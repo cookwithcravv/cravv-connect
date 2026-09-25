@@ -45,6 +45,7 @@ const (
 	MethodResetIdentity   = "reset_identity"
 	MethodAuditRead       = "audit.read"
 	MethodHookCounts      = "hook.counts"
+	MethodDaemonShutdown  = "daemon.shutdown"
 )
 
 // Empty is the params or result of methods that carry nothing ({}).

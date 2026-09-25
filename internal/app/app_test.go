@@ -23,6 +23,9 @@ func TestPortsFillsEveryPort(t *testing.T) {
 	p := Ports(nil)
 	v := reflect.ValueOf(p)
 	for i := range v.NumField() {
+		if v.Type().Field(i).Name == "Lifecycle" {
+			continue // optional: Serve sets it
+		}
 		if v.Field(i).IsNil() {
 			t.Errorf("port %s is nil", v.Type().Field(i).Name)
 		}

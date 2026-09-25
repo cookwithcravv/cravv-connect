@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -37,14 +36,6 @@ func newDaemonCmd(env *Env) *cobra.Command {
 	return cmd
 }
 
-func pidFile(env *Env) (string, error) {
-	p, err := env.Paths()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(p.Home, "daemon.pid"), nil
-}
-
 func newDaemonRunCmd(env *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "run",
@@ -57,11 +48,7 @@ func newDaemonRunCmd(env *Env) *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			pf := filepath.Join(paths.Home, "daemon.pid")
-			if err := os.WriteFile(pf, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
-				return err
-			}
-			defer os.Remove(pf)
+			// The daemon writes daemon.pid itself once it owns the socket.
 			logger := slog.New(slog.NewJSONHandler(env.Stderr, nil))
 			logger.Info("daemon starting", "home", paths.Home)
 			return env.RunDaemon(ctx, paths, logger)
@@ -121,47 +108,98 @@ func newDaemonStartCmd(env *Env) *cobra.Command {
 	}
 }
 
+// stopWait is how long `daemon stop` waits for the daemon to go away.
+var stopWait = 10 * time.Second
+
 func newDaemonStopCmd(env *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
 		Short: "Stop the daemon",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
 			if env.Service != nil && env.Service.Installed() {
-				if err := env.Service.Stop(cmd.Context()); err != nil {
+				if err := env.Service.Stop(ctx); err != nil {
 					return err
 				}
 				fmt.Fprintln(env.Stdout, "Daemon stopped.")
 				return nil
 			}
-			pf, err := pidFile(env)
+			paths, err := env.Paths()
 			if err != nil {
 				return err
 			}
-			b, err := os.ReadFile(pf)
-			if errors.Is(err, os.ErrNotExist) {
+			// Only a daemon that answers on the socket is stopped: a pid file
+			// alone may name an unrelated process that reused the pid.
+			c, err := connect(ctx, env)
+			if err != nil {
 				fmt.Fprintln(env.Stdout, "Daemon is not running.")
 				return nil
 			}
-			if err != nil {
-				return err
+			err = c.Call(ctx, ipc.MethodStatus, nil, nil)
+			if err == nil {
+				err = c.Call(ctx, ipc.MethodDaemonShutdown, nil, nil)
+			} else if errors.Is(err, ipc.ErrClosed) {
+				c.Close()
+				fmt.Fprintln(env.Stdout, "Daemon is not running.")
+				return nil
 			}
-			pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
-			if err != nil || pid <= 0 {
-				return fmt.Errorf("bad pid file %s", pf)
-			}
-			if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-				if errors.Is(err, syscall.ESRCH) {
-					os.Remove(pf)
-					fmt.Fprintln(env.Stdout, "Daemon is not running.")
-					return nil
+			c.Close()
+			switch {
+			case err == nil || errors.Is(err, ipc.ErrClosed):
+				if err := waitGone(ctx, func() bool {
+					_, err := os.Stat(paths.Socket)
+					return errors.Is(err, os.ErrNotExist)
+				}); err != nil {
+					return err
 				}
+			case ipc.IsKind(err, ipc.KindBadRequest):
+				// An older daemon without daemon.shutdown: signal the pid it recorded.
+				if err := stopByPID(ctx, paths.PIDFile()); err != nil {
+					return err
+				}
+			default:
 				return err
 			}
 			fmt.Fprintln(env.Stdout, "Daemon stopped.")
 			return nil
 		},
 	}
+}
+
+// waitGone polls gone until it reports true or stopWait passes.
+func waitGone(ctx context.Context, gone func() bool) error {
+	deadline := time.Now().Add(stopWait)
+	for !gone() {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("daemon did not stop within %s", stopWait)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	return nil
+}
+
+// stopByPID sends SIGTERM to the pid in pf and waits for the process to exit.
+func stopByPID(ctx context.Context, pf string) error {
+	b, err := os.ReadFile(pf)
+	if err != nil {
+		return fmt.Errorf("daemon cannot be stopped over its socket and has no readable pid file: %w", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || pid <= 0 {
+		return fmt.Errorf("bad pid file %s", pf)
+	}
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+		return err
+	}
+	return waitGone(ctx, func() bool { return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) })
 }
 
 func newDaemonStatusCmd(env *Env) *cobra.Command {

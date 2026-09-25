@@ -30,6 +30,9 @@ type Config struct {
 // Paths are the locations of every file in the state directory.
 type Paths struct{ Home, Config, DB, Audit, Socket, Files, Log string }
 
+// PIDFile is where a running daemon records its process ID.
+func (p Paths) PIDFile() string { return filepath.Join(p.Home, "daemon.pid") }
+
 // EnvHome overrides the state directory (used by tests and multi-daemon setups).
 const EnvHome = "CRAVV_HOME"
 

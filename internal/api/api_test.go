@@ -116,6 +116,7 @@ func TestEveryMethodRegisteredWithGate(t *testing.T) {
 		ipc.MethodResetIdentity:   ipc.GateUnlock,
 		ipc.MethodAuditRead:       ipc.GateAllowWhenKilled,
 		ipc.MethodHookCounts:      ipc.GateAllowWhenKilled,
+		ipc.MethodDaemonShutdown:  ipc.GateAllowWhenKilled,
 	}
 	got := srv.Methods()
 	if len(got) != len(want) {

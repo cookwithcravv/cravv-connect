@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 
 	"github.com/cravv/cravv-connect/internal/ipc"
@@ -12,6 +13,16 @@ func (h *handlers) registerControl(s *ipc.Server) {
 	s.Register(ipc.MethodResume, ipc.Typed(h.resume), ipc.GateUnlock|ipc.GateAllowWhenKilled)
 	s.Register(ipc.MethodAllowPathAdd, ipc.Typed(h.allowPath), ipc.GateUnlock)
 	s.Register(ipc.MethodResetIdentity, ipc.Typed(h.resetIdentity), ipc.GateUnlock)
+	// Stopping the daemon cuts traffic off, like kill: agents may do it, no
+	// password, also while killed. Starting it again needs no password either.
+	s.Register(ipc.MethodDaemonShutdown, ipc.Typed(h.shutdown), ipc.GateAllowWhenKilled)
+}
+
+func (h *handlers) shutdown(context.Context, *ipc.ConnState, ipc.Empty) (any, error) {
+	if h.p.Lifecycle == nil {
+		return nil, fmt.Errorf("%w: this daemon cannot shut itself down", ipc.ErrBadRequest)
+	}
+	return nil, h.p.Lifecycle.Shutdown()
 }
 
 func (h *handlers) kill(ctx context.Context, _ *ipc.ConnState, _ ipc.Empty) (any, error) {

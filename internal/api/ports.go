@@ -87,6 +87,12 @@ type ControlPort interface {
 	ResetIdentity(ctx context.Context, unlocked bool) error
 }
 
+// LifecyclePort stops the daemon process. Shutdown returns at once; the
+// daemon stops shortly after, once the reply has been written.
+type LifecyclePort interface {
+	Shutdown() error
+}
+
 // StatusPort reports machine status, including peers with their Online flag.
 type StatusPort interface {
 	Status(ctx context.Context) (ipc.StatusResult, error)
@@ -123,4 +129,6 @@ type Ports struct {
 	Audit    AuditPort
 	Hook     HookPort
 	Auth     AuthPort
+	// Lifecycle is optional: nil means daemon.shutdown is not supported.
+	Lifecycle LifecyclePort
 }

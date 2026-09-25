@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"strconv"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/api"
 	"github.com/cravv/cravv-connect/internal/config"
@@ -32,20 +35,57 @@ func Run(ctx context.Context, paths config.Paths, logger *slog.Logger) error {
 		return err
 	}
 	defer d.Close()
-	ln, err := ipc.Listen(paths.Socket)
+	ln, removePID, err := listenWithPID(paths)
 	if err != nil {
 		return err
 	}
+	defer removePID()
 	return Serve(ctx, d, ln, clock, logger)
+}
+
+// listenWithPID listens on the daemon socket and only then writes the pid
+// file, so a second daemon that fails to listen never overwrites the running
+// daemon's pid. The returned cleanup removes the pid file only if it still
+// holds this process's pid.
+func listenWithPID(paths config.Paths) (net.Listener, func(), error) {
+	ln, err := ipc.Listen(paths.Socket)
+	if err != nil {
+		return nil, nil, err
+	}
+	pid := strconv.Itoa(os.Getpid())
+	pf := paths.PIDFile()
+	if err := os.WriteFile(pf, []byte(pid), 0o600); err != nil {
+		ln.Close()
+		return nil, nil, fmt.Errorf("write pid file: %w", err)
+	}
+	return ln, func() {
+		if b, err := os.ReadFile(pf); err == nil && string(b) == pid {
+			os.Remove(pf)
+		}
+	}, nil
+}
+
+// shutdownDelay lets the daemon.shutdown reply reach the client before the
+// server stops.
+const shutdownDelay = 100 * time.Millisecond
+
+// stopper implements api.LifecyclePort by cancelling Serve's context.
+type stopper struct{ cancel context.CancelFunc }
+
+func (s stopper) Shutdown() error {
+	time.AfterFunc(shutdownDelay, s.cancel)
+	return nil
 }
 
 // Serve runs the daemon and the ipc-v1 API on ln until ctx ends or one of
 // them fails. It does not close d. Run and the e2e harness both use it, so
 // tests serve the daemon exactly as `cravv-connect daemon run` does.
 func Serve(ctx context.Context, d *daemon.Daemon, ln net.Listener, clock core.Clock, logger *slog.Logger) error {
-	srv := api.NewServer(Ports(d), clock, logger)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	ports := Ports(d)
+	ports.Lifecycle = stopper{cancel}
+	srv := api.NewServer(ports, clock, logger)
 	errc := make(chan error, 2)
 	go func() { errc <- d.Run(ctx) }()
 	go func() { errc <- srv.Serve(ctx, ln) }()
