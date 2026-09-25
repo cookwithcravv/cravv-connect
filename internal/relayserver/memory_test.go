@@ -69,25 +69,29 @@ func TestMemoryInvitesAndRooms(t *testing.T) {
 	ctx := context.Background()
 	clock := core.NewFakeClock(time.Unix(1_800_000_000, 0))
 	be := NewMemoryBackend(clock)
-	if err := be.PutInvite(ctx, "inv", time.Minute); err != nil {
+	if err := be.PutInvite(ctx, "inv", "a", time.Minute, 20); err != nil {
 		t.Fatal(err)
 	}
-	if ok, _ := be.ConsumeInvite(ctx, "inv"); !ok {
+	if err := be.PutInvite(ctx, "inv", "a", time.Minute, 20); !errors.Is(err, ErrExists) {
+		t.Fatalf("duplicate invite err = %v", err)
+	}
+	if ok, _ := be.RegisterWithInvite(ctx, "inv", "m1"); !ok {
 		t.Fatal("first consume failed")
 	}
-	if ok, _ := be.ConsumeInvite(ctx, "inv"); ok {
+	if ok, _ := be.RegisterWithInvite(ctx, "inv", "m2"); ok {
 		t.Fatal("invite reused")
 	}
-	_ = be.PutInvite(ctx, "old", time.Minute)
+	_ = be.PutInvite(ctx, "old", "a", time.Minute, 20)
 	clock.Advance(time.Minute)
-	if ok, _ := be.ConsumeInvite(ctx, "old"); ok {
+	if ok, _ := be.RegisterWithInvite(ctx, "old", "m3"); ok {
 		t.Fatal("expired invite accepted")
 	}
 
-	if err := be.CreateRoom(ctx, RoomRecord{Nameplate: "ABCD"}); err != nil {
+	exp := clock.Now().Add(time.Minute)
+	if err := be.CreateRoom(ctx, RoomRecord{Nameplate: "ABCD", ExpiresAt: exp}, 8); err != nil {
 		t.Fatal(err)
 	}
-	if err := be.CreateRoom(ctx, RoomRecord{Nameplate: "ABCD"}); !errors.Is(err, ErrExists) {
+	if err := be.CreateRoom(ctx, RoomRecord{Nameplate: "ABCD", ExpiresAt: exp}, 8); !errors.Is(err, ErrExists) {
 		t.Fatalf("duplicate nameplate err = %v", err)
 	}
 	if ok, _ := be.ClaimJoin(ctx, "ABCD"); !ok {
@@ -105,7 +109,7 @@ func TestMemoryInvitesAndRooms(t *testing.T) {
 func TestMemoryBlobTotalCap(t *testing.T) {
 	ctx := context.Background()
 	be := NewMemoryBackend(core.NewFakeClock(time.Unix(1_800_000_000, 0)))
-	_ = be.CreateBlob(ctx, BlobRecord{ID: "b", Chunks: 2})
+	_ = be.CreateBlob(ctx, BlobRecord{ID: "b", Chunks: 2}, 100, 100)
 	if err := be.PutChunk(ctx, "b", 0, make([]byte, 6), 10); err != nil {
 		t.Fatal(err)
 	}

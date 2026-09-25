@@ -130,15 +130,6 @@ func (s *Server) handleBlobCreate(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, relayproto.CodeBadRequest, "bad recipient")
 		return
 	}
-	used, err := s.be.UploaderBytes(r.Context(), uploader)
-	if err != nil {
-		httpError(w, http.StatusInternalServerError, relayproto.CodeInternal, "blob store unavailable")
-		return
-	}
-	if used+req.Size > lim.BlobQuota {
-		httpError(w, http.StatusRequestEntityTooLarge, relayproto.CodeTooLarge, "blob storage quota exceeded")
-		return
-	}
 	rec := BlobRecord{
 		ID:        randomToken(),
 		Uploader:  uploader,
@@ -147,7 +138,14 @@ func (s *Server) handleBlobCreate(w http.ResponseWriter, r *http.Request) {
 		Chunks:    req.Chunks,
 		ExpiresAt: s.cfg.Clock.Now().Add(lim.BlobTTL),
 	}
-	if err := s.be.CreateBlob(r.Context(), rec); err != nil {
+	switch err := s.be.CreateBlob(r.Context(), rec, lim.BlobQuota, lim.TotalBlobBytes); {
+	case errors.Is(err, ErrQuota):
+		httpError(w, http.StatusRequestEntityTooLarge, relayproto.CodeTooLarge, "blob storage quota exceeded")
+		return
+	case errors.Is(err, ErrStorageFull):
+		httpError(w, http.StatusRequestEntityTooLarge, relayproto.CodeTooLarge, "relay blob storage is full")
+		return
+	case err != nil:
 		httpError(w, http.StatusInternalServerError, relayproto.CodeInternal, "blob store unavailable")
 		return
 	}

@@ -160,19 +160,18 @@ func (s *Server) register(ctx, hctx context.Context, ws *websocket.Conn, mailbox
 		return errHandled
 	}
 	ok := secretEqual(reg.AdminToken, s.cfg.AdminToken)
-	if !ok && reg.Invite != "" {
-		if ok, err = s.be.ConsumeInvite(ctx, reg.Invite); err != nil {
-			closeWithError(ctx, ws, relayproto.CodeInternal, "registry unavailable")
-			return errHandled
-		}
+	if ok {
+		err = s.be.AddMember(ctx, mailbox)
+	} else if reg.Invite != "" {
+		ok, err = s.be.RegisterWithInvite(ctx, reg.Invite, mailbox)
+	}
+	if err != nil {
+		closeWithError(ctx, ws, relayproto.CodeInternal, "registry unavailable")
+		return errHandled
 	}
 	if !ok {
 		_ = reply(ctx, ws, relayproto.Res{RID: reg.RID, Status: relayproto.StatusError, Code: relayproto.CodeForbidden})
 		_ = ws.Close(websocket.StatusPolicyViolation, relayproto.CodeForbidden)
-		return errHandled
-	}
-	if err := s.be.AddMember(ctx, mailbox); err != nil {
-		closeWithError(ctx, ws, relayproto.CodeInternal, "registry unavailable")
 		return errHandled
 	}
 	s.log.Info("mailbox registered", "mailbox", mailbox, "via_invite", reg.Invite != "" && reg.AdminToken == "")

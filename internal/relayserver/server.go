@@ -3,11 +3,13 @@
 package relayserver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/relayproto"
@@ -23,7 +25,12 @@ type Config struct {
 	Clock        core.Clock
 	Limits       Limits
 	Logger       *slog.Logger // nil discards logs
+	// SweepInterval is how often expired state is purged from the Backend and idle
+	// rate-limit buckets are dropped. Zero means one minute; negative disables it.
+	SweepInterval time.Duration
 }
+
+const defaultSweepInterval = time.Minute
 
 // Server serves relay-v1 over HTTP and WebSocket.
 type Server struct {
@@ -36,6 +43,9 @@ type Server struct {
 	log       *slog.Logger
 	ops       map[string]opHandler
 	rooms     *roomHub
+
+	stopSweep context.CancelFunc
+	sweepDone chan struct{}
 }
 
 // New builds a Server. Zero Limits fields take DefaultLimits values. It fails when
@@ -65,12 +75,48 @@ func New(cfg Config, be Backend) (*Server, error) {
 	}
 	s.ops = s.mailboxOps()
 	s.routes()
+	ctx, stop := context.WithCancel(context.Background())
+	s.stopSweep, s.sweepDone = stop, make(chan struct{})
+	go s.sweepLoop(ctx, cfg.SweepInterval)
 	return s, nil
 }
 
-// Close releases the Server's background resources. It does not close connections
-// or the Backend. It is safe to call more than once.
-func (s *Server) Close() error { return nil }
+// Close stops the background sweeper and waits for it to exit. It does not close
+// connections or the Backend. It is safe to call more than once.
+func (s *Server) Close() error {
+	s.stopSweep()
+	<-s.sweepDone
+	return nil
+}
+
+func (s *Server) sweepLoop(ctx context.Context, every time.Duration) {
+	defer close(s.sweepDone)
+	if every < 0 {
+		return
+	}
+	if every == 0 {
+		every = defaultSweepInterval
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.sweep(ctx)
+		}
+	}
+}
+
+// sweep purges expired Backend state and evicts idle rate-limit buckets.
+func (s *Server) sweep(ctx context.Context) {
+	if err := s.be.PurgeExpired(ctx, s.cfg.Clock.Now()); err != nil && ctx.Err() == nil {
+		s.log.Error("purge expired", "err", err)
+	}
+	s.limiter.evictFull()
+	s.ipLimiter.evictFull()
+}
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET "+relayproto.PathHealth, s.handleHealth)

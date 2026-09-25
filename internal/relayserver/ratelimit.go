@@ -51,6 +51,23 @@ func (l *rateLimiter) allow(key string) bool {
 	return true
 }
 
+// evictFull drops buckets that have refilled to the burst size. A dropped key starts
+// again with a full bucket, so eviction never changes what allow decides; it only
+// keeps idle keys from accumulating.
+func (l *rateLimiter) evictFull() {
+	if l.rate < 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.clock.Now()
+	for k, b := range l.buckets {
+		if b.tokens+now.Sub(b.last).Seconds()*l.rate >= l.burst {
+			delete(l.buckets, k)
+		}
+	}
+}
+
 // clientIP is the connection's remote IP. Proxy headers are not trusted.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

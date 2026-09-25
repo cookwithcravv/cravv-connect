@@ -151,7 +151,7 @@ client                                   server
    ```
    The server accepts it if `admin_token` equals the relay's admin token (compared in
    constant time; an empty token never matches) or `invite` is a known, unused,
-   unexpired invite, which it consumes atomically. Success:
+   unexpired invite. Consuming the invite and adding the member are one atomic step. Success:
    ```json
    {"t":"res","rid":"register","status":"ok"}
    ```
@@ -219,7 +219,9 @@ the queue and are still delivered.
 {"t":"res","rid":"3","status":"ok","invite":"k3vq7a2m5n6c4d9e0f1g2h3i4j"}
 ```
 Invites are opaque strings of at most 64 characters, unique, and unguessable (at least
-128 random bits).
+128 random bits). The relay records which member minted each invite. As relay policy, a
+relay MAY cap the number of unused, unexpired invites one member holds; over the cap the
+request gets `res{status:"error", code:"rate_limited"}`. The reference relay allows 20.
 
 **room_create.** Create a pairing room (section 5) that lives 10 minutes.
 ```json
@@ -227,8 +229,11 @@ Invites are opaque strings of at most 64 characters, unique, and unguessable (at
 {"t":"res","rid":"4","status":"ok","nameplate":"7K3F","creator_token":"9f2c4e6a8b0d1f3e5a7c9b1d3f5e7a9c"}
 ```
 `nameplate` is 4 characters from the Crockford base32 alphabet
-`0123456789ABCDEFGHJKMNPQRSTVWXYZ`, unique among live rooms. `creator_token` is an opaque
-secret of at least 128 random bits (reference relays use 32 lowercase hex characters).
+`0123456789ABCDEFGHJKMNPQRSTVWXYZ`, unique among live rooms (an expired room's nameplate
+is free again). `creator_token` is an opaque secret of at least 128 random bits
+(reference relays use 32 lowercase hex characters). As relay policy, a relay MAY cap the
+number of live rooms one member owns; over the cap the request gets
+`res{status:"error", code:"rate_limited"}`. The reference relay allows 8.
 
 **send.** Queue a frame for another mailbox.
 ```json
@@ -298,7 +303,9 @@ or invalid JSON gets `error{bad_request}` and the connection closes.
 ## 4. Queue lifetime
 
 - A queued frame expires 7 days after it was accepted. Expired frames MUST NOT be
-  delivered and MUST NOT count toward the caps. A relay MAY drop them lazily, at read time.
+  delivered and MUST NOT count toward the caps. A relay MAY drop them lazily, at read time,
+  but SHOULD also purge expired frames, invites, rooms, and blobs periodically so that
+  abandoned state does not accumulate (the reference relay sweeps every minute).
 - The caps are per recipient mailbox: 10000 frames and 52428800 bytes of decoded frames.
 
 ## 5. Pairing rooms: `GET /v1/pair/{nameplate}`
@@ -407,6 +414,10 @@ a registered mailbox; otherwise `403`.
 - `recipient` not a valid key: `400`.
 - The total `size` of the caller's unexpired blobs would exceed the relay's per-member
   quota (at least 1 GiB; reference relays use 2 GiB): `413`.
+- As relay policy, a relay MAY also cap the total `size` of all unexpired blobs it holds
+  (the reference relay uses 50 GiB); over it, `413`.
+- The quota checks and the creation are one atomic step, so concurrent creates cannot
+  overshoot a quota.
 - Blob IDs are opaque, unguessable, at most 64 characters (reference relays use 26
   lowercase base32 characters). The blob expires 7 days after creation.
 
@@ -463,7 +474,11 @@ with `code` from section 3.8.
 | Mailbox queue | 10000 frames or 52428800 bytes |
 | Queue TTL | 7 days |
 | Invite lifetime | 10 minutes, single use |
+| Outstanding invites per member | MAY cap; 20 in the reference relay |
 | Room lifetime | 10 minutes, one joiner |
+| Live rooms per member | MAY cap; 8 in the reference relay |
+| Blob storage per member | at least 1 GiB; 2 GiB in the reference relay |
+| Blob storage, relay-wide | MAY cap; 50 GiB in the reference relay |
 | Room buffer before join | 16 messages |
 | Blob | 104857600 bytes plaintext, TTL 7 days |
 | Chunk upload body | 1048640 bytes |

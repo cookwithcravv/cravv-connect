@@ -12,7 +12,13 @@ import (
 type memQueue struct {
 	lastSeq uint64
 	frames  []QueuedFrame
+	expires []time.Time // parallel to frames: Enqueued + the TTL given to Enqueue
 	bytes   int64
+}
+
+type memInvite struct {
+	inviter string
+	expires time.Time
 }
 
 type memBlob struct {
@@ -25,7 +31,7 @@ type memoryBackend struct {
 	clock   core.Clock
 	mu      sync.Mutex
 	members map[string]bool
-	invites map[string]time.Time // token -> expiry
+	invites map[string]memInvite
 	allow   map[string]map[string]bool
 	queues  map[string]*memQueue
 	rooms   map[string]RoomRecord
@@ -41,7 +47,7 @@ func NewMemoryBackend(clock core.Clock) Backend {
 	return &memoryBackend{
 		clock:   clock,
 		members: map[string]bool{},
-		invites: map[string]time.Time{},
+		invites: map[string]memInvite{},
 		allow:   map[string]map[string]bool{},
 		queues:  map[string]*memQueue{},
 		rooms:   map[string]RoomRecord{},
@@ -62,25 +68,39 @@ func (m *memoryBackend) AddMember(_ context.Context, mailbox string) error {
 	return nil
 }
 
-func (m *memoryBackend) PutInvite(_ context.Context, token string, ttl time.Duration) error {
+func (m *memoryBackend) PutInvite(_ context.Context, token, inviter string, ttl time.Duration, maxOutstanding int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.invites[token]; ok {
+	now := m.clock.Now()
+	if inv, ok := m.invites[token]; ok && now.Before(inv.expires) {
 		return ErrExists
 	}
-	m.invites[token] = m.clock.Now().Add(ttl)
+	n := 0
+	for _, inv := range m.invites {
+		if inv.inviter == inviter && now.Before(inv.expires) {
+			n++
+		}
+	}
+	if n >= maxOutstanding {
+		return ErrLimit
+	}
+	m.invites[token] = memInvite{inviter: inviter, expires: now.Add(ttl)}
 	return nil
 }
 
-func (m *memoryBackend) ConsumeInvite(_ context.Context, token string) (bool, error) {
+func (m *memoryBackend) RegisterWithInvite(_ context.Context, token, mailbox string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	exp, ok := m.invites[token]
+	inv, ok := m.invites[token]
 	if !ok {
 		return false, nil
 	}
 	delete(m.invites, token)
-	return m.clock.Now().Before(exp), nil
+	if !m.clock.Now().Before(inv.expires) {
+		return false, nil
+	}
+	m.members[mailbox] = true
+	return true, nil
 }
 
 func (m *memoryBackend) Allow(_ context.Context, mailbox, sender string) error {
@@ -120,10 +140,18 @@ func (m *memoryBackend) dropExpired(q *memQueue, ttl time.Duration) {
 	cut := m.clock.Now().Add(-ttl)
 	i := 0
 	for i < len(q.frames) && !q.frames[i].Enqueued.After(cut) {
-		q.bytes -= int64(len(q.frames[i].Frame))
 		i++
 	}
-	q.frames = q.frames[i:]
+	q.dropFront(i)
+}
+
+// dropFront removes the first n frames.
+func (q *memQueue) dropFront(n int) {
+	for _, f := range q.frames[:n] {
+		q.bytes -= int64(len(f.Frame))
+	}
+	q.frames = q.frames[n:]
+	q.expires = q.expires[n:]
 }
 
 func (m *memoryBackend) Enqueue(_ context.Context, mailbox string, from ed25519.PublicKey, id string, frame []byte, lim QueueLimits) (uint64, error) {
@@ -135,13 +163,15 @@ func (m *memoryBackend) Enqueue(_ context.Context, mailbox string, from ed25519.
 		return 0, ErrQueueFull
 	}
 	q.lastSeq++
+	now := m.clock.Now()
 	q.frames = append(q.frames, QueuedFrame{
 		Seq:      q.lastSeq,
 		From:     append(ed25519.PublicKey(nil), from...),
 		ID:       id,
 		Frame:    append([]byte(nil), frame...),
-		Enqueued: m.clock.Now(),
+		Enqueued: now,
 	})
+	q.expires = append(q.expires, now.Add(lim.TTL))
 	q.bytes += int64(len(frame))
 	return q.lastSeq, nil
 }
@@ -170,18 +200,27 @@ func (m *memoryBackend) Ack(_ context.Context, mailbox string, upTo uint64) erro
 	q := m.queue(mailbox)
 	i := 0
 	for i < len(q.frames) && q.frames[i].Seq <= upTo {
-		q.bytes -= int64(len(q.frames[i].Frame))
 		i++
 	}
-	q.frames = q.frames[i:]
+	q.dropFront(i)
 	return nil
 }
 
-func (m *memoryBackend) CreateRoom(_ context.Context, r RoomRecord) error {
+func (m *memoryBackend) CreateRoom(_ context.Context, r RoomRecord, maxPerOwner int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.rooms[r.Nameplate]; ok {
+	now := m.clock.Now()
+	if old, ok := m.rooms[r.Nameplate]; ok && now.Before(old.ExpiresAt) {
 		return ErrExists
+	}
+	n := 0
+	for _, x := range m.rooms {
+		if x.Owner == r.Owner && now.Before(x.ExpiresAt) {
+			n++
+		}
+	}
+	if n >= maxPerOwner {
+		return ErrLimit
 	}
 	m.rooms[r.Nameplate] = r
 	return nil
@@ -219,11 +258,28 @@ func (m *memoryBackend) DeleteRoom(_ context.Context, nameplate string) error {
 	return nil
 }
 
-func (m *memoryBackend) CreateBlob(_ context.Context, b BlobRecord) error {
+func (m *memoryBackend) CreateBlob(_ context.Context, b BlobRecord, quota, total int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.blobs[b.ID]; ok {
 		return ErrExists
+	}
+	now := m.clock.Now()
+	var mine, all int64
+	for _, x := range m.blobs {
+		if !now.Before(x.rec.ExpiresAt) {
+			continue
+		}
+		all += x.rec.Size
+		if x.rec.Uploader == b.Uploader {
+			mine += x.rec.Size
+		}
+	}
+	if mine+b.Size > quota {
+		return ErrQuota
+	}
+	if all+b.Size > total {
+		return ErrStorageFull
 	}
 	m.blobs[b.ID] = &memBlob{rec: b, chunks: map[uint32][]byte{}}
 	return nil
@@ -276,15 +332,36 @@ func (m *memoryBackend) DeleteBlob(_ context.Context, id string) error {
 	return nil
 }
 
-func (m *memoryBackend) UploaderBytes(_ context.Context, uploader string) (int64, error) {
+func (m *memoryBackend) PurgeExpired(_ context.Context, now time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	now := m.clock.Now()
-	var n int64
-	for _, b := range m.blobs {
-		if b.rec.Uploader == uploader && now.Before(b.rec.ExpiresAt) {
-			n += b.rec.Size
+	for tok, inv := range m.invites {
+		if !now.Before(inv.expires) {
+			delete(m.invites, tok)
 		}
 	}
-	return n, nil
+	for np, r := range m.rooms {
+		if !now.Before(r.ExpiresAt) {
+			delete(m.rooms, np)
+		}
+	}
+	for id, b := range m.blobs {
+		if !now.Before(b.rec.ExpiresAt) {
+			delete(m.blobs, id)
+		}
+	}
+	for _, q := range m.queues {
+		keep := 0
+		for i, f := range q.frames {
+			if now.Before(q.expires[i]) {
+				q.frames[keep], q.expires[keep] = f, q.expires[i]
+				keep++
+			} else {
+				q.bytes -= int64(len(f.Frame))
+			}
+		}
+		clear(q.frames[keep:])
+		q.frames, q.expires = q.frames[:keep], q.expires[:keep]
+	}
+	return nil
 }

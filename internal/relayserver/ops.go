@@ -53,12 +53,24 @@ func (s *Server) opDeny(c *mailboxConn, raw []byte) (relayproto.Res, error) {
 	return relayproto.Res{Status: relayproto.StatusOK}, s.be.Deny(c.ctx, c.mailbox, relayproto.MailboxID(ik))
 }
 
+var capReached = relayproto.Res{Status: relayproto.StatusError, Code: relayproto.CodeRateLimited}
+
 func (s *Server) opInvite(c *mailboxConn, _ []byte) (relayproto.Res, error) {
-	tok := randomToken()
-	if err := s.be.PutInvite(c.ctx, tok, s.cfg.Limits.InviteTTL); err != nil {
-		return relayproto.Res{}, err
+	lim := s.cfg.Limits
+	for range 4 {
+		tok := randomToken()
+		err := s.be.PutInvite(c.ctx, tok, c.mailbox, lim.InviteTTL, lim.MaxInvitesPerMember)
+		switch {
+		case errors.Is(err, ErrLimit):
+			return capReached, nil
+		case errors.Is(err, ErrExists):
+			continue
+		case err != nil:
+			return relayproto.Res{}, err
+		}
+		return relayproto.Res{Status: relayproto.StatusOK, Invite: tok}, nil
 	}
-	return relayproto.Res{Status: relayproto.StatusOK, Invite: tok}, nil
+	return relayproto.Res{}, errors.New("no free invite token")
 }
 
 func (s *Server) opRoomCreate(c *mailboxConn, _ []byte) (relayproto.Res, error) {
@@ -69,7 +81,10 @@ func (s *Server) opRoomCreate(c *mailboxConn, _ []byte) (relayproto.Res, error) 
 			Owner:        c.mailbox,
 			ExpiresAt:    s.cfg.Clock.Now().Add(s.cfg.Limits.RoomTTL),
 		}
-		err := s.be.CreateRoom(c.ctx, rec)
+		err := s.be.CreateRoom(c.ctx, rec, s.cfg.Limits.MaxRoomsPerMember)
+		if errors.Is(err, ErrLimit) {
+			return capReached, nil
+		}
 		if errors.Is(err, ErrExists) {
 			continue
 		}
