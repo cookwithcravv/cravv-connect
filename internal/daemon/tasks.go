@@ -463,14 +463,19 @@ func (s *TaskService) HandleUpdate(ctx context.Context, peer store.Peer, env cor
 	return Retryable(err)
 }
 
-// Get returns a task a session may see: any inbound task, or an outbound
-// task the session created.
+// Get returns a task a session may see: an inbound task a human did not hold
+// or reject, or an outbound task the session created. Held (awaiting_approval)
+// and rejected inbound tasks look like they do not exist, so agents never read
+// instructions no human approved.
 func (s *TaskService) Get(ctx context.Context, session, id string) (store.Task, error) {
 	t, err := s.d.Tasks.GetTask(ctx, id)
 	if err != nil {
-		return t, err
+		return store.Task{}, err
 	}
 	if t.Direction == store.TaskOutbound && t.FromSession != session {
+		return store.Task{}, core.ErrNotFound
+	}
+	if t.Direction == store.TaskInbound && (t.State == core.TaskAwaitingApproval || t.State == core.TaskRejected) {
 		return store.Task{}, core.ErrNotFound
 	}
 	return t, nil

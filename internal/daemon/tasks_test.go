@@ -526,3 +526,30 @@ func TestRecheckPeerRejectsPending(t *testing.T) {
 		t.Fatal("chat-only recheck wrong")
 	}
 }
+
+// Agents must not read instructions a human has not approved: held and
+// rejected inbound tasks look like they do not exist.
+func TestGetHidesUnapprovedInboundTasks(t *testing.T) {
+	ctx := context.Background()
+	e := d2Tasks(t)
+	ask, _ := d2Peer(t, e.st, "mac", core.TrustAskFirst)
+	chatOnly, _ := d2Peer(t, e.st, "stranger", core.TrustChatOnly)
+	auto, _ := d2Peer(t, e.st, "gpu-box", core.TrustAutonomous)
+	held := e.incoming(t, ask, "", "held work")
+	rejected := e.incoming(t, chatOnly, "", "rejected work")
+	queued := e.incoming(t, auto, "", "open work")
+	for _, id := range []string{held, rejected} {
+		if tk, err := e.tasks.Get(ctx, "claude@proj", id); !errors.Is(err, core.ErrNotFound) || tk.Instructions != "" {
+			t.Fatalf("Get(%s) = %+v, %v; want ErrNotFound", e.state(t, id).State, tk, err)
+		}
+	}
+	if tk, err := e.tasks.Get(ctx, "claude@proj", queued); err != nil || tk.Instructions != "open work" {
+		t.Fatalf("Get(queued) = %+v, %v", tk, err)
+	}
+	if err := e.tasks.Decide(ctx, held, true, true); err != nil {
+		t.Fatal(err)
+	}
+	if tk, err := e.tasks.Get(ctx, "claude@proj", held); err != nil || tk.Instructions != "held work" {
+		t.Fatalf("Get(approved) = %+v, %v", tk, err)
+	}
+}
