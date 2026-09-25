@@ -289,8 +289,15 @@ func TestKillBlocksOutboundAndPersists(t *testing.T) {
 	if tk, _ := d.store.GetTask(ctx, taskID); tk.State != core.TaskFailed {
 		t.Fatalf("claimed task state after kill = %s", tk.State)
 	}
-	if _, err := d.Outbound().SendEnvelope(ctx, peer.rec.MachineID, core.KindChat, "", "", core.ChatBody{Text: "x"}); !errors.Is(err, core.ErrKilled) {
-		t.Fatalf("send while killed err = %v", err)
+	// The failed(killed) update went out before the disconnect.
+	if got := relay.box(0).sendCount(); got != sent+1 {
+		t.Fatalf("sends at kill %d->%d, want the failed(killed) update flushed", sent, got)
+	}
+	sent++
+	// Envelopes are still queued while killed (the IPC layer refuses agent sends);
+	// nothing leaves until resume.
+	if _, err := d.Outbound().SendEnvelope(ctx, peer.rec.MachineID, core.KindChat, "", "", core.ChatBody{Text: "x"}); err != nil {
+		t.Fatalf("enqueue while killed err = %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)
 	if relay.dials() != 1 || relay.box(0).sendCount() != sent {
@@ -316,7 +323,7 @@ func TestKillBlocksOutboundAndPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 	d2Eventually(t, "dial after resume", func() bool { return relay.dials() == 2 })
-	d2Eventually(t, "queued failed(killed) update sent after resume", func() bool { return relay.box(1).sendCount() >= 1 })
+	d2Eventually(t, "message queued while killed sent after resume", func() bool { return relay.box(1).sendCount() >= 1 })
 }
 
 func TestEnsureRegisteredWithInvite(t *testing.T) {

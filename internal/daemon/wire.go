@@ -205,8 +205,15 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 	d.svc.Store(d.build(identity))
 	kill.SetHooks(KillHooks{
 		BeforeKill: func(ctx context.Context) {
-			if err := d.svc.Load().tasks.FailActive(ctx, "killed"); err != nil {
+			g := d.svc.Load()
+			if err := g.tasks.FailActive(ctx, "killed"); err != nil {
 				d.log.Warn("fail tasks on kill", "err", err)
+			}
+			// Send the failed(killed) updates now, while still connected.
+			fctx, cancel := context.WithTimeout(ctx, KillFlushTimeout)
+			defer cancel()
+			if err := g.outbound.SendDue(fctx); err != nil {
+				d.log.Warn("flush outbox on kill", "err", err)
 			}
 		},
 		AfterKill: func(context.Context) {

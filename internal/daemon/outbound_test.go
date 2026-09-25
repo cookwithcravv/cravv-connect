@@ -281,8 +281,27 @@ func TestOutboundOfflineAndKilled(t *testing.T) {
 	if len(f.mb.sentFrames()) != 0 {
 		t.Fatal("sent while killed")
 	}
-	if _, err := f.o.SendEnvelope(context.Background(), f.gpu.rec.MachineID, core.KindChat, "", "", core.ChatBody{}); !errors.Is(err, core.ErrKilled) {
+	// While killed, envelopes (such as task.update expired) are queued, not
+	// dropped; nothing leaves until resume. SendDirect bypasses the outbox and
+	// is refused.
+	late, err := f.o.SendEnvelope(context.Background(), f.gpu.rec.MachineID, core.KindTaskUpdate, "", "", core.TaskUpdateBody{TaskID: "T", State: core.TaskExpired})
+	if err != nil {
 		t.Fatalf("SendEnvelope while killed err = %v", err)
+	}
+	if f.status(t, late).Status != store.OutboxPending {
+		t.Fatal("envelope enqueued while killed is not pending")
+	}
+	if err := f.o.SendDirect(context.Background(), f.gpu.rec, core.KindControlPaused, core.EmptyBody{}); !errors.Is(err, core.ErrKilled) {
+		t.Fatalf("SendDirect while killed err = %v", err)
+	}
+	f.pass(t)
+	if len(f.mb.sentFrames()) != 0 {
+		t.Fatal("sent while killed")
+	}
+	f.killed = false
+	f.pass(t)
+	if n := len(f.mb.sentFrames()); n != 2 {
+		t.Fatalf("sent %d after resume, want 2", n)
 	}
 }
 

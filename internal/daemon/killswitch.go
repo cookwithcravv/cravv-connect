@@ -4,16 +4,22 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/audit"
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/store"
 )
 
+// KillFlushTimeout bounds how long Kill waits for the outbox flush that sends
+// failed(killed) updates before disconnecting.
+const KillFlushTimeout = 3 * time.Second
+
 // KillHooks are the side effects of the kill switch, set by the Daemon.
 type KillHooks struct {
-	// BeforeKill runs while traffic can still be queued: it fails claimed tasks
-	// so their senders get task.update failed(killed) (best effort).
+	// BeforeKill runs while traffic can still flow: it fails claimed tasks and
+	// flushes the outbox (up to KillFlushTimeout) so their senders get
+	// task.update failed(killed) now when online (best effort).
 	BeforeKill func(ctx context.Context)
 	// AfterKill stops running file downloads and disconnects from the relay.
 	AfterKill func(ctx context.Context)

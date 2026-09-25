@@ -38,6 +38,7 @@ type Outbound struct {
 	logger    *slog.Logger
 	wake      chan struct{}
 
+	pass   sync.Mutex // serializes SendDue passes (the loop and Flush)
 	mu     sync.Mutex
 	recent []string
 }
@@ -58,16 +59,16 @@ func NewOutbound(id *keys.Identity, peers store.PeerStore, outbox store.OutboxSt
 	}
 }
 
-// SendEnvelope builds an envelope and stores it in the outbox. It fails with an error
+// SendEnvelope builds an envelope and stores it in the outbox. While the kill switch is
+// on it still enqueues (so task.update notices such as expired are not lost) but the
+// send loop sends nothing until resume; refusing agent sends while killed is the IPC
+// layer's job. It fails with an error
 // wrapping core.ErrTooLarge, before enqueueing, when the sealed frame could not fit the
 // relay frame limit. It fails with core.ErrPaused
 // when we paused the peer (control kinds excepted). When the peer paused us the item is
 // stored as held and goes out after control.resumed. Control kinds are never held: a
 // held control.resumed would deadlock two peers that paused each other.
 func (o *Outbound) SendEnvelope(ctx context.Context, to core.MachineID, kind core.Kind, fromSession, toSession string, body any) (string, error) {
-	if o.killed() {
-		return "", core.ErrKilled
-	}
 	peer, err := o.peers.GetPeer(ctx, to)
 	if err != nil {
 		return "", err
@@ -161,6 +162,8 @@ func (o *Outbound) SendDue(ctx context.Context) error {
 	if o.killed() {
 		return nil
 	}
+	o.pass.Lock()
+	defer o.pass.Unlock()
 	mb, ok := o.mailboxes.Mailbox()
 	if !ok {
 		return nil
