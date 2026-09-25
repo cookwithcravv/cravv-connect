@@ -525,3 +525,19 @@ The suite runs against `internal/relaytest` and against relay-cf under `wrangler
   - PAM via cgo on Linux; OpenDirectory via cgo on macOS
 - **Builds:** release builds per OS and architecture (darwin arm64/amd64, linux amd64/arm64) on CI. cgo is needed only for `internal/auth`.
 - **Relay:** TypeScript, Cloudflare Workers, Durable Objects (SQLite storage, Hibernation API), R2, `wrangler`, Vitest with Miniflare.
+
+## Implementation notes (deviations from this spec)
+
+The v1 implementation differs from this spec in these places. Where they disagree, `protocol/*.md`, `docs/security.md` and the code describe what ships.
+
+- **HPKE library:** Go's standard `crypto/hpke` instead of `cloudflare/circl` (section 5.2, section 14).
+- **Header binding:** the single-shot HPKE API has no separate AAD, so the canonical frame header is bound to the ciphertext through the HPKE `info` (`"cravv-connect/peer-v1\n" + canonical header`) instead of as AAD.
+- **SPAKE2 test vectors:** there are no python-spake2 cross-implementation vectors. `gospake2` does not let callers inject randomness, so deterministic vectors cannot be reproduced; the tests check round trips, wrong-password failure and message format instead (sections 6.2 and 13).
+- **Password handling:** the daemon cannot wipe the password from memory, because Go strings are immutable and may be copied by the runtime. It does not retain the password after the check (section 7.2).
+- **Password check on macOS:** PAM is used on both macOS and Linux (not OpenDirectory on macOS). The PAM service must be on a per-OS allowlist (`chkpasswd` or `checkpw` on macOS, `login` or `system-auth` on Linux; empty `pam_service` means the default, `chkpasswd` or `login`). The daemon runs a one-time self-test per PAM service (a random password must be rejected) and refuses to start if it is accepted. Failed-attempt lockout state is persisted across daemon restarts.
+- **Identity key storage:** there is no `identity.key` file. The Ed25519 seed lives in the login Keychain on macOS, and in the `settings` table of `store.db` on Linux (and as the macOS fallback) (sections 4 and 5).
+- **HTTP request signatures bind the origin:** the blob request signing string is `cravv-http-v1\n` + normalized relay origin + method + path + timestamp + body hash, so a signed request cannot be replayed against another relay. Origins are normalized (`relayproto.NormalizeOrigin`) on both sides.
+- **Relay caps:** beyond the limits in section 11.1, both relays cap outstanding invites per member (20), each uploader's live blob bytes (2 GiB) and the relay-wide live blob total (50 GiB), and rate-limit requests per mailbox (200 per second, burst 1000). Both rate-limit per client IP (relay-cf through an optional Cloudflare rate-limit binding). The Go reference relay also caps open pairing rooms per member (8); relay-cf also caps live blobs per member (256). Clients send WebSocket keepalive pings every 30 seconds and drop the connection when no pong arrives within 15 seconds.
+- **Mailbox routing hint:** `GET /v1/connect?ik=<identity key>` carries the identity key as a routing hint so a relay can route the connection to the right mailbox before the handshake; the server rejects the connection if `auth.ik` differs from it.
+- **Approvals:** a human reviews and decides pending tasks with the `cravv-connect approvals` CLI (and `approve` / `deny`). The daemon only raises a desktop notification when a task starts waiting; there is no approval UI inside the notification.
+- **`control.relay_moved`:** v1 daemons accept and store it (only `https` URLs, or plain `http` for `localhost`, `127.0.0.1` and `::1`) but never send it.

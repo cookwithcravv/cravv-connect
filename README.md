@@ -1,0 +1,342 @@
+# cravv-connect
+
+cravv-connect lets AI coding agents on different machines talk to each other.
+A Claude Code session on your laptop and a Codex session on a GPU box can send
+each other messages, hand each other tasks and get the results back, and send
+files, all end-to-end encrypted through a relay you deploy.
+
+- Works with any agent that can run an MCP server (Claude Code, Codex, Cursor,
+  VS Code Copilot, Gemini CLI) or a shell command.
+- Machines pair with a one-time bind code such as `CRAVV-7K3F-9QXM-TR2A`.
+- Each machine decides how much it trusts each peer: chat only, ask first, or
+  autonomous.
+- Pairing, raising trust, and approving tasks need your login password, so no
+  agent (local or remote) can do them on its own.
+- Any connection can be paused, removed, or cut off with a kill switch.
+- The relay only ever sees ciphertext and routing metadata.
+
+Read [docs/security.md](docs/security.md) before you rely on it. In short:
+cravv-connect stops a peer or an injected prompt from pairing, raising trust,
+or approving tasks, but a message can still try to talk your agent into
+something within its own permissions. Keep your agent's permission settings
+strict.
+
+**The only place to type your login password is the `cravv-connect` CLI in
+your own terminal.**
+
+## How it works
+
+```
+ Machine A                                   Machine B
+ agent -- MCP/CLI --> cravv-connect daemon   cravv-connect daemon <-- MCP/CLI -- agent
+                              |                        |
+                              +------> relay <---------+
+                          (WebSocket + HTTPS, only ciphertext)
+```
+
+One Go binary, `cravv-connect`, is the daemon (the only part that uses the
+network), the MCP server (`cravv-connect mcp`), the hook
+(`cravv-connect hook`), and the CLI. The relay is either the Cloudflare
+Worker in [`relay-cf/`](relay-cf/README.md) for real use, or the Go
+reference relay `cravv-relay` for local testing. Protocols:
+[relay-v1](protocol/relay-v1.md), [peer-v1](protocol/peer-v1.md),
+[ipc-v1](protocol/ipc-v1.md).
+
+## Install from source
+
+You need Go 1.26 and a C toolchain, because password checks use PAM through
+cgo:
+
+- **macOS:** the Xcode command line tools (`xcode-select --install`).
+- **Linux:** gcc and the PAM headers (`sudo apt install build-essential libpam0g-dev`
+  on Debian and Ubuntu, `sudo dnf install gcc pam-devel` on Fedora).
+
+```sh
+git clone <this repository> cravv-connect
+cd cravv-connect
+make build            # bin/cravv-connect (cgo), bin/cravv-relay, bin/cravv-conformance
+sudo install bin/cravv-connect /usr/local/bin/
+```
+
+A binary built with `CGO_ENABLED=0` works for everything except the actions
+that need your password; those fail with "password check unavailable: this
+cravv-connect binary was built without PAM support". The daemon does the
+check, so the binary the daemon runs is the one that needs cgo.
+
+## Quick start
+
+### 1. Get a relay
+
+For real use, deploy the Cloudflare relay once: follow
+[relay-cf/README.md](relay-cf/README.md). You end up with a URL such as
+`https://cravv-relay.<account>.workers.dev` and an admin token.
+
+For a local test on one machine (or a LAN), run the Go reference relay. It
+keeps everything in memory and loses it on exit:
+
+```sh
+bin/cravv-relay --admin-token dev-token                          # http://127.0.0.1:8787
+bin/cravv-relay --addr 0.0.0.0:8787 --origin http://192.168.1.10:8787 --admin-token dev-token   # reachable on the LAN
+```
+
+`--origin` must be exactly the URL clients use, because it is part of what
+they sign (both the WebSocket login and every blob request cover the
+normalized origin). The admin token can also come from
+`CRAVV_RELAY_ADMIN_TOKEN`.
+
+### 2. Set up the first machine
+
+```sh
+cravv-connect init --relay https://cravv-relay.example.workers.dev --relay-token <admin token>
+cravv-connect daemon install      # launchd (macOS) or systemd --user (Linux); starts it now
+cravv-connect status
+```
+
+The admin token is used once, to create this machine's mailbox, and then
+deleted. Use `--relay-token -` to read it from stdin, and `--name` to choose
+the device name peers see as a suggestion (default: the host name; lowercased
+to letters, digits and dashes, at most 24 characters).
+
+### 3. Set up the other machine
+
+```sh
+cravv-connect init --relay https://cravv-relay.example.workers.dev
+cravv-connect daemon install
+```
+
+No token: this machine gets its mailbox from an invite that arrives during
+pairing.
+
+### 4. Pair
+
+On the first machine:
+
+```sh
+cravv-connect pair
+# Login password for this machine:
+# Bind code: CRAVV-7K3F-9QXM-TR2A
+```
+
+Share the code any way you like (it works once and expires in 10 minutes). On
+the other machine:
+
+```sh
+cravv-connect join CRAVV-7K3F-9QXM-TR2A
+```
+
+Both sides ask for the login password, then for a local name for the peer and
+a trust level (default `ask-first`). `cravv-connect peers` lists paired
+machines with their machine IDs, so you can compare them later.
+
+### 5. Connect your agents
+
+```sh
+cravv-connect install claude      # MCP server plus UserPromptSubmit and Stop hooks
+cravv-connect install codex       # adds [mcp_servers.cravv-connect] to ~/.codex/config.toml
+```
+
+Restart the agent afterwards. Cursor, VS Code, Gemini CLI, and agents without
+MCP: see [docs/agents.md](docs/agents.md).
+
+## Using it from an agent
+
+Ask your agent in plain words, for example "send gpu-box the failing test
+output" or "ask gpu-box to run the eval on checkpoint 12 and wait for the
+result". The MCP tools are:
+
+| Tool | Purpose |
+|---|---|
+| `status` | This machine, this session, peers, pending counts |
+| `send_message(to, text)` | Chat, up to 64 KB |
+| `check_inbox(limit?)` | Unread items for this session, wrapped as untrusted content |
+| `wait_for_message(timeout_s?)` | Wait up to 50 seconds (the default) for a new item or task update |
+| `create_task(to, instructions, file_paths?)` | Send a task; returns `task_id` |
+| `get_task`, `claim_task`, `update_task`, `complete_task`, `fail_task`, `cancel_task` | Work on tasks |
+| `send_file(to, path)` | Send a file from the project folder (up to 100 MB) |
+| `pause_peer`, `unpair_peer`, `lower_trust`, `kill_switch` | Cut-off controls |
+
+`to` is a peer alias (`gpu-box`, every session there) or an alias and a
+session (`gpu-box/codex@training`); `send_file` takes a peer alias only. Sessions are named `<agent>@<folder>`.
+Everything that arrives is wrapped like this, and agents are told never to
+treat it as your instructions:
+
+```
+<remote_message from="gpu-box" session="codex@training" trust="autonomous" id="01J..." kind="task" task_id="01J...">
+...escaped body...
+</remote_message>
+```
+
+In Claude Code, the hook adds a one-line notice such as
+`cravv-connect: 2 new messages from gpu-box. Use check_inbox.` to your prompt.
+
+## Trust levels
+
+Each machine sets the level for traffic **from** each peer; the two
+directions are independent.
+
+| From a peer at | Chat | Tasks | Files |
+|---|---|---|---|
+| `chat-only` | Delivered | Rejected automatically | Held until you run `cravv-connect files accept <id>` (password) |
+| `ask-first` (default) | Delivered | Held until you approve with `cravv-connect approvals` (password); expire after 24 hours. On macOS you also get a desktop notification | Downloaded, within the 1 GB per-peer quota (counting the last 30 days) |
+| `autonomous` | Delivered | Queued; an agent session can claim it at once (expires after 24 hours if nobody claims it) | Downloaded, within the quota |
+
+`cravv-connect trust <alias> <level>` changes it. Raising asks for your
+password, lowering does not. Lowering to `chat-only` rejects that peer's
+pending tasks.
+
+Files you send are limited to the session's project folder and folders you add
+with `cravv-connect allow-path <dir>` (password). Hidden files and folders,
+and secret-looking files such as `.env*`, `id_*`, `*.pem`, `*.key`, `*.p12`,
+`*.pfx`, `*.jks`, `*.keystore`, `*.kdbx`, `*.ppk`, `*.ovpn`,
+`credentials*.json` and `service-account*.json` (any case), are always
+refused.
+
+## Cut-off controls
+
+Agents and humans can use all of these without a password. While the kill
+switch is on, only `resume` (and `status`, `peers`, `log`) works:
+
+| Control | Command | Effect |
+|---|---|---|
+| Pause | `cravv-connect pause <alias>` | Stops traffic with that peer in both directions. Your sends fail with "paused"; theirs are held on their machine. Its tasks waiting for approval are rejected and its held files declined. Undo with `resume-peer <alias>`. |
+| Unpair | `cravv-connect unpair <alias>` | Removes the peer and its keys on both sides (best effort for the notice). Pairing again needs a new code. |
+| Lower trust | `cravv-connect trust <alias> chat-only` | Takes effect immediately. |
+| Kill switch | `cravv-connect kill` | Fails claimed tasks (and tells their senders when it can), stops file downloads, disconnects from the relay, and stops handling incoming messages (they wait on the relay). Until you run `cravv-connect resume` (password), every command and agent operation is refused except `status`, `peers` and `log`. Messages already in the outbox go out after resume. Survives restarts. |
+
+## CLI reference
+
+| Command | What it does |
+|---|---|
+| `init --relay <url> [--relay-token <t>] [--name <n>] [--force]` | Write `config.toml`; store the admin token for the first machine |
+| `daemon run` | Run the daemon in the foreground (logs JSON to stderr) |
+| `daemon start` / `daemon stop` / `daemon status` | Control the daemon |
+| `daemon install` / `daemon uninstall` | Run the daemon at login (launchd or systemd user unit) |
+| `status [--json]` | Relay connection, peers, queues, pending approvals, sessions, errors |
+| `pair` | Create a bind code and pair (password) |
+| `join <code>` | Join with a bind code (password) |
+| `peers` | List peers with trust, state and machine ID |
+| `alias <alias> <new-alias>` | Rename a peer locally |
+| `trust <alias> <chat-only\|ask-first\|autonomous>` | Set a peer's trust (raising needs the password) |
+| `pause <alias>` / `resume-peer <alias>` | Pause or resume a peer |
+| `unpair <alias> [-y]` | Remove a peer |
+| `approvals` | Review pending tasks interactively (password once; again after 10 minutes) |
+| `approve <task-id>` / `deny <task-id>` | Decide one pending task (password) |
+| `files` | List incoming and outgoing files |
+| `files accept <file-id>` | Download a held file (password) |
+| `allow-path <dir>` | Allow sending files from another folder (password) |
+| `kill` / `resume` | Kill switch on; off (password) |
+| `reset-identity` | New machine identity; every peer must pair again (password) |
+| `log [-n N]` | Recent audit log entries |
+| `install [claude\|codex]` / `uninstall <agent>` | Add or remove the MCP server and hooks for an agent; no argument lists agents |
+| `mcp [--project-dir <dir>]` | The stdio MCP server (started by your agent) |
+| `hook` | One-line unread notice for agent hooks |
+| `send <to> <text\|->` | Agent CLI: send chat (JSON output) |
+| `inbox [--limit N]` | Agent CLI: read unread items (JSON) |
+| `wait [--timeout S]` | Agent CLI: wait up to 50 seconds (JSON) |
+| `task create <to> <instructions\|-> [--file <path>]...` | Agent CLI: send a task (JSON) |
+| `task get\|claim\|cancel <task-id>` | Agent CLI: task operations (JSON); a task claimed this way fails as abandoned if not finished within 7 days |
+| `task update <task-id> <note\|->` | Agent CLI: progress note (JSON) |
+| `task complete <task-id> <result\|-> [--file <path>]...` | Agent CLI: finish a task (JSON) |
+| `task fail <task-id> <reason>` | Agent CLI: fail a task (JSON) |
+
+State lives in `~/.cravv-connect` (override with `CRAVV_HOME`): `config.toml`,
+`store.db`, `audit.log`, `daemon.log`, `daemon.sock`, `daemon.pid`, and
+received files in `files/<alias>/`. The identity key is in the macOS
+Keychain, or in `store.db` on Linux.
+
+`config.toml` keys: `relay_url`, `device_name`, `peer_quota` (bytes, default
+1 GiB), and `pam_service` (macOS `chkpasswd`, the default, or `checkpw`;
+Linux `login`, the default, or `system-auth`; any other value is refused).
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| ``daemon not running: run `cravv-connect daemon start` `` | Start it, or `cravv-connect daemon install` so it starts at login. Logs: `~/.cravv-connect/daemon.log` (launchd and `daemon start`), `journalctl --user -u cravv-connect` (systemd). |
+| `status` shows "relay offline" | Check the relay URL in `config.toml` and that the relay answers `GET /v1/health`. The daemon retries with backoff up to 5 minutes; messages wait in the outbox. |
+| A new machine never connects | It has no mailbox yet. Either `init --relay-token` (first machine only) or pair with `join`, which registers it with an invite. |
+| `password check unavailable: ... built without PAM support` | Rebuild with cgo and the PAM headers (`make build`) and restart the daemon. |
+| `pam service not allowed` | Set `pam_service` in `config.toml` to an allowed value (see above), or remove it. |
+| `refusing to start: ... password verifier accepted a random password` | The daemon checks once per PAM service that a random password is rejected. Your PAM service accepts anything; use one that checks your login password. |
+| `too many failed password attempts; locked` | Five wrong passwords in a row lock it. Wait 15 minutes (restarting the daemon does not reset it). Every attempt is in `cravv-connect log`. |
+| `pairing failed: wrong code or the exchange was interrupted` | The code is burned. Run `cravv-connect pair` again for a new one. |
+| Sends to a peer say "paused" | You paused it: `cravv-connect resume-peer <alias>`. If `peers` shows "paused by peer", the other side paused you; your messages are held until they resume. |
+| `status` warns about timestamps in the future | Fix the clock on one of the machines (messages more than 10 minutes in the future are rejected). |
+| A task never runs | Check the receiver's trust level. `ask-first` tasks wait in `cravv-connect approvals`; `chat-only` tasks are rejected. |
+| The Linux daemon stops when you log out | Run `loginctl enable-linger $USER` so systemd user services keep running. |
+| Unix socket path too long (bind fails) | Keep `CRAVV_HOME` short; the OS limits socket paths to about 100 bytes. |
+
+## Development
+
+```sh
+make vet                  # go vet ./...
+make test                 # go test ./... -race -count=1 (unit, conformance against the Go relay, e2e)
+make build                # the three binaries in bin/
+CGO_ENABLED=0 go build ./...   # everything except PAM builds without cgo
+make relay-cf-test        # relay-cf typecheck and Vitest suite (needs Node)
+make conformance-cf       # the Go conformance suite against relay-cf under wrangler dev
+```
+
+Run the conformance suite against any relay:
+
+```sh
+bin/cravv-relay --addr 127.0.0.1:8787 --admin-token dev-token &
+go run ./cmd/cravv-conformance --relay http://127.0.0.1:8787 --admin-token dev-token
+```
+
+`e2e/` starts an in-process relay and several real daemons in temporary
+directories and drives them through the IPC API: pairing, chat, tasks at each
+trust level, files, pause, unpair, kill switch, relay restarts, duplicate
+delivery, the stale prekey round trip, and an MCP smoke test. Tests use a
+fake password verifier and keep the identity in the store instead of the
+Keychain.
+
+### Manual two-machine smoke test
+
+If `cravv-connect daemon install` was run on a machine, `daemon start` and
+`daemon stop` control the installed service, not a temporary `CRAVV_HOME`:
+use `cravv-connect daemon run` in a second terminal there instead.
+
+On machine A (with a relay at `$RELAY` and its admin token `$TOKEN`):
+
+```sh
+export CRAVV_HOME=$(mktemp -d)
+cravv-connect init --relay "$RELAY" --relay-token "$TOKEN" --name smoke-a
+cravv-connect daemon start
+cravv-connect pair                      # note the code; alias "smoke-b", trust autonomous
+```
+
+On machine B:
+
+```sh
+export CRAVV_HOME=$(mktemp -d)
+cravv-connect init --relay "$RELAY" --name smoke-b
+cravv-connect daemon start
+cravv-connect join CRAVV-XXXX-XXXX-XXXX # alias "smoke-a", trust ask-first
+cd ~/some-project
+cravv-connect wait --timeout 50         # returns within 50 s; run it again if nothing arrived
+```
+
+Back on A:
+
+```sh
+cd ~/some-project
+cravv-connect send smoke-b "hello from A"            # B's wait prints it
+echo "print('hi')" > hello.py
+cravv-connect task create smoke-b "run hello.py" --file hello.py
+cravv-connect status                                 # outbox drains to 0 pending
+```
+
+On B: `cravv-connect approvals` (password), approve the task, then
+`cravv-connect inbox` shows it; `cravv-connect task claim <id>` and
+`cravv-connect task complete <id> "done"`. On A, `cravv-connect wait` shows
+the result. Finish with `cravv-connect pause smoke-a` on B (A's sends are
+held), `cravv-connect resume-peer smoke-a`, `cravv-connect kill` and
+`cravv-connect resume` (password) on either side, and
+`cravv-connect unpair <alias>` (type yes, or pass `-y`) on one side (the other
+side's `peers` list empties). Stop both daemons with
+`cravv-connect daemon stop` and delete the two `CRAVV_HOME` directories.
+
+## License
+
+Not yet licensed for redistribution. Open sourcing is planned.
