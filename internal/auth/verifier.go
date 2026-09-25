@@ -38,6 +38,12 @@ type unavailable struct{}
 
 func (unavailable) Verify(string, string) error { return ErrUnavailable }
 
+// ErrAccountRejected is returned when the password is correct but PAM's
+// account management refuses the account (expired, disabled, or a password
+// change is required). It is not a bad password and does not count toward
+// the lockout.
+var ErrAccountRejected = errors.New("account expired, disabled or not permitted")
+
 // ErrServiceNotAllowed is returned (wrapped, together with ErrUnavailable)
 // for a PAM service that is not on the allowlist. Only services that
 // authenticate the user's own login password are allowed; others (for

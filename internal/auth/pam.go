@@ -48,7 +48,18 @@ func (v pamVerifier) Verify(username, password string) error {
 		}
 		return fmt.Errorf("auth: pam authenticate: %w", err)
 	}
-	return nil
+	// The password is right; now ask the account stack whether the account
+	// may be used at all (expired, disabled, password must be changed).
+	return accountError(tx.AcctMgmt(pam.DisallowNullAuthtok))
+}
+
+// accountError maps a pam_acct_mgmt result: nil stays nil, anything else is
+// ErrAccountRejected wrapping the PAM error.
+func accountError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("auth: pam account check: %w: %w", ErrAccountRejected, err)
 }
 
 // isBadCredential reports whether a PAM error means "wrong user or password"
