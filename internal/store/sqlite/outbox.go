@@ -72,9 +72,12 @@ func (d *DB) Delete(ctx context.Context, ids ...string) error {
 	return err
 }
 
+// HoldPeer holds a peer's pending and queued items, except control.* envelopes: those
+// must keep flowing (a held control.resumed would deadlock a mutual pause).
 func (d *DB) HoldPeer(ctx context.Context, to core.MachineID) error {
 	_, err := d.sql.ExecContext(ctx,
-		`UPDATE outbox SET status = ? WHERE to_machine = ? AND status IN (?, ?)`,
+		`UPDATE outbox SET status = ? WHERE to_machine = ? AND status IN (?, ?)
+AND COALESCE(CASE WHEN json_valid(CAST(envelope AS TEXT)) THEN json_extract(CAST(envelope AS TEXT), '$.kind') END, '') NOT LIKE 'control.%'`,
 		string(store.OutboxHeld), string(to), string(store.OutboxPending), string(store.OutboxQueued))
 	return err
 }

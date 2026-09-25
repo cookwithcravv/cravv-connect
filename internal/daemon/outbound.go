@@ -62,7 +62,8 @@ func NewOutbound(id *keys.Identity, peers store.PeerStore, outbox store.OutboxSt
 // wrapping core.ErrTooLarge, before enqueueing, when the sealed frame could not fit the
 // relay frame limit. It fails with core.ErrPaused
 // when we paused the peer (control kinds excepted). When the peer paused us the item is
-// stored as held and goes out after control.resumed.
+// stored as held and goes out after control.resumed. Control kinds are never held: a
+// held control.resumed would deadlock two peers that paused each other.
 func (o *Outbound) SendEnvelope(ctx context.Context, to core.MachineID, kind core.Kind, fromSession, toSession string, body any) (string, error) {
 	if o.killed() {
 		return "", core.ErrKilled
@@ -87,7 +88,7 @@ func (o *Outbound) SendEnvelope(ctx context.Context, to core.MachineID, kind cor
 		return "", err
 	}
 	status := store.OutboxPending
-	if peer.PausedByPeer {
+	if peer.PausedByPeer && !kind.IsControl() {
 		status = store.OutboxHeld
 	}
 	now := o.clock.Now()
@@ -192,7 +193,7 @@ func (o *Outbound) attempt(ctx context.Context, mb transport.Mailbox, it store.O
 		o.recordError(fmt.Sprintf("dropped message %s: corrupt outbox entry", it.ID))
 		return o.outbox.Delete(ctx, it.ID)
 	}
-	if (peer.Paused && !env.Kind.IsControl()) || peer.PausedByPeer {
+	if (peer.Paused || peer.PausedByPeer) && !env.Kind.IsControl() {
 		return o.outbox.SetStatus(ctx, it.ID, store.OutboxHeld, it.Attempts, it.NextAttempt)
 	}
 	frame, err := o.seal(peer, env)
@@ -213,7 +214,15 @@ func (o *Outbound) attempt(ctx context.Context, mb transport.Mailbox, it store.O
 	case transport.SendQueued:
 		return o.outbox.SetStatus(ctx, it.ID, store.OutboxQueued, it.Attempts+1, o.clock.Now())
 	case transport.SendNotAllowed:
-		return o.markPausedByPeer(ctx, peer)
+		if err := o.markPausedByPeer(ctx, peer); err != nil {
+			return err
+		}
+		if env.Kind.IsControl() {
+			// Keep retrying: the peer may have paused us after we paused them, and
+			// only our control.resumed tells it we are back.
+			return o.backoff(ctx, it)
+		}
+		return nil
 	case transport.SendTooLarge:
 		o.recordError(fmt.Sprintf("dropped message %s to %s: too large for the relay", it.ID, peer.Alias))
 		return o.outbox.Delete(ctx, it.ID)
@@ -310,7 +319,7 @@ func (o *Outbound) Reseal(ctx context.Context, to core.MachineID, msgID string) 
 	return nil
 }
 
-// Hold stops sending to a peer: its pending and queued items become held.
+// Hold stops sending to a peer: its pending and queued items become held (control.* excepted).
 func (o *Outbound) Hold(ctx context.Context, peer core.MachineID) error {
 	return o.outbox.HoldPeer(ctx, peer)
 }

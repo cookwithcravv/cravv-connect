@@ -74,7 +74,7 @@ type OutboxStore interface {
 	Get(ctx context.Context, id string) (OutboxItem, error)
 	SetStatus(ctx context.Context, id string, st OutboxStatus, attempts int, next time.Time) error
 	Delete(ctx context.Context, ids ...string) error                         // on delivered
-	HoldPeer(ctx context.Context, to core.MachineID) error                   // pending|queued -> held
+	HoldPeer(ctx context.Context, to core.MachineID) error                   // pending|queued -> held, except control.* envelopes
 	ReleasePeer(ctx context.Context, to core.MachineID, now time.Time) error // held -> pending, next=now
 	DeleteOutboxForPeer(ctx context.Context, to core.MachineID) error        // all items to a peer (unpair)
 	PurgeOutboxBefore(ctx context.Context, t time.Time) (int, error)         // CreatedAt < t

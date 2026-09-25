@@ -428,3 +428,29 @@ func TestOutboundDropsItemThatSealsTooLarge(t *testing.T) {
 		t.Fatalf("errors = %v", f.o.Errors())
 	}
 }
+
+func TestOutboundControlItemsAreNeverHeld(t *testing.T) {
+	f := newOutboundFixture(t)
+	ctx := context.Background()
+	p := f.gpu.rec
+	p.PausedByPeer = true
+	mustPut(t, f.peers, p)
+	id, err := f.o.SendEnvelope(ctx, p.MachineID, core.KindControlResumed, "", "", core.EmptyBody{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := f.status(t, id).Status; st != store.OutboxPending {
+		t.Fatalf("control item status = %s, want pending", st)
+	}
+	f.mb.statuses = []transport.SendStatus{transport.SendNotAllowed}
+	f.pass(t)
+	it := f.status(t, id)
+	if it.Status != store.OutboxPending || it.Attempts != 1 || !it.NextAttempt.Equal(testEpoch.Add(time.Second)) {
+		t.Fatalf("control item after not_allowed = %+v, want pending with backoff", it)
+	}
+	f.clock.Advance(time.Second)
+	f.pass(t)
+	if st := f.status(t, id).Status; st != store.OutboxQueued {
+		t.Fatalf("control item not retried: %s", st)
+	}
+}

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"sync"
 	"time"
@@ -208,7 +209,7 @@ func (s *memOutbox) HoldPeer(_ context.Context, to core.MachineID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, it := range s.m {
-		if it.To == to && (it.Status == store.OutboxPending || it.Status == store.OutboxQueued) {
+		if it.To == to && (it.Status == store.OutboxPending || it.Status == store.OutboxQueued) && !memIsControl(it) {
 			it.Status = store.OutboxHeld
 			s.m[id] = it
 		}
@@ -328,4 +329,12 @@ func (s *memOutbox) RequeueStale(_ context.Context, now time.Time) (int, error) 
 		}
 	}
 	return n, nil
+}
+
+// memIsControl mirrors the sqlite HoldPeer filter: control.* envelopes are never held.
+func memIsControl(it store.OutboxItem) bool {
+	var env struct {
+		Kind core.Kind `json:"kind"`
+	}
+	return json.Unmarshal(it.Envelope, &env) == nil && env.Kind.IsControl()
 }

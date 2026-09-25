@@ -230,3 +230,27 @@ func TestOutboxRequeueStale(t *testing.T) {
 		t.Fatalf("due after requeue = %v", got)
 	}
 }
+
+// control.* items are never held: a held control.resumed would deadlock two peers
+// that paused each other.
+func TestOutboxHoldPeerSkipsControlItems(t *testing.T) {
+	ctx := context.Background()
+	ob := newTestDB(t)
+	ctl := outItem("ctl", "A", t0, t0)
+	ctl.Envelope = []byte(`{"id":"ctl","kind":"control.resumed"}`)
+	chat := outItem("chat", "A", t0, t0)
+	chat.Envelope = []byte(`{"id":"chat","kind":"chat"}`)
+	for _, it := range []store.OutboxItem{ctl, chat} {
+		if err := ob.Enqueue(ctx, it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ob.HoldPeer(ctx, "A"); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]store.OutboxStatus{"ctl": store.OutboxPending, "chat": store.OutboxHeld} {
+		if it, _ := ob.Get(ctx, id); it.Status != want {
+			t.Fatalf("%s status = %s, want %s", id, it.Status, want)
+		}
+	}
+}
