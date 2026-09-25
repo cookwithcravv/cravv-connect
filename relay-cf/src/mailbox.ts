@@ -39,6 +39,8 @@ type Stage = "hello" | "auth" | "register" | "ready";
 // Per-socket state. Stored with serializeAttachment so it survives hibernation.
 interface Attachment {
   stage: Stage;
+  connId: string; // also the socket's tag ("c:<connId>"), fixed at accept time
+  acceptedAt: number; // ms; pre-auth sockets older than HANDSHAKE_TIMEOUT_MS are closed
   ik: string; // canonical unpadded base64 of the routing IK
   origin: string;
   nonce: string;
@@ -48,6 +50,9 @@ interface Attachment {
 type Op = (ws: WebSocket, a: Attachment, f: Frame, rid: string) => Promise<void>;
 
 const ROOM_CREATE_ATTEMPTS = 16;
+// relay-v1 section 8: a hibernating relay cannot run a timer per socket, so a socket still in
+// the handshake after this long is closed the next time any socket arrives for the mailbox.
+const HANDSHAKE_TIMEOUT_MS = 10_000;
 const MAX_ID_CHARS = 128;
 
 // Mailbox is one SQLite-backed Durable Object per mailbox id. It owns the queue, the allow-list
@@ -93,11 +98,14 @@ export class Mailbox extends DurableObject<Env> {
     const ik = request.headers.get(ROUTE_IK_HEADER);
     const mailboxId = request.headers.get(ROUTE_MAILBOX_HEADER);
     if (!isUpgrade(request) || !ik || !mailboxId) return notUpgrade();
+    const now = Date.now();
+    this.closeStalePreAuth(now);
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    this.ctx.acceptWebSocket(server);
+    const connId = randomToken();
+    this.ctx.acceptWebSocket(server, [connTag(connId)]);
     const origin = this.env.PUBLIC_ORIGIN || new URL(request.url).origin;
-    const a: Attachment = { stage: "hello", ik, origin, nonce: "", mailboxId };
+    const a: Attachment = { stage: "hello", connId, acceptedAt: now, ik, origin, nonce: "", mailboxId };
     server.serializeAttachment(a);
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -147,6 +155,11 @@ export class Mailbox extends DurableObject<Env> {
         case "register":
           return await this.onRegister(ws, a, f);
         case "ready":
+          // A replaced socket may still have messages in flight; it must not act on them.
+          if (a.connId !== this.meta.get("live")) {
+            failSocket(ws, Code.GONE, "replaced by a newer connection");
+            return;
+          }
           return await this.onReady(ws, a, f);
       }
     } catch (err) {
@@ -239,8 +252,19 @@ export class Mailbox extends DurableObject<Env> {
     this.activate(ws, a);
   }
 
+  // Closes sockets that have not finished the handshake within HANDSHAKE_TIMEOUT_MS.
+  private closeStalePreAuth(now: number): void {
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = ws.deserializeAttachment() as Attachment | null;
+      if (a && a.stage !== "ready" && (a.acceptedAt ?? 0) <= now - HANDSHAKE_TIMEOUT_MS) {
+        failSocket(ws, Code.BAD_REQUEST, "handshake timeout");
+      }
+    }
+  }
+
   // Marks ws as the single live connection, closes older ones, and pushes the backlog.
   private activate(ws: WebSocket, a: Attachment): void {
+    this.meta.set("live", a.connId);
     for (const other of this.ctx.getWebSockets()) {
       if (other === ws) continue;
       const oa = other.deserializeAttachment() as Attachment | null;
@@ -427,8 +451,11 @@ export class Mailbox extends DurableObject<Env> {
     return this.env.REGISTRY.getByName(REGISTRY_NAME);
   }
 
+  // The live connection, found by the tag recorded when it was activated.
   private liveSocket(): WebSocket | undefined {
-    for (const ws of this.ctx.getWebSockets()) {
+    const live = this.meta.get("live");
+    if (live === undefined) return undefined;
+    for (const ws of this.ctx.getWebSockets(connTag(live))) {
       const a = ws.deserializeAttachment() as Attachment | null;
       if (a && a.stage === "ready" && ws.readyState === WebSocket.READY_STATE_OPEN) return ws;
     }
@@ -448,6 +475,10 @@ export class Mailbox extends DurableObject<Env> {
     this.tokens -= 1;
     return true;
   }
+}
+
+function connTag(connId: string): string {
+  return `c:${connId}`;
 }
 
 function deliverFrame(seq: number, from: string, id: string, frame: string): string {

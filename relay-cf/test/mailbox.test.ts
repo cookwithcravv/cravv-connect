@@ -224,6 +224,57 @@ describe("send, deliver, ack", () => {
     second.close();
   });
 
+  it("a socket that is no longer the live connection cannot act", async () => {
+    const id = await Identity.create();
+    const other = await Identity.create();
+    const first = await member(id);
+    const stub = testEnv.MAILBOX.getByName(id.mailboxId);
+    // Simulate a newer connection having taken over before first's close was processed.
+    await runInDurableObject(stub, (_inst, state) => {
+      state.storage.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('live', 'newer')");
+    });
+    first.send({ t: "allow", rid: "x", ik: other.ikB64 });
+    expect(await first.next()).toMatchObject({ t: "error", code: "gone" });
+    await first.waitClosed();
+    const rows = await runInDurableObject(stub, (_inst, state) =>
+      state.storage.sql.exec("SELECT mailbox_id FROM allow").toArray(),
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("closes pre-auth sockets older than 10 seconds when a new socket arrives", async () => {
+    const id = await Identity.create();
+    const stale = await Conn.open(`/v1/connect?ik=${encodeURIComponent(id.ikB64)}`);
+    await runInDurableObject(testEnv.MAILBOX.getByName(id.mailboxId), (_inst, state) => {
+      const sockets = state.getWebSockets();
+      expect(sockets.length).toBe(1);
+      const a = sockets[0].deserializeAttachment() as { acceptedAt: number };
+      a.acceptedAt -= 11_000;
+      sockets[0].serializeAttachment(a);
+    });
+    const fresh = await Conn.open(`/v1/connect?ik=${encodeURIComponent(id.ikB64)}`);
+    expect(await stale.next()).toMatchObject({ t: "error", code: "bad_request" });
+    await stale.waitClosed();
+    const { conn, authOk } = await handshake(id);
+    expect(authOk).toMatchObject({ t: "auth_ok" });
+    expect(fresh.closed).toBe(false);
+    fresh.close();
+    conn.close();
+  });
+
+  it("keeps the frames already queued when the recipient denies the sender", async () => {
+    const { a, b, ca, cb } = await pair();
+    cb.close();
+    expect((await ca.request({ t: "send", to: b.mailboxId, id: "before", frame: frameB64("x") })).status).toBe("queued");
+    const c2 = await member(b);
+    expect((await c2.request({ t: "deny", ik: a.ikB64 }, [])).status).toBe("ok");
+    c2.close();
+    const c3 = await member(b);
+    expect(await c3.next()).toMatchObject({ t: "deliver", id: "before" });
+    c3.close();
+    ca.close();
+  });
+
   it("replies queue_full at the frame cap (QUEUE_MAX_FRAMES=5 in tests)", async () => {
     const { b, ca, cb } = await pair();
     cb.close();
