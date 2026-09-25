@@ -197,10 +197,14 @@ func (d *Daemon) build(id *keys.Identity) *services {
 func registerHandlers(g *services, inbox *InboxService, peers store.PeerStore) {
 	r := g.registry
 	r.Register(core.KindChat, NewChatHandler(inbox))
-	r.Register(core.KindTaskCreate, HandlerFunc(g.tasks.HandleCreate))
+	// task.create and file.offer pass the trust policy centrally (spec 7.1): a rejected
+	// item never reaches the service's main handler.
+	r.Register(core.KindTaskCreate, PolicyGate{
+		Inner: HandlerFunc(g.tasks.HandleCreate), OnReject: HandlerFunc(g.tasks.RejectCreate)})
 	r.Register(core.KindTaskUpdate, HandlerFunc(g.tasks.HandleUpdate))
 	r.Register(core.KindTaskCancel, HandlerFunc(g.tasks.HandleCancel))
-	r.Register(core.KindFileOffer, HandlerFunc(g.files.HandleOffer))
+	r.Register(core.KindFileOffer, PolicyGate{
+		Inner: HandlerFunc(g.files.HandleOffer), OnReject: HandlerFunc(g.files.RejectOffer)})
 	RegisterControlHandlers(r, peers, g.peers, g.outbound)
 	g.activity.WrapAll(r,
 		core.KindChat, core.KindTaskCreate, core.KindTaskUpdate, core.KindTaskCancel, core.KindFileOffer,

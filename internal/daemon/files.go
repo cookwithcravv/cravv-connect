@@ -218,7 +218,18 @@ func chunkLen(size int64, i uint32) int64 {
 }
 
 // HandleOffer records an incoming file.offer and holds, declines or downloads it.
+// Behind a PolicyGate its own decision must match the gate's.
 func (s *FileService) HandleOffer(ctx context.Context, peer store.Peer, env core.Envelope) error {
+	return s.handleOffer(ctx, peer, env, s.d.Policy.Decide(peer.TrustIn, core.KindFileOffer))
+}
+
+// RejectOffer records an incoming file.offer as declined ("not permitted") and tells the
+// sender. It is the PolicyGate's OnReject for file.offer.
+func (s *FileService) RejectOffer(ctx context.Context, peer store.Peer, env core.Envelope) error {
+	return s.handleOffer(ctx, peer, env, DecisionReject)
+}
+
+func (s *FileService) handleOffer(ctx context.Context, peer store.Peer, env core.Envelope, decision Decision) error {
 	b, err := decodeEnvBody[core.FileOfferBody](env.Body)
 	if err != nil {
 		return err
@@ -226,6 +237,9 @@ func (s *FileService) HandleOffer(ctx context.Context, peer store.Peer, env core
 	if !safeID(env.ID) || !safeID(b.FileID) || b.BlobID == "" || b.Size < 0 || b.Size > core.MaxFileBytes ||
 		b.Chunks != filecrypt.ChunkCount(b.Size) || len(b.SHA256) != sha256.Size || len(b.Key) != 32 {
 		return fmt.Errorf("file.offer %s: malformed", env.ID)
+	}
+	if err := checkGateDecision(ctx, decision, core.KindFileOffer, b.FileID); err != nil {
+		return err
 	}
 	if _, err := s.d.Files.GetFile(ctx, b.FileID); err == nil {
 		return nil // duplicate offer
@@ -241,7 +255,7 @@ func (s *FileService) HandleOffer(ctx context.Context, peer store.Peer, env core
 		Name: pathguard.SanitizeName(b.Name), Size: b.Size, Chunks: b.Chunks, SHA256: b.SHA256, Key: b.Key,
 		TaskID: b.TaskID, LocalPath: local, CreatedAt: s.d.Clock.Now(),
 	}
-	switch s.d.Policy.Decide(peer.TrustIn, core.KindFileOffer) {
+	switch decision {
 	case DecisionHold:
 		rec.State, rec.Reason = store.FileHeld, "held for a human to accept"
 		if err := s.d.Files.PutFile(ctx, rec); err != nil {

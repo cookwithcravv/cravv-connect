@@ -135,14 +135,29 @@ func (s *TaskService) sendFiles(ctx context.Context, to core.MachineID, projectD
 	return refs, nil
 }
 
-// HandleCreate applies the trust policy to an incoming task.create.
+// HandleCreate applies the trust policy to an incoming task.create. Behind a PolicyGate
+// its own decision must match the gate's.
 func (s *TaskService) HandleCreate(ctx context.Context, peer store.Peer, env core.Envelope) error {
+	decision := s.d.Policy.Decide(peer.TrustIn, core.KindTaskCreate)
+	return s.handleCreate(ctx, peer, env, decision)
+}
+
+// RejectCreate records an incoming task.create as rejected and tells the sender. It is
+// the PolicyGate's OnReject for task.create.
+func (s *TaskService) RejectCreate(ctx context.Context, peer store.Peer, env core.Envelope) error {
+	return s.handleCreate(ctx, peer, env, DecisionReject)
+}
+
+func (s *TaskService) handleCreate(ctx context.Context, peer store.Peer, env core.Envelope, decision Decision) error {
 	body, err := decodeEnvBody[core.TaskCreateBody](env.Body)
 	if err != nil {
 		return err
 	}
 	if body.TaskID == "" {
 		return errors.New("task.create without task_id")
+	}
+	if err := checkGateDecision(ctx, decision, core.KindTaskCreate, body.TaskID); err != nil {
+		return err
 	}
 	if len(body.Instructions) > core.MaxTextBytes {
 		return fmt.Errorf("task %s: %w", body.TaskID, core.ErrTooLarge)
@@ -158,7 +173,7 @@ func (s *TaskService) HandleCreate(ctx context.Context, peer store.Peer, env cor
 		FromSession: env.FromSession, ToSession: env.ToSession, Instructions: body.Instructions,
 		Files: body.Files, CreatedAt: now, UpdatedAt: now,
 	}
-	switch s.d.Policy.Decide(peer.TrustIn, core.KindTaskCreate) {
+	switch decision {
 	case DecisionDeliver:
 		t.State = core.TaskQueued
 		t.ExpiresAt = now.Add(core.UnclaimedExpiry)
