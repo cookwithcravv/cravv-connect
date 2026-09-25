@@ -102,7 +102,9 @@ type InboxStore interface {
 	MarkRead(ctx context.Context, seqs []int64) error
 	// cursor for a brand new session: max(seq) of items that are both older than `since` AND ReadByAny; 0 if none
 	InitialCursor(ctx context.Context, since time.Time) (int64, error)
-	RedirectOrphans(ctx context.Context, session string, note string) (int, error) // ToSession=session -> ""
+	// Re-inserts every item with ToSession=session as a new machine-wide item
+	// (new seq, ReadByAny=false, Note=note) and deletes the originals, atomically.
+	RedirectOrphans(ctx context.Context, session string, note string) (int, error)
 	UnreadCount(ctx context.Context, session string, after int64) (int, map[core.MachineID]int, error)
 	PurgeInboxBefore(ctx context.Context, t time.Time) (int, error) // ReceivedAt < t
 }

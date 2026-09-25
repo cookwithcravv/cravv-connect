@@ -2,7 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/cravv/cravv-connect/internal/core"
@@ -67,16 +69,43 @@ func (d *DB) InitialCursor(ctx context.Context, since time.Time) (int64, error) 
 	return c, err
 }
 
+// RedirectOrphans moves every item addressed to session to the machine-wide
+// inbox. Each item is re-inserted with a new seq (so sessions whose cursor is
+// already past the original seq still see it), unread and carrying note, and
+// the original row is deleted, all in one transaction.
 func (d *DB) RedirectOrphans(ctx context.Context, session string, note string) (int, error) {
 	if session == "" {
 		return 0, nil
 	}
-	res, err := d.sql.ExecContext(ctx,
-		`UPDATE inbox SET to_session = '', note = ? WHERE to_session = ?`, note, session)
+	var n int
+	err := inTx(ctx, d.sql, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `
+INSERT INTO inbox (msg_id, from_machine, from_session, to_session, kind, body, task_id, note, received_at, read_by_any)
+SELECT msg_id, from_machine, from_session, '', kind, body, task_id, ?, received_at, 0
+FROM inbox WHERE to_session = ? ORDER BY seq`, note, session)
+		if err != nil {
+			return err
+		}
+		if n, err = affected(res); err != nil {
+			return err
+		}
+		res, err = tx.ExecContext(ctx, `DELETE FROM inbox WHERE to_session = ?`, session)
+		if err != nil {
+			return err
+		}
+		deleted, err := affected(res)
+		if err != nil {
+			return err
+		}
+		if deleted != n {
+			return fmt.Errorf("store: redirect orphans: inserted %d, deleted %d", n, deleted)
+		}
+		return nil
+	})
 	if err != nil {
 		return 0, err
 	}
-	return affected(res)
+	return n, nil
 }
 
 func (d *DB) UnreadCount(ctx context.Context, session string, after int64) (int, map[core.MachineID]int, error) {

@@ -179,3 +179,57 @@ func TestInboxDeleteOlderThan(t *testing.T) {
 		t.Fatalf("remaining = %v", got)
 	}
 }
+
+// A session that already advanced its cursor past an orphaned item (for
+// example a machine-wide session that read later items) must still see it
+// once it is redirected: redirecting re-inserts it with a new seq.
+func TestInboxRedirectOrphansReinsertsWithNewSeq(t *testing.T) {
+	ctx := context.Background()
+	ib := newTestDB(t)
+	orphan := addInbox(t, ib, "for-gone", "A", "claude@gone", t0)
+	later := addInbox(t, ib, "all-later", "B", "", t0)
+	if err := ib.MarkRead(ctx, []int64{orphan, later}); err != nil {
+		t.Fatal(err)
+	}
+
+	// An existing session whose cursor is already past both items.
+	before, _ := ib.ItemsFor(ctx, "cli@x", later, 10)
+	if len(before) != 0 {
+		t.Fatalf("precondition: cursor at %d sees %v", later, msgIDs(before))
+	}
+
+	n, err := ib.RedirectOrphans(ctx, "claude@gone", "(originally for claude@gone)")
+	if err != nil || n != 1 {
+		t.Fatalf("RedirectOrphans = %d, %v; want 1", n, err)
+	}
+
+	items, err := ib.ItemsFor(ctx, "cli@x", later, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].MsgID != "for-gone" {
+		t.Fatalf("existing session after redirect sees %v, want [for-gone]", msgIDs(items))
+	}
+	it := items[0]
+	if it.Seq <= later || it.ToSession != "" || it.ReadByAny || it.Note != "(originally for claude@gone)" ||
+		it.From != "A" || it.FromSession != "codex@train" || string(it.Body) != `{"text":"hi"}` || !it.ReceivedAt.Equal(t0) {
+		t.Fatalf("redirected item = %+v", it)
+	}
+
+	// The original row is gone: nothing is visible twice.
+	all, _ := ib.ItemsFor(ctx, "claude@gone", 0, 10)
+	if got := msgIDs(all); !equalStrings(got, []string{"all-later", "for-gone"}) {
+		t.Fatalf("all items after redirect = %v", got)
+	}
+
+	// A brand new session starts at InitialCursor, which only skips items
+	// that were read; the redirected copy is unread, so it is visible.
+	cur, err := ib.InitialCursor(ctx, t0.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := ib.ItemsFor(ctx, "claude@new", cur, 10)
+	if got := msgIDs(fresh); !equalStrings(got, []string{"for-gone"}) {
+		t.Fatalf("new session (cursor %d) sees %v, want [for-gone]", cur, got)
+	}
+}
