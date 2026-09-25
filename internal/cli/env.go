@@ -12,6 +12,7 @@ import (
 
 	"github.com/cravv/cravv-connect/internal/app"
 	"github.com/cravv/cravv-connect/internal/config"
+	"github.com/cravv/cravv-connect/internal/install"
 	"github.com/cravv/cravv-connect/internal/ipc"
 	"github.com/cravv/cravv-connect/internal/store"
 	"github.com/cravv/cravv-connect/internal/store/sqlite"
@@ -46,6 +47,14 @@ type Env struct {
 	Spawn        func(exe string, args []string, logPath string) (pid int, err error)
 	Executable   func() (string, error)
 	Service      ServiceManager
+	ServiceSetup ServiceInstaller  // installs the login service; nil when unsupported
+	Agents       *install.Registry // agent installers; nil disables `install`
+}
+
+// ServiceInstaller installs and removes the login service.
+type ServiceInstaller interface {
+	Install(ctx context.Context, bin string) error
+	Uninstall(ctx context.Context) error
 }
 
 // DefaultEnv wires the real terminal, socket, store and process functions.

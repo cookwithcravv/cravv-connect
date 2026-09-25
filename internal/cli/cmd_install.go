@@ -1,0 +1,141 @@
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"runtime"
+	"strings"
+	"text/tabwriter"
+
+	"github.com/cravv/cravv-connect/internal/install"
+	"github.com/spf13/cobra"
+)
+
+func init() {
+	Register(newInstallCmd)
+	Register(newUninstallCmd)
+	RegisterDaemon(newDaemonInstallCmd)
+	RegisterDaemon(newDaemonUninstallCmd)
+}
+
+const otherAgentsHint = "For Cursor, VS Code and Gemini CLI, see docs/agents.md."
+
+func agentInstaller(env *Env, name string) (install.Installer, error) {
+	if env.Agents == nil {
+		return nil, errors.New("agent installers are not available")
+	}
+	i, ok := env.Agents.Get(name)
+	if !ok {
+		return nil, fmt.Errorf("unknown agent %q (supported: %s). %s", name, strings.Join(env.Agents.Names(), ", "), otherAgentsHint)
+	}
+	return i, nil
+}
+
+func newInstallCmd(env *Env) *cobra.Command {
+	return &cobra.Command{
+		Use:   "install [agent]",
+		Short: "Add cravv-connect to a coding agent (claude, codex); no argument lists agents",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return listAgents(env)
+			}
+			i, err := agentInstaller(env, args[0])
+			if err != nil {
+				return err
+			}
+			bin, err := env.Executable()
+			if err != nil {
+				return err
+			}
+			if err := i.Install(cmd.Context(), bin); err != nil {
+				return err
+			}
+			fmt.Fprintf(env.Stdout, "Installed cravv-connect for %s. Restart the agent so it loads the MCP server.\n", i.Name())
+			return nil
+		},
+	}
+}
+
+func listAgents(env *Env) error {
+	if env.Agents == nil {
+		return errors.New("agent installers are not available")
+	}
+	tw := tabwriter.NewWriter(env.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "AGENT\tSTATUS")
+	for _, n := range env.Agents.Names() {
+		i, _ := env.Agents.Get(n)
+		status := "not found"
+		if i.Detect() {
+			status = "detected"
+		}
+		fmt.Fprintf(tw, "%s\t%s\n", n, status)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Fprintln(env.Stdout, "Run `cravv-connect install <agent>`. "+otherAgentsHint)
+	return nil
+}
+
+func newUninstallCmd(env *Env) *cobra.Command {
+	return &cobra.Command{
+		Use:   "uninstall <agent>",
+		Short: "Remove cravv-connect from a coding agent",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			i, err := agentInstaller(env, args[0])
+			if err != nil {
+				return err
+			}
+			if err := i.Uninstall(cmd.Context()); err != nil {
+				return err
+			}
+			fmt.Fprintf(env.Stdout, "Removed cravv-connect from %s.\n", i.Name())
+			return nil
+		},
+	}
+}
+
+func newDaemonInstallCmd(env *Env) *cobra.Command {
+	return &cobra.Command{
+		Use:   "install",
+		Short: "Run the daemon at login (launchd on macOS, systemd on Linux) and start it now",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if env.ServiceSetup == nil {
+				return install.ErrNoServiceManager
+			}
+			bin, err := env.Executable()
+			if err != nil {
+				return err
+			}
+			if err := env.ServiceSetup.Install(cmd.Context(), bin); err != nil {
+				return err
+			}
+			fmt.Fprintln(env.Stdout, "Daemon installed as a login service and started.")
+			if runtime.GOOS == "linux" {
+				fmt.Fprintln(env.Stdout, "On a headless Linux box, run `loginctl enable-linger $USER` so it keeps running after you log out.")
+			}
+			return nil
+		},
+	}
+}
+
+func newDaemonUninstallCmd(env *Env) *cobra.Command {
+	return &cobra.Command{
+		Use:   "uninstall",
+		Short: "Stop the daemon and remove the login service",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if env.ServiceSetup == nil {
+				return install.ErrNoServiceManager
+			}
+			if err := env.ServiceSetup.Uninstall(cmd.Context()); err != nil {
+				return err
+			}
+			fmt.Fprintln(env.Stdout, "Daemon service removed.")
+			return nil
+		},
+	}
+}
