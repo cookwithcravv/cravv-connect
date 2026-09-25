@@ -222,9 +222,12 @@ func TestAutonomousTaskLifecycle(t *testing.T) {
 	if result == nil {
 		t.Fatal("sender never saw the result through inbox.wait")
 	}
-	Call(t, sa, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
-	if tv.State != "done" || tv.Result != "42 lines" || tv.Direction != "out" {
-		t.Fatalf("sender view %+v", tv)
+	var sv ipc.TaskView
+	Call(t, sa, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, &sv)
+	// The result is peer text: only the wrapped view carries it.
+	if sv.State != "done" || sv.Result != "" || !strings.Contains(sv.Wrapped, "Result:\n42 lines") ||
+		!strings.Contains(sv.Wrapped, `<remote_message from="bob"`) || sv.Direction != "out" {
+		t.Fatalf("sender view %+v", sv)
 	}
 }
 
@@ -478,12 +481,8 @@ func TestKillSwitch(t *testing.T) {
 	Eventually(t, wait, "sender sees failed(killed)", func() bool {
 		var tv ipc.TaskView
 		Call(t, sa, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
-		for _, n := range tv.Notes {
-			if n.Text == "killed" && tv.State == "failed" {
-				return true
-			}
-		}
-		return false
+		// The peer's note is peer text: it arrives only inside the wrapper.
+		return tv.State == "failed" && strings.Contains(tv.Wrapped, " killed\n") && len(tv.Notes) == 0
 	})
 	sb2, _ := b.Session("codex")
 	id := sendChat(t, sa, "bob", "after resume")

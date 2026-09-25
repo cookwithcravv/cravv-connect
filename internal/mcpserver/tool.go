@@ -1,8 +1,10 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -40,11 +42,16 @@ func addTool[In any](s *mcp.Server, name, description string, fn func(ctx contex
 
 // jsonText renders a structured result for the model.
 func jsonText(v any) (string, error) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
+	// No HTML escaping: wrapped fields must read as <remote_message>, not
+	// \u003cremote_message\u003e. Peer text inside them is already escaped.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
 		return "", err
 	}
-	return string(b), nil
+	return strings.TrimSuffix(buf.String(), "\n"), nil
 }
 
 // callJSON calls method and returns its result as JSON text.

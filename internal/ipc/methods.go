@@ -209,6 +209,12 @@ type InboxView struct {
 	At      time.Time `json:"at"`
 }
 
+// TaskView is a task as agents see it. Text written by the peer (an inbound
+// task's instructions and file names; an outbound task's result, the peer's
+// progress notes and result file names) is never returned raw: it is
+// rendered once, inside a <remote_message> wrapper, in Wrapped, and the raw
+// fields are left empty. Instructions, Result and Notes hold only text this
+// machine wrote.
 type TaskView struct {
 	TaskID       string           `json:"task_id"`
 	Direction    string           `json:"direction"`
@@ -216,10 +222,11 @@ type TaskView struct {
 	State        string           `json:"state"`
 	ClaimedBy    string           `json:"claimed_by,omitempty"`
 	Result       string           `json:"result,omitempty"`
-	Instructions string           `json:"instructions"`
+	Instructions string           `json:"instructions,omitempty"`
 	Notes        []store.TaskNote `json:"notes,omitempty"`
 	Files        []core.FileRef   `json:"files,omitempty"`
 	ResultFiles  []core.FileRef   `json:"result_files,omitempty"`
+	Wrapped      string           `json:"wrapped,omitempty"`
 	UpdatedAt    time.Time        `json:"updated_at"`
 }
 
