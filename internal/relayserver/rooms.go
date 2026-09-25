@@ -17,7 +17,10 @@ import (
 // maxBufferedRoomMsgs bounds messages the creator may send before the joiner arrives.
 const maxBufferedRoomMsgs = 16
 
-var errRoomBufferFull = errors.New("relayserver: room buffer full")
+var (
+	errRoomBufferFull = errors.New("relayserver: room buffer full")
+	errRoomBurned     = errors.New("relayserver: room already ended")
+)
 
 // liveRoom holds the connections of one pairing room while it is in use.
 type liveRoom struct {
@@ -27,6 +30,7 @@ type liveRoom struct {
 	joiner    *websocket.Conn
 	buffered  []string // B64 data the creator sent before the joiner arrived
 	timer     *time.Timer
+	burned    bool // set under mu once the room has ended; no side may attach after
 	once      sync.Once
 }
 
@@ -53,6 +57,9 @@ func (lr *liveRoom) forward(ctx context.Context, side *websocket.Conn, data stri
 func (lr *liveRoom) join(ctx context.Context, ws *websocket.Conn) error {
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
+	if lr.burned {
+		return errRoomBurned
+	}
 	lr.joiner = ws
 	joined := relayproto.RoomSignal{T: relayproto.TypePeerJoined}
 	if err := writeJSON(ctx, ws, joined); err != nil {
@@ -67,9 +74,11 @@ func (lr *liveRoom) join(ctx context.Context, ws *websocket.Conn) error {
 	return writeJSON(ctx, lr.creator, joined)
 }
 
-func (lr *liveRoom) sides() []*websocket.Conn {
+// burn marks the room ended and returns the sides connected at that moment.
+func (lr *liveRoom) burn() []*websocket.Conn {
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
+	lr.burned = true
 	return []*websocket.Conn{lr.creator, lr.joiner}
 }
 
@@ -167,24 +176,37 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 			closeWithError(ctx, ws, relayproto.CodeGone, "pairing room already used")
 			return
 		}
-		if err := lr.join(ctx, ws); err != nil {
+		err = lr.join(ctx, ws)
+		if errors.Is(err, errRoomBurned) {
+			closeWithError(ctx, ws, relayproto.CodeGone, "pairing room already ended")
+			return
+		}
+		if err != nil {
 			s.endRoom(ctx, lr, ws)
 			return
 		}
 	}
-	s.relayRoom(ctx, lr, ws)
+	s.relayRoom(ctx, lr, ws, rec.ExpiresAt.Sub(now))
 }
 
 // relayRoom forwards msg frames from side until side closes or breaks the rules.
-func (s *Server) relayRoom(ctx context.Context, lr *liveRoom, side *websocket.Conn) {
+// Reads stop when the room's lifetime (ttl from now) ends, as a backstop to the
+// room timer: nothing is read from a room past its ExpiresAt.
+func (s *Server) relayRoom(ctx context.Context, lr *liveRoom, side *websocket.Conn, ttl time.Duration) {
+	rctx, cancel := context.WithTimeout(ctx, ttl)
+	defer cancel()
 	fail := func(code, msg string) {
 		s.endRoom(ctx, lr, side)
 		closeWithError(ctx, side, code, msg)
 	}
 	for {
-		h, raw, err := readFrame(ctx, side)
+		h, raw, err := readFrame(rctx, side)
 		if err != nil {
-			s.endRoom(ctx, lr, side)
+			if errors.Is(rctx.Err(), context.DeadlineExceeded) {
+				s.expireRoom(lr)
+			} else {
+				s.endRoom(ctx, lr, side)
+			}
 			return
 		}
 		var m relayproto.RoomMsg
@@ -238,7 +260,7 @@ func (s *Server) burnRoom(ctx context.Context, lr *liveRoom, skip *websocket.Con
 		}
 		s.rooms.remove(lr.nameplate)
 		_ = s.be.DeleteRoom(ctx, lr.nameplate)
-		for _, ws := range lr.sides() {
+		for _, ws := range lr.burn() {
 			if ws == nil || ws == skip {
 				continue
 			}
