@@ -20,9 +20,18 @@ Go reference types for every message below live in `internal/relayproto`.
 - **Identity key (IK).** A 32-byte Ed25519 public key.
 - **Mailbox ID.** `lowercase(base32(SHA-256(ik)))` with the RFC 4648 alphabet and no
   padding: always 52 characters. It equals the machine ID used by peers.
-- **Origin.** `scheme://host[:port]` of the relay exactly as the client dialed it, with a
-  lowercase host, no trailing slash, and no path (for example `https://relay.example.com`
-  or `http://127.0.0.1:8787`). A relay SHOULD be configured with its public origin. It MUST
+- **Origin.** `scheme://host[:port]` of the relay as the client dials it, in this
+  normalized form (both sides MUST normalize before signing or verifying):
+  - `scheme` is `http` or `https`, lowercase;
+  - `host` is lowercase, without a trailing dot; an IPv6 literal is written in brackets
+    (`[::1]`);
+  - the port is omitted when it is the scheme's default (`443` for `https`, `80` for
+    `http`) and written in decimal otherwise;
+  - no user info, path, trailing slash, query, or fragment.
+
+  For example `HTTPS://Relay.Example.com.:443/` normalizes to `https://relay.example.com`,
+  and `http://127.0.0.1:8787` is already normal. The Go reference is
+  `relayproto.NormalizeOrigin`. A relay SHOULD be configured with its public origin. It MUST
   NOT derive the origin from client-controlled request headers (such as `Host` behind a
   proxy), because the origin is what stops a signature made for one relay from being
   replayed to another. A relay MAY use the request URL's origin when the platform itself
@@ -335,15 +344,40 @@ Every blob request MUST carry three headers:
 | `X-Cravv-Sig` | base64 Ed25519 signature by the IK over the string below |
 
 ```
-cravv-http-v1\n<METHOD>\n<path>\n<ts>\n<hex(sha256(body))>
+cravv-http-v1\n<origin>\n<METHOD>\n<path>\n<ts>\n<hex(sha256(body))>
 ```
 
-`<path>` is the URL path only, without the query string (for example
-`/v1/blobs/abc/chunks/0`). `<ts>` is the header value. The hash is lowercase hex; an empty
-body hashes to `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`. The server MUST reject with `401` when a header is
-missing, the key or signature is malformed, the signature does not verify, or `ts` is
-more than 300 seconds away from the server clock. The signer MUST be a registered
-mailbox; otherwise `403`.
+- `<origin>` is the relay's normalized origin (section 1). The client signs the origin it
+  dialed; the server verifies against its own configured origin, never one taken from
+  request headers, so a signed request cannot be replayed to another relay.
+- `<METHOD>` is the request method as sent (`GET`, `PUT`, `POST`, `DELETE`).
+- `<path>` is the **raw** request path exactly as it appears on the request line, still
+  percent-encoded, without the query string (for example `/v1/blobs/abc/chunks/0`). The
+  client signs the path it sends; the server verifies over the path it received, without
+  decoding it. Blob IDs use only `[a-z0-9]`, so in practice the raw and decoded paths are
+  identical.
+- `<ts>` is the `X-Cravv-TS` header value.
+- The hash is lowercase hex; an empty body hashes to
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+Example: a `PUT` of the 2-byte body `hi` to `https://relay.example.com` at `ts`
+1700000000 signs
+
+```
+cravv-http-v1
+https://relay.example.com
+PUT
+/v1/blobs/abc/chunks/0
+1700000000
+8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4
+```
+
+(lines joined by `\n`, no trailing newline).
+
+The server MUST reject with `401` when a header is missing, the key or signature is
+malformed, the signature does not verify (including a signature made for another
+origin), or `ts` is more than 300 seconds away from the server clock. The signer MUST be
+a registered mailbox; otherwise `403`.
 
 ### 6.2 Operations
 

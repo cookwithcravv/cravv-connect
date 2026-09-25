@@ -28,10 +28,15 @@ type env struct {
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	clock := core.NewFakeClock(time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC))
-	var srv *relayserver.Server
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { srv.ServeHTTP(w, r) }))
+	var h http.Handler
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.ServeHTTP(w, r) }))
 	t.Cleanup(ts.Close)
-	srv = relayserver.New(relayserver.Config{PublicOrigin: ts.URL, AdminToken: admin, Clock: clock}, relayserver.NewMemoryBackend(clock))
+	srv, err := relayserver.New(relayserver.Config{PublicOrigin: ts.URL, AdminToken: admin, Clock: clock}, relayserver.NewMemoryBackend(clock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { srv.Close() })
+	h = srv
 	c, err := relayclient.New(ts.URL, relayclient.WithClock(clock))
 	if err != nil {
 		t.Fatal(err)
@@ -81,9 +86,13 @@ func recv(t *testing.T, mb transport.Mailbox) transport.Delivery {
 
 func TestNewValidatesURL(t *testing.T) {
 	good := map[string]string{
-		"https://relay.example.com":     "https://relay.example.com",
-		"http://127.0.0.1:8787/":        "http://127.0.0.1:8787",
-		"https://Relay.Example.com:443": "https://relay.example.com:443",
+		"https://relay.example.com":      "https://relay.example.com",
+		"http://127.0.0.1:8787/":         "http://127.0.0.1:8787",
+		"https://Relay.Example.com:443":  "https://relay.example.com",
+		"HTTPS://relay.example.com.":     "https://relay.example.com",
+		"http://relay.example.com:80":    "http://relay.example.com",
+		"http://[::1]:8787":              "http://[::1]:8787",
+		"https://relay.example.com:8443": "https://relay.example.com:8443",
 	}
 	for in, origin := range good {
 		c, err := relayclient.New(in)

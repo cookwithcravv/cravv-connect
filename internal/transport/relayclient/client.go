@@ -4,10 +4,10 @@ package relayclient
 import (
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cravv/cravv-connect/internal/relayproto"
 	"github.com/cravv/cravv-connect/internal/transport"
 )
 
@@ -28,22 +28,17 @@ func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h
 // WithClock sets the clock used for request-signature timestamps.
 func WithClock(clk core.Clock) Option { return func(c *Client) { c.clock = clk } }
 
-// New parses relayURL ("https://host" or "http://127.0.0.1:port"; no path, query, or fragment).
+// New parses relayURL ("https://host" or "http://127.0.0.1:port"; no path, query, or
+// fragment) and normalizes it with relayproto.NormalizeOrigin.
 func New(relayURL string, opts ...Option) (*Client, error) {
-	u, err := url.Parse(relayURL)
+	origin, err := relayproto.NormalizeOrigin(relayURL)
 	if err != nil {
 		return nil, fmt.Errorf("relay url: %w", err)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, fmt.Errorf("relay url %q: scheme must be http or https", relayURL)
-	}
-	if u.Host == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
-		return nil, fmt.Errorf("relay url %q: use scheme://host[:port] only", relayURL)
-	}
-	host := strings.ToLower(u.Host)
+	scheme, host, _ := strings.Cut(origin, "://")
 	c := &Client{
-		origin: u.Scheme + "://" + host,
-		wsBase: map[string]string{"http": "ws", "https": "wss"}[u.Scheme] + "://" + host,
+		origin: origin,
+		wsBase: map[string]string{"http": "ws", "https": "wss"}[scheme] + "://" + host,
 		http:   http.DefaultClient,
 		clock:  core.SystemClock{},
 	}
@@ -53,7 +48,7 @@ func New(relayURL string, opts ...Option) (*Client, error) {
 	return c, nil
 }
 
-// Origin is scheme://host[:port], the value bound into auth signatures.
+// Origin is the normalized scheme://host[:port], the value bound into auth and HTTP signatures.
 func (c *Client) Origin() string { return c.origin }
 
 // Dialer returns a transport.Dialer for mailbox connections.

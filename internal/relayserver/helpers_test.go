@@ -29,10 +29,26 @@ type testRelay struct {
 // newTestRelay starts a relay whose PublicOrigin is the httptest URL.
 func newTestRelay(t *testing.T, lim Limits) *testRelay {
 	t.Helper()
+	return newTestRelayCfg(t, func(c *Config) { c.Limits = lim })
+}
+
+// newTestRelayCfg is newTestRelay with a hook to adjust the Config before New.
+// The hook sees PublicOrigin already set to the httptest URL.
+func newTestRelayCfg(t *testing.T, mod func(*Config)) *testRelay {
+	t.Helper()
 	tr := &testRelay{clock: core.NewFakeClock(time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC))}
 	tr.ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { tr.srv.ServeHTTP(w, r) }))
 	t.Cleanup(tr.ts.Close)
-	tr.srv = New(Config{PublicOrigin: tr.ts.URL, AdminToken: testAdmin, Clock: tr.clock, Limits: lim}, NewMemoryBackend(tr.clock))
+	cfg := Config{PublicOrigin: tr.ts.URL, AdminToken: testAdmin, Clock: tr.clock}
+	if mod != nil {
+		mod(&cfg)
+	}
+	srv, err := New(cfg, NewMemoryBackend(tr.clock))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { srv.Close() })
+	tr.srv = srv
 	return tr
 }
 

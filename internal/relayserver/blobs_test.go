@@ -13,14 +13,20 @@ import (
 	"github.com/cravv/cravv-connect/internal/relayproto"
 )
 
-// do sends a request signed by k at the relay clock's time (plus skew).
+// do sends a request signed by k for the relay's origin at the relay clock's time (plus skew).
 func (tr *testRelay) do(t *testing.T, k ed25519.PrivateKey, method, path string, body []byte, skew time.Duration) (int, []byte) {
+	t.Helper()
+	return tr.doOrigin(t, tr.ts.URL, k, method, path, body, skew)
+}
+
+// doOrigin is do with the origin bound into the signature chosen by the caller.
+func (tr *testRelay) doOrigin(t *testing.T, origin string, k ed25519.PrivateKey, method, path string, body []byte, skew time.Duration) (int, []byte) {
 	t.Helper()
 	req, err := http.NewRequest(method, tr.ts.URL+path, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	relayproto.SignRequest(req, func(m []byte) []byte { return ed25519.Sign(k, m) }, pubOf(k), tr.clock.Now().Add(skew).Unix(), body)
+	relayproto.SignRequest(req, origin, func(m []byte) []byte { return ed25519.Sign(k, m) }, pubOf(k), tr.clock.Now().Add(skew).Unix(), body)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +187,7 @@ func TestBlobAuthAndExpiry(t *testing.T) {
 		t.Fatalf("skewed = %d", code)
 	}
 	req, _ := http.NewRequest("PUT", tr.ts.URL+chunkPath(id, 0), bytes.NewReader([]byte("hello")))
-	relayproto.SignRequest(req, func(m []byte) []byte { return ed25519.Sign(up, m) }, pubOf(up), tr.clock.Now().Unix(), []byte("other body"))
+	relayproto.SignRequest(req, tr.ts.URL, func(m []byte) []byte { return ed25519.Sign(up, m) }, pubOf(up), tr.clock.Now().Unix(), []byte("other body"))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

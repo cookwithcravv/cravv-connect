@@ -29,23 +29,30 @@ var (
 	ErrClockSkew        = errors.New("relayproto: request timestamp outside allowed skew")
 )
 
-// HTTPMessage is the byte string signed for an HTTP request.
-// ts is unix seconds; path is the URL path without query string.
-func HTTPMessage(method, path string, ts int64, body []byte) []byte {
+// HTTPMessage is the byte string signed for an HTTP request:
+//
+//	cravv-http-v1\n<origin>\n<METHOD>\n<path>\n<ts>\n<hex(sha256(body))>
+//
+// origin is the relay's normalized origin (NormalizeOrigin), path is the raw
+// (still percent-encoded) request path without the query string, ts is unix seconds.
+func HTTPMessage(origin, method, path string, ts int64, body []byte) []byte {
 	sum := sha256.Sum256(body)
-	return []byte(HTTPContext + "\n" + method + "\n" + path + "\n" + strconv.FormatInt(ts, 10) + "\n" + hex.EncodeToString(sum[:]))
+	return []byte(HTTPContext + "\n" + origin + "\n" + method + "\n" + path + "\n" + strconv.FormatInt(ts, 10) + "\n" + hex.EncodeToString(sum[:]))
 }
 
-// SignRequest sets the three signature headers on r. ts is unix seconds.
-func SignRequest(r *http.Request, sign func([]byte) []byte, ik ed25519.PublicKey, ts int64, body []byte) {
-	sig := sign(HTTPMessage(r.Method, r.URL.Path, ts, body))
+// SignRequest sets the three signature headers on r for the relay at origin.
+// It signs r.URL.EscapedPath(), the path exactly as it goes on the wire. ts is unix seconds.
+func SignRequest(r *http.Request, origin string, sign func([]byte) []byte, ik ed25519.PublicKey, ts int64, body []byte) {
+	sig := sign(HTTPMessage(origin, r.Method, r.URL.EscapedPath(), ts, body))
 	r.Header.Set(HeaderIK, B64(ik))
 	r.Header.Set(HeaderTS, strconv.FormatInt(ts, 10))
 	r.Header.Set(HeaderSig, B64(sig))
 }
 
-// VerifyRequest checks the signature headers of r against body and returns the signer's IK.
-func VerifyRequest(r *http.Request, body []byte, now time.Time) (ed25519.PublicKey, error) {
+// VerifyRequest checks the signature headers of r against body and the relay's own
+// configured origin, and returns the signer's IK. It verifies over r.URL.EscapedPath(),
+// the raw path as received.
+func VerifyRequest(r *http.Request, origin string, body []byte, now time.Time) (ed25519.PublicKey, error) {
 	ikS, tsS, sigS := r.Header.Get(HeaderIK), r.Header.Get(HeaderTS), r.Header.Get(HeaderSig)
 	if ikS == "" || tsS == "" || sigS == "" {
 		return nil, ErrMissingSignature
@@ -66,7 +73,7 @@ func VerifyRequest(r *http.Request, body []byte, now time.Time) (ed25519.PublicK
 	if d > MaxHTTPSkew || d < -MaxHTTPSkew {
 		return nil, ErrClockSkew
 	}
-	if !ed25519.Verify(ik, HTTPMessage(r.Method, r.URL.Path, ts, body), sig) {
+	if !ed25519.Verify(ik, HTTPMessage(origin, r.Method, r.URL.EscapedPath(), ts, body), sig) {
 		return nil, ErrBadSignature
 	}
 	return ik, nil

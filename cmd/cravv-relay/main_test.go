@@ -25,6 +25,9 @@ func TestParseOptions(t *testing.T) {
 		{"env token", nil, "t2", options{addr: "127.0.0.1:8787", origin: "http://127.0.0.1:8787", adminToken: "t2"}, false},
 		{"flag wins over env", []string{"-admin-token", "t1"}, "t2", options{addr: "127.0.0.1:8787", origin: "http://127.0.0.1:8787", adminToken: "t1"}, false},
 		{"explicit origin", []string{"-addr", ":9000", "-origin", "https://relay.example.com", "-admin-token", "x"}, "", options{addr: ":9000", origin: "https://relay.example.com", adminToken: "x"}, false},
+		{"origin normalized", []string{"-origin", "HTTPS://Relay.Example.com:443/", "-admin-token", "x"}, "", options{addr: "127.0.0.1:8787", origin: "https://relay.example.com", adminToken: "x"}, false},
+		{"default origin for wildcard addr", []string{"-addr", ":9000", "-admin-token", "x"}, "", options{addr: ":9000", origin: "http://127.0.0.1:9000", adminToken: "x"}, false},
+		{"bad origin", []string{"-origin", "https://relay.example.com/path", "-admin-token", "x"}, "", options{}, true},
 		{"no token", nil, "", options{}, true},
 		{"bad flag", []string{"-nope"}, "t", options{}, true},
 	}

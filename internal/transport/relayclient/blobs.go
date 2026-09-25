@@ -27,7 +27,7 @@ func (b blobs) do(ctx context.Context, method, path string, body []byte, limit i
 	if err != nil {
 		return 0, nil, err
 	}
-	relayproto.SignRequest(req, b.s.Sign, b.s.Public(), b.c.clock.Now().Unix(), body)
+	relayproto.SignRequest(req, b.c.origin, b.s.Sign, b.s.Public(), b.c.clock.Now().Unix(), body)
 	resp, err := b.c.http.Do(req)
 	if err != nil {
 		return 0, nil, fmt.Errorf("relay: %s %s: %w", method, path, err)

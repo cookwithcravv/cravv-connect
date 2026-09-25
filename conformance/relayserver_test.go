@@ -18,15 +18,20 @@ import (
 // refills token buckets on its own.
 func TestRelayServer(t *testing.T) {
 	clock := core.NewFakeClock(time.Now())
-	var srv *relayserver.Server
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { srv.ServeHTTP(w, r) }))
+	var h http.Handler
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.ServeHTTP(w, r) }))
 	defer ts.Close()
-	srv = relayserver.New(relayserver.Config{
+	srv, err := relayserver.New(relayserver.Config{
 		PublicOrigin: ts.URL,
 		AdminToken:   "conformance-admin",
 		Clock:        clock,
 		Limits:       relayserver.Limits{OpRate: -1, IPRate: -1},
 	}, relayserver.NewMemoryBackend(clock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	h = srv
 	conformance.Run(t, conformance.Target{
 		URL:        ts.URL,
 		AdminToken: "conformance-admin",

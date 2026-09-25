@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cravv/cravv-connect/internal/relayproto"
 	"github.com/cravv/cravv-connect/internal/relayserver"
 )
 
@@ -43,8 +45,20 @@ func parseOptions(args []string, getenv func(string) string, stderr io.Writer) (
 		return options{}, errors.New("an admin token is required: pass -admin-token or set CRAVV_RELAY_ADMIN_TOKEN")
 	}
 	if o.origin == "" {
-		o.origin = "http://" + o.addr
+		host, port, err := net.SplitHostPort(o.addr)
+		if err != nil {
+			return options{}, fmt.Errorf("-addr %q: %w", o.addr, err)
+		}
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			host = "127.0.0.1"
+		}
+		o.origin = "http://" + net.JoinHostPort(host, port)
 	}
+	origin, err := relayproto.NormalizeOrigin(o.origin)
+	if err != nil {
+		return options{}, fmt.Errorf("-origin: %w", err)
+	}
+	o.origin = origin
 	return o, nil
 }
 
@@ -56,12 +70,17 @@ func main() {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	clock := core.SystemClock{}
-	srv := relayserver.New(relayserver.Config{
+	srv, err := relayserver.New(relayserver.Config{
 		PublicOrigin: o.origin,
 		AdminToken:   o.adminToken,
 		Clock:        clock,
 		Logger:       log,
 	}, relayserver.NewMemoryBackend(clock))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "cravv-relay:", err)
+		os.Exit(2)
+	}
+	defer srv.Close()
 
 	hs := &http.Server{Addr: o.addr, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

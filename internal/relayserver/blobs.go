@@ -45,7 +45,7 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool
 
 // caller verifies the request signature and membership. It writes 401/403 on failure.
 func (s *Server) caller(w http.ResponseWriter, r *http.Request, body []byte) (string, bool) {
-	ik, err := relayproto.VerifyRequest(r, body, s.cfg.Clock.Now())
+	ik, err := relayproto.VerifyRequest(r, s.cfg.PublicOrigin, body, s.cfg.Clock.Now())
 	if err != nil {
 		httpError(w, http.StatusUnauthorized, relayproto.CodeAuthFailed, "bad or missing request signature")
 		return "", false
