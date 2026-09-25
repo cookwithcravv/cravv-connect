@@ -1,12 +1,15 @@
 package conformance
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cravv/cravv-connect/internal/relayproto"
 	"github.com/cravv/cravv-connect/internal/transport"
 )
 
@@ -75,7 +78,8 @@ func roomCases() []testCase {
 					t.Fatal(err)
 				}
 			}
-			time.Sleep(100 * time.Millisecond)
+			// No wait needed: whether the relay reads these before or after the join, it
+			// must deliver them to the joiner after peer_joined and in order.
 			joiner, err := s.client.Rooms().Open(ctxT(t), strings.ToLower(np), "")
 			if err != nil {
 				t.Fatalf("lowercase nameplate: %v", err)
@@ -85,6 +89,85 @@ func roomCases() []testCase {
 				if got, err := joiner.Recv(ctxT(t)); err != nil || string(got) != want {
 					t.Fatalf("joiner got %q %v, want %q", got, err, want)
 				}
+			}
+		}},
+		{"rooms/non_msg_frame_bad_request_and_peer_closed", func(t *testing.T, s *suite) {
+			_, mb := s.member(t)
+			np, tok, err := mb.CreateRoom(ctxT(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			creator, err := s.client.Rooms().Open(ctxT(t), np, tok)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer creator.Close()
+			joiner := s.rawPair(t, np, "")
+			joiner.expect(relayproto.TypePeerJoined)
+			if err := creator.WaitPeer(ctxT(t)); err != nil {
+				t.Fatal(err)
+			}
+			joiner.write(relayproto.RoomSignal{T: relayproto.TypeWaiting})
+			joiner.expectError(relayproto.CodeBadRequest)
+			if _, err := creator.Recv(ctxT(t)); !errors.Is(err, io.EOF) {
+				t.Fatalf("peer after rule break: %v, want closed (EOF)", err)
+			}
+		}},
+		{"rooms/msg_over_262144_too_large", func(t *testing.T, s *suite) {
+			_, mb := s.member(t)
+			np, tok, err := mb.CreateRoom(ctxT(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			creator := s.rawPair(t, np, tok)
+			creator.expect(relayproto.TypeWaiting)
+			creator.write(relayproto.RoomMsg{T: relayproto.TypeMsg, Data: relayproto.B64(make([]byte, core.MaxFrameBytes+1))})
+			creator.expectError(relayproto.CodeTooLarge)
+		}},
+		{"rooms/max_size_msg_relayed", func(t *testing.T, s *suite) {
+			_, mb := s.member(t)
+			np, tok, err := mb.CreateRoom(ctxT(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			creator, err := s.client.Rooms().Open(ctxT(t), np, tok)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer creator.Close()
+			joiner, err := s.client.Rooms().Open(ctxT(t), np, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer joiner.Close()
+			big := bytes.Repeat([]byte{7}, core.MaxFrameBytes)
+			if err := creator.Send(ctxT(t), big); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := joiner.Recv(ctxT(t)); err != nil || !bytes.Equal(got, big) {
+				t.Fatalf("max-size msg: %d bytes, %v", len(got), err)
+			}
+		}},
+		{"rooms/joiner_before_creator_not_consumed", func(t *testing.T, s *suite) {
+			_, mb := s.member(t)
+			np, tok, err := mb.CreateRoom(ctxT(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			early := s.rawPair(t, np, "")
+			early.expectError(relayproto.CodeNotFound)
+			creator, err := s.client.Rooms().Open(ctxT(t), np, tok)
+			if err != nil {
+				t.Fatalf("creator after early joiner: %v", err)
+			}
+			defer creator.Close()
+			joiner, err := s.client.Rooms().Open(ctxT(t), np, "")
+			if err != nil {
+				t.Fatalf("the early attempt consumed the join: %v", err)
+			}
+			defer joiner.Close()
+			if err := creator.WaitPeer(ctxT(t)); err != nil {
+				t.Fatal(err)
 			}
 		}},
 		{"rooms/second_creator_gone", func(t *testing.T, s *suite) {

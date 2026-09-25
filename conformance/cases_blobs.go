@@ -1,9 +1,12 @@
 package conformance
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/relayproto"
@@ -130,6 +133,93 @@ func blobCases() []testCase {
 			if err := b.PutChunk(ctxT(t), id, 0, make([]byte, core.FileChunkBytes+relayproto.ChunkOverhead)); err != nil {
 				t.Fatalf("max chunk: %v", err)
 			}
+		}},
+		{"blobs/clock_skew_over_300s_401", func(t *testing.T, s *suite) {
+			up, _ := s.member(t)
+			rcpt, _ := s.member(t)
+			body, _ := json.Marshal(relayproto.BlobCreateRequest{Size: 1, Chunks: 1, Recipient: relayproto.B64(rcpt.Public())})
+			origin := s.client.Origin()
+			// 330s leaves margin for clock drift between the suite and an external relay.
+			for _, d := range []time.Duration{-330 * time.Second, 330 * time.Second} {
+				if code := s.rawHTTP(t, up, origin, http.MethodPost, relayproto.PathBlobs, body, s.now().Add(d)); code != http.StatusUnauthorized {
+					t.Fatalf("ts skewed by %v: %d, want 401", d, code)
+				}
+			}
+			if code := s.rawHTTP(t, up, origin, http.MethodPost, relayproto.PathBlobs, body, s.now()); code != http.StatusCreated {
+				t.Fatalf("unskewed control request: %d, want 201", code)
+			}
+		}},
+		{"blobs/signature_bound_to_origin_401", func(t *testing.T, s *suite) {
+			up, _ := s.member(t)
+			rcpt, _ := s.member(t)
+			body, _ := json.Marshal(relayproto.BlobCreateRequest{Size: 1, Chunks: 1, Recipient: relayproto.B64(rcpt.Public())})
+			if code := s.rawHTTP(t, up, "https://other-relay.invalid", http.MethodPost, relayproto.PathBlobs, body, s.now()); code != http.StatusUnauthorized {
+				t.Fatalf("signature for another origin: %d, want 401", code)
+			}
+		}},
+		{"blobs/stored_bytes_capped_by_declared_size_413", func(t *testing.T, s *suite) {
+			up, _ := s.member(t)
+			rcpt, _ := s.member(t)
+			b := s.client.Blobs(up)
+			// size FileChunkBytes+1 in 2 chunks: stored bytes may total size + 2*64.
+			id, err := b.Create(ctxT(t), rcpt.Public(), core.FileChunkBytes+1, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := b.PutChunk(ctxT(t), id, 0, make([]byte, core.FileChunkBytes+relayproto.ChunkOverhead)); err != nil {
+				t.Fatalf("chunk 0 at the body limit: %v", err)
+			}
+			if err := b.PutChunk(ctxT(t), id, 1, make([]byte, relayproto.ChunkOverhead+2)); httpStatus(err) != http.StatusRequestEntityTooLarge {
+				t.Fatalf("total one byte over size+64*chunks: %v, want 413", err)
+			}
+			if err := b.PutChunk(ctxT(t), id, 1, make([]byte, relayproto.ChunkOverhead+1)); err != nil {
+				t.Fatalf("total exactly size+64*chunks: %v", err)
+			}
+		}},
+		{"blobs/per_member_quota_413", func(t *testing.T, s *suite) {
+			up, _ := s.member(t)
+			other, _ := s.member(t)
+			rcpt, _ := s.member(t)
+			b := s.client.Blobs(up)
+			var ids []string
+			t.Cleanup(func() {
+				for _, id := range ids {
+					_ = b.Delete(context.Background(), id)
+				}
+			})
+			// Blobs are only declared, never uploaded, so this is cheap even for a
+			// multi-GiB quota. relay-v1 requires a quota of at least 1 GiB.
+			const maxTries = 64 // 6.4 GiB
+			for len(ids) < maxTries {
+				id, err := b.Create(ctxT(t), rcpt.Public(), core.MaxFileBytes, core.MaxFileBytes/core.FileChunkBytes)
+				if httpStatus(err) == http.StatusRequestEntityTooLarge {
+					break
+				}
+				if err != nil {
+					t.Fatalf("create %d: %v", len(ids)+1, err)
+				}
+				ids = append(ids, id)
+			}
+			if len(ids) == maxTries {
+				t.Skipf("no quota hit after %d x 100 MiB; relay quota is larger than this case probes", maxTries)
+			}
+			if int64(len(ids))*core.MaxFileBytes < 1<<30-core.MaxFileBytes {
+				t.Fatalf("quota hit after %d x 100 MiB; relay-v1 requires at least 1 GiB", len(ids))
+			}
+			id, err := s.client.Blobs(other).Create(ctxT(t), rcpt.Public(), core.MaxFileBytes, core.MaxFileBytes/core.FileChunkBytes)
+			if err != nil {
+				t.Fatalf("quota must be per member: %v", err)
+			}
+			_ = s.client.Blobs(other).Delete(ctxT(t), id)
+			if err := b.Delete(ctxT(t), ids[0]); err != nil {
+				t.Fatal(err)
+			}
+			ids = ids[1:]
+			id, err = b.Create(ctxT(t), rcpt.Public(), core.MaxFileBytes, core.MaxFileBytes/core.FileChunkBytes)
+			if err != nil {
+				t.Fatalf("deleting a blob must free quota: %v", err)
+			}
+			ids = append(ids, id)
 		}},
 		{"blobs/forbidden_maps_to_sentinel", func(t *testing.T, s *suite) {
 			up, _ := s.member(t)

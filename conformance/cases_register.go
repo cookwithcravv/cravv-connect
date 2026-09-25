@@ -53,6 +53,28 @@ func registerCases() []testCase {
 				t.Fatalf("res = %v", m)
 			}
 		}},
+		{"register/refused_gets_res_then_close", func(t *testing.T, s *suite) {
+			id := s.tg.NewIdentity()
+			c := s.rawConnect(t, ikQuery(id))
+			c.auth(s.client.Origin(), c.hello(), id)
+			c.write(relayproto.Register{T: relayproto.TypeRegister, RID: "reg", Invite: "not-an-invite"})
+			m := c.expect(relayproto.TypeRes)
+			if m["rid"] != "reg" || m["status"] != relayproto.StatusError || m["code"] != relayproto.CodeForbidden {
+				t.Fatalf("res = %v, want error forbidden", m)
+			}
+			c.expectClosed()
+		}},
+		{"register/outstanding_invites_capped", func(t *testing.T, s *suite) {
+			_, a := s.member(t)
+			for i := range 20 {
+				if _, err := a.RequestInvite(ctxT(t)); err != nil {
+					t.Fatalf("invite %d: %v", i+1, err)
+				}
+			}
+			if _, err := a.RequestInvite(ctxT(t)); serverCode(err) != relayproto.CodeRateLimited {
+				t.Fatalf("21st outstanding invite: %v, want error rate_limited", err)
+			}
+		}},
 		{"register/invite_single_use", func(t *testing.T, s *suite) {
 			_, a := s.member(t)
 			inv, err := a.RequestInvite(ctxT(t))

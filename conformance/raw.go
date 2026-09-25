@@ -40,6 +40,34 @@ func (s *suite) rawConnect(t *testing.T, query string) *rawConn {
 	return &rawConn{t: t, ws: ws}
 }
 
+// rawPair dials /v1/pair/{nameplate}, with ?token= when token is not empty.
+func (s *suite) rawPair(t *testing.T, nameplate, token string) *rawConn {
+	t.Helper()
+	u := s.wsURL(relayproto.PathPair + url.PathEscape(nameplate))
+	if token != "" {
+		u += "?" + relayproto.QueryToken + "=" + url.QueryEscape(token)
+	}
+	ws, _, err := websocket.Dial(ctxT(t), u, nil)
+	if err != nil {
+		t.Fatalf("raw pair dial: %v", err)
+	}
+	ws.SetReadLimit(1 << 20)
+	t.Cleanup(func() { ws.CloseNow() })
+	return &rawConn{t: t, ws: ws}
+}
+
+// rawMember returns a raw connection that completed the handshake as a registered member.
+func (s *suite) rawMember(t *testing.T) (transport.Signer, *rawConn) {
+	t.Helper()
+	id, mb := s.member(t)
+	mb.Close()
+	c := s.rawConnect(t, ikQuery(id))
+	if ok := c.auth(s.client.Origin(), c.hello(), id); ok["registered"] != true {
+		t.Fatalf("member not registered: %v", ok)
+	}
+	return id, c
+}
+
 func ikQuery(id transport.Signer) string {
 	return relayproto.QueryIK + "=" + url.QueryEscape(relayproto.B64(id.Public()))
 }
@@ -52,6 +80,27 @@ func (c *rawConn) write(v any) {
 	}
 	if err := c.ws.Write(ctxT(c.t), websocket.MessageText, b); err != nil {
 		c.t.Fatalf("raw write: %v", err)
+	}
+}
+
+func (c *rawConn) writeRaw(typ websocket.MessageType, b []byte) {
+	c.t.Helper()
+	if err := c.ws.Write(ctxT(c.t), typ, b); err != nil {
+		c.t.Fatalf("raw write: %v", err)
+	}
+}
+
+// expectClosed asserts that the relay closes the connection without sending more frames.
+func (c *rawConn) expectClosed() {
+	c.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, b, err := c.ws.Read(ctx)
+	if err == nil {
+		c.t.Fatalf("connection still open; got %s", b)
+	}
+	if ctx.Err() != nil {
+		c.t.Fatal("relay did not close the connection within 10s")
 	}
 }
 

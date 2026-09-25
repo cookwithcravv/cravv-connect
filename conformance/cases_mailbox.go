@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/relayproto"
 	"github.com/cravv/cravv-connect/internal/transport"
@@ -171,6 +173,75 @@ func mailboxCases() []testCase {
 			c.auth(s.client.Origin(), c.hello(), id)
 			c.write(map[string]any{"t": "ack", "seq": "seven"})
 			c.expectError(relayproto.CodeBadRequest)
+		}},
+		{"mailbox/binary_message_closes", func(t *testing.T, s *suite) {
+			_, c := s.rawMember(t)
+			c.writeRaw(websocket.MessageBinary, []byte(`{"t":"invite_request","rid":"1"}`))
+			c.expectError(relayproto.CodeBadRequest)
+			c.expectClosed()
+		}},
+		{"mailbox/known_request_without_rid_closes", func(t *testing.T, s *suite) {
+			_, c := s.rawMember(t)
+			c.write(map[string]string{"t": relayproto.TypeAllow, "ik": relayproto.B64(s.tg.NewIdentity().Public())})
+			c.expectError(relayproto.CodeBadRequest)
+			c.expectClosed()
+		}},
+		{"mailbox/allow_bad_ik_bad_request", func(t *testing.T, s *suite) {
+			_, c := s.rawMember(t)
+			for i, ik := range []string{"not-base64!", relayproto.B64(make([]byte, 31)), ""} {
+				rid := fmt.Sprint("a", i)
+				c.write(relayproto.Allow{T: relayproto.TypeAllow, RID: rid, IK: ik})
+				if m := c.expect(relayproto.TypeRes); m["rid"] != rid || m["status"] != relayproto.StatusError || m["code"] != relayproto.CodeBadRequest {
+					t.Fatalf("allow ik %q: %v, want error bad_request", ik, m)
+				}
+			}
+			c.write(relayproto.InviteRequest{T: relayproto.TypeInviteRequest, RID: "after"})
+			if m := c.expect(relayproto.TypeRes); m["rid"] != "after" || m["status"] != relayproto.StatusOK {
+				t.Fatalf("connection not usable after bad allow: %v", m)
+			}
+		}},
+		{"mailbox/no_duplicate_seq_within_connection", func(t *testing.T, s *suite) {
+			a, amb, _, bmb := s.pair(t)
+			seen := map[uint64]bool{}
+			var prev uint64
+			take := func(want string) {
+				t.Helper()
+				d := recv(t, amb)
+				if d.ID != want {
+					t.Fatalf("got %s, want %s", d.ID, want)
+				}
+				if seen[d.Seq] || d.Seq <= prev {
+					t.Fatalf("seq %d pushed twice or out of order (prev %d)", d.Seq, prev)
+				}
+				seen[d.Seq], prev = true, d.Seq
+			}
+			for i := range 3 {
+				send(t, bmb, a, fmt.Sprint("first", i), []byte{1})
+			}
+			for i := range 3 {
+				take(fmt.Sprint("first", i))
+			}
+			// Unacked frames must not be pushed again on this connection when new ones arrive.
+			for i := range 2 {
+				send(t, bmb, a, fmt.Sprint("second", i), []byte{2})
+			}
+			for i := range 2 {
+				take(fmt.Sprint("second", i))
+			}
+			sync(t, amb)
+			expectNoDelivery(t, amb, 300*time.Millisecond)
+		}},
+		{"mailbox/deny_keeps_already_queued_frames", func(t *testing.T, s *suite) {
+			a, amb, b, bmb := s.pair(t)
+			amb.Close()
+			send(t, bmb, a, "before-deny", []byte("x"))
+			amb2 := s.dial(t, a, transport.Credentials{})
+			if err := amb2.Deny(ctxT(t), b.Public()); err != nil {
+				t.Fatal(err)
+			}
+			if d := recv(t, amb2); d.ID != "before-deny" {
+				t.Fatalf("got %s, want the frame queued before deny", d.ID)
+			}
 		}},
 		{"mailbox/res_echoes_rid", func(t *testing.T, s *suite) {
 			id, _ := s.member(t)
