@@ -14,8 +14,16 @@ import (
 // pamVerifier authenticates through PAM (OpenPAM on macOS, Linux-PAM on Linux).
 type pamVerifier struct{ service string }
 
-// NewPAM returns a Verifier that authenticates against the given PAM service.
-func NewPAM(service string) Verifier { return pamVerifier{service: service} }
+// NewPAM returns a Verifier that authenticates against the given PAM
+// service. A service that is not allowlisted (see AllowedPAMServices) yields
+// a Verifier that never reaches PAM and fails every check with an error
+// matching ErrServiceNotAllowed and ErrUnavailable.
+func NewPAM(service string) Verifier {
+	if err := CheckPAMService(service); err != nil {
+		return refused{err: err}
+	}
+	return pamVerifier{service: service}
+}
 
 func (v pamVerifier) Verify(username, password string) error {
 	tx, err := pam.StartFunc(v.service, username, func(s pam.Style, _ string) (string, error) {
