@@ -119,7 +119,7 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 	}
 	d := &Daemon{
 		opts: opts, store: db, audit: lg, log: opts.Log, clock: opts.Clock, relay: opts.Relay,
-		ids: ids, kill: kill, guard: auth.NewGuard(opts.Verifier, opts.Clock, lg, opts.Username),
+		ids: ids, kill: kill, guard: auth.NewGuard(opts.Verifier, opts.Clock, lg, opts.Username, auth.WithState(db)),
 		allow: NewAllowPaths(db, lg), changed: make(chan struct{}), wake: make(chan struct{}, 1),
 	}
 	if v, ok, err := db.GetSetting(ctx, SettingRelayRegistered); err != nil {
