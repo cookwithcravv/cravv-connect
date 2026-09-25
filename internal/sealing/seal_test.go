@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -240,4 +241,147 @@ func flipped(b []byte, i int) []byte {
 	c := append([]byte(nil), b...)
 	c[i] ^= 0x01
 	return c
+}
+
+// Only pk_id is switched to another prekey Bob really holds, and the frame
+// is re-signed by the real sender. The header is bound into HPKE info and
+// the key differs, so decryption must fail.
+func TestOpenPKIDSwitchedToOtherRetainedPrekey(t *testing.T) {
+	f := newFixture(t)
+	fr, err := Seal(f.alice, f.bobSigned, f.chat(t, f.alice, f.bob, "hi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := keys.GeneratePrekey(f.clock.Now().Add(core.PrekeyRotation))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.resolver[other.ID] = other.Priv
+	fr.Header.PKID = other.ID
+	fr = resign(fr, f.alice)
+	env, err := Open(fr, f.alice.Public(), f.bob.MachineID(), f.resolver)
+	if err == nil {
+		t.Fatalf("frame with switched pk_id opened as %+v", env)
+	}
+	if errors.Is(err, ErrBadSignature) || errors.Is(err, ErrUnknownPrekey) {
+		t.Fatalf("expected a decryption failure, got %v", err)
+	}
+}
+
+func TestOpenRejectsEnvelopeVersion(t *testing.T) {
+	f := newFixture(t)
+	for _, v := range []int{0, 2} {
+		inner := f.chat(t, f.alice, f.bob, "hi")
+		inner.V = v
+		pt, _ := json.Marshal(inner)
+		h := Header{V: 1, ID: inner.ID, FromMachine: f.alice.MachineID(), ToMachine: f.bob.MachineID(), PKID: f.bobSigned.ID, Suite: DefaultSuite}
+		suite, _ := Lookup(DefaultSuite)
+		payload, err := suite.Seal(f.bobSigned.Pub, h.info(), pt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fr := resign(Frame{Header: h, Payload: payload}, f.alice)
+		if _, err := Open(fr, f.alice.Public(), f.bob.MachineID(), f.resolver); !errors.Is(err, ErrMismatch) {
+			t.Fatalf("envelope v=%d: Open = %v, want ErrMismatch", v, err)
+		}
+	}
+}
+
+func TestSealDoesNotHTMLEscape(t *testing.T) {
+	f := newFixture(t)
+	env := f.chat(t, f.alice, f.bob, strings.Repeat("<", core.MaxTextBytes))
+	fr, err := Seal(f.alice, f.bobSigned, env)
+	if err != nil {
+		t.Fatalf("64 KiB of '<' must seal: %v", err)
+	}
+	raw, _ := fr.Marshal()
+	if len(raw) > core.MaxFrameBytes {
+		t.Fatalf("frame is %d bytes", len(raw))
+	}
+	parsed, err := ParseFrame(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Open(parsed, f.alice.Public(), f.bob.MachineID(), f.resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body core.ChatBody
+	if err := json.Unmarshal(got.Body, &body); err != nil || body.Text != strings.Repeat("<", core.MaxTextBytes) {
+		t.Fatalf("body did not round-trip: %v", err)
+	}
+}
+
+func TestSealTooLarge(t *testing.T) {
+	f := newFixture(t)
+	// Control characters JSON-escape to \u0001 (6 bytes each): 384 KiB.
+	env := f.chat(t, f.alice, f.bob, strings.Repeat("\x01", core.MaxTextBytes))
+	if _, err := Seal(f.alice, f.bobSigned, env); !errors.Is(err, core.ErrTooLarge) {
+		t.Fatalf("Seal = %v, want ErrTooLarge", err)
+	}
+	if err := FitsFrame(env); !errors.Is(err, core.ErrTooLarge) {
+		t.Fatalf("FitsFrame = %v, want ErrTooLarge", err)
+	}
+}
+
+// FitsFrame assumes the longest allowed pk_id, so it is exact for such a
+// prekey and conservative for shorter ones.
+func TestFitsFrameAgreesWithSealAtBoundary(t *testing.T) {
+	f := newFixture(t)
+	long := *f.bobPK
+	long.ID = strings.Repeat("P", MaxIDLen)
+	longSigned := long.Signed(f.bob)
+
+	envOf := func(n int) core.Envelope { return f.chat(t, f.alice, f.bob, strings.Repeat("a", n)) }
+	// Largest n that FitsFrame accepts.
+	lo, hi := 0, core.MaxFrameBytes
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if FitsFrame(envOf(mid)) == nil {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	n := lo
+	if n < core.MaxTextBytes {
+		t.Fatalf("boundary %d is below MaxTextBytes", n)
+	}
+	for _, tc := range []struct {
+		n    int
+		fits bool
+	}{{n, true}, {n + 1, false}} {
+		env := envOf(tc.n)
+		fitErr := FitsFrame(env)
+		if (fitErr == nil) != tc.fits {
+			t.Fatalf("n=%d: FitsFrame = %v", tc.n, fitErr)
+		}
+		fr, sealErr := Seal(f.alice, longSigned, env)
+		if tc.fits {
+			if sealErr != nil {
+				t.Fatalf("n=%d: FitsFrame ok but Seal = %v", tc.n, sealErr)
+			}
+			raw, _ := fr.Marshal()
+			if len(raw) > core.MaxFrameBytes {
+				t.Fatalf("n=%d: frame is %d bytes", tc.n, len(raw))
+			}
+		} else if !errors.Is(sealErr, core.ErrTooLarge) {
+			t.Fatalf("n=%d: FitsFrame refused but Seal = %v", tc.n, sealErr)
+		}
+		// With a normal-length prekey, FitsFrame ok always implies Seal ok.
+		if fitErr == nil {
+			if _, err := Seal(f.alice, f.bobSigned, env); err != nil {
+				t.Fatalf("n=%d: FitsFrame ok but Seal with short pk_id = %v", tc.n, err)
+			}
+		}
+	}
+}
+
+func TestSealRejectsMalformedHeaderFields(t *testing.T) {
+	f := newFixture(t)
+	bad := f.bobSigned
+	bad.ID = "has space"
+	if _, err := Seal(f.alice, bad, f.chat(t, f.alice, f.bob, "x")); !errors.Is(err, ErrMalformed) {
+		t.Fatalf("Seal = %v, want ErrMalformed", err)
+	}
 }

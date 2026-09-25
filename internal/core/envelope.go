@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -28,10 +29,14 @@ func NewEnvelope(clock Clock, from, to MachineID, kind Kind, body any) (Envelope
 	if body == nil {
 		body = EmptyBody{}
 	}
-	raw, err := json.Marshal(body)
-	if err != nil {
+	// No HTML escaping: '<', '>' and '&' would otherwise cost 6 bytes each.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(body); err != nil {
 		return Envelope{}, fmt.Errorf("core: marshal %s body: %w", kind, err)
 	}
+	raw := json.RawMessage(bytes.TrimSuffix(buf.Bytes(), []byte("\n")))
 	now := fixedClock(clock.Now()) // read the clock once so ID and TS agree
 	return Envelope{
 		V:           EnvelopeVersion,

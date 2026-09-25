@@ -72,10 +72,15 @@ func TestEnvelopeJSONRoundTrip(t *testing.T) {
 		}
 		env.FromSession = "claude@proj"
 		env.ToSession = "codex@repo"
-		raw, err := json.Marshal(env)
-		if err != nil {
+		// Encode as sealing does (no HTML escaping); json.Marshal would
+		// re-escape the RawMessage body and change its bytes.
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(env); err != nil {
 			t.Fatal(err)
 		}
+		raw := buf.Bytes()
 		var back Envelope
 		if err := json.Unmarshal(raw, &back); err != nil {
 			t.Fatal(err)
@@ -118,5 +123,15 @@ func TestNewEnvelopeIDMatchesTS(t *testing.T) {
 	want, _ := newIDAt(time.UnixMilli(env.TS), bytes.NewReader(make([]byte, 10)))
 	if env.ID[:9] != want[:9] {
 		t.Fatalf("envelope ID %q does not encode TS %d (want prefix %q)", env.ID, env.TS, want[:9])
+	}
+}
+
+func TestNewEnvelopeBodyNotHTMLEscaped(t *testing.T) {
+	env, err := NewEnvelope(NewFakeClock(time.Unix(0, 0)), "a", "b", KindChat, ChatBody{Text: "<a&b>"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(env.Body); got != `{"text":"<a&b>"}` {
+		t.Fatalf("body = %s", got)
 	}
 }

@@ -19,11 +19,22 @@ var (
 	suites   = map[string]Suite{}
 )
 
-// Register adds a suite, replacing any suite with the same ID.
+// Register adds a suite. It panics if a suite with the same ID is already
+// registered, so one suite can never silently replace another.
 func Register(s Suite) {
 	suitesMu.Lock()
 	defer suitesMu.Unlock()
+	if _, dup := suites[s.ID()]; dup {
+		panic("sealing: duplicate suite " + s.ID())
+	}
 	suites[s.ID()] = s
+}
+
+// unregister removes a suite. It exists for tests.
+func unregister(id string) {
+	suitesMu.Lock()
+	defer suitesMu.Unlock()
+	delete(suites, id)
 }
 
 // Lookup returns the suite with the given ID.

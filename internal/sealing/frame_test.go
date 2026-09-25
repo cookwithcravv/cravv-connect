@@ -10,9 +10,14 @@ import (
 	"github.com/cravv/cravv-connect/internal/core"
 )
 
+var (
+	machineA = core.MachineID(strings.Repeat("a", 52))
+	machineB = core.MachineID(strings.Repeat("b2", 26))
+)
+
 func sampleFrame() Frame {
 	return Frame{
-		Header:  Header{V: 1, ID: "ID1", FromMachine: "from", ToMachine: "to", PKID: "PK1", Suite: DefaultSuite},
+		Header:  Header{V: 1, ID: "ID1", FromMachine: machineA, ToMachine: machineB, PKID: "PK1", Suite: DefaultSuite},
 		Payload: []byte{1, 2, 3},
 		Sig:     []byte{4, 5, 6},
 	}
@@ -24,7 +29,7 @@ func TestFrameMarshalParseRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), `"h":{"v":1,"id":"ID1","from_machine":"from","to_machine":"to","pk_id":"PK1","suite":"`) {
+	if !strings.Contains(string(b), `"h":{"v":1,"id":"ID1","from_machine":"`+string(machineA)+`","to_machine":"`+string(machineB)+`","pk_id":"PK1","suite":"`) {
 		t.Fatalf("unexpected JSON %s", b)
 	}
 	back, err := ParseFrame(b)
@@ -60,6 +65,41 @@ func TestParseFrameRejects(t *testing.T) {
 	for _, tt := range tests {
 		if _, err := ParseFrame(tt.in); err == nil {
 			t.Errorf("%s: ParseFrame succeeded", tt.name)
+		}
+	}
+	malformed := []struct {
+		name string
+		mut  func(*Frame)
+	}{
+		{"id with dash", func(f *Frame) { f.Header.ID = "ID-1" }},
+		{"id non-ascii", func(f *Frame) { f.Header.ID = "ID\u00e91" }},
+		{"id too long", func(f *Frame) { f.Header.ID = strings.Repeat("A", 65) }},
+		{"pk_id with slash", func(f *Frame) { f.Header.PKID = "../x" }},
+		{"pk_id too long", func(f *Frame) { f.Header.PKID = strings.Repeat("A", 65) }},
+		{"from short", func(f *Frame) { f.Header.FromMachine = machineA[:51] }},
+		{"from long", func(f *Frame) { f.Header.FromMachine = machineA + "a" }},
+		{"from upper", func(f *Frame) { f.Header.FromMachine = core.MachineID(strings.Repeat("A", 52)) }},
+		{"from digit 1", func(f *Frame) { f.Header.FromMachine = core.MachineID(strings.Repeat("1", 52)) }},
+		{"to digit 8", func(f *Frame) { f.Header.ToMachine = core.MachineID(strings.Repeat("8", 52)) }},
+		{"suite control", func(f *Frame) { f.Header.Suite = "x\ny" }},
+		{"suite non-ascii", func(f *Frame) { f.Header.Suite = "su\u00efte" }},
+		{"suite too long", func(f *Frame) { f.Header.Suite = strings.Repeat("s", 65) }},
+		{"version 2", func(f *Frame) { f.Header.V = 2 }},
+		{"no id", func(f *Frame) { f.Header.ID = "" }},
+	}
+	for _, tt := range malformed {
+		if _, err := ParseFrame(mk(tt.mut)); !errors.Is(err, ErrMalformed) {
+			t.Errorf("%s: ParseFrame = %v, want ErrMalformed", tt.name, err)
+		}
+	}
+	for _, ok := range []func(*Frame){
+		func(f *Frame) { f.Header.ID = strings.Repeat("z", 64) },
+		func(f *Frame) { f.Header.PKID = "a" },
+		func(f *Frame) { f.Header.Suite = "~" },
+		func(f *Frame) { f.Header.FromMachine = core.MachineID(strings.Repeat("7", 52)) },
+	} {
+		if _, err := ParseFrame(mk(ok)); err != nil {
+			t.Errorf("valid header rejected: %v", err)
 		}
 	}
 	big := bytes.Repeat([]byte{' '}, core.MaxFrameBytes+1)
