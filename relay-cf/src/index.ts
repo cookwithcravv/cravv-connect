@@ -2,7 +2,7 @@ import { handleBlobs } from "./blobs";
 import { b64encode, decodeIK, mailboxIdOf } from "./crypto";
 import type { Env } from "./env";
 import { rateLimitsEnabled } from "./limits";
-import { isUpgrade, notUpgrade, rejectSocket } from "./http";
+import { isUpgrade, jsonError, notUpgrade, rejectSocket } from "./http";
 import { Code, NAMEPLATE_RE, ROUTE_IK_HEADER, ROUTE_MAILBOX_HEADER } from "./protocol";
 
 export { BlobMeta } from "./blobmeta";
@@ -38,20 +38,30 @@ async function pair(request: Request, env: Env, nameplate: string): Promise<Resp
   return env.ROOM.getByName(np).fetch(request);
 }
 
+// Routes one request. Unexpected exceptions are turned into a fixed 500 by the caller.
+async function route(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  if (path === "/v1/health") return Response.json({ ok: true, version: 1 });
+  if (!(await ipAllowed(request, env))) {
+    return isUpgrade(request)
+      ? rejectSocket(Code.RATE_LIMITED, "too many requests from this address")
+      : jsonError(429, Code.RATE_LIMITED, "too many requests");
+  }
+  if (path === "/v1/connect") return connect(request, env, url);
+  const pairMatch = path.match(/^\/v1\/pair\/([^/]+)$/);
+  if (pairMatch) return pair(request, env, pairMatch[1]);
+  if (path === "/v1/blobs" || path.startsWith("/v1/blobs/")) return handleBlobs(request, env);
+  return jsonError(404, Code.NOT_FOUND, "not found");
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    const path = url.pathname;
-    if (path === "/v1/health") return Response.json({ ok: true, version: 1 });
-    if (!(await ipAllowed(request, env))) {
-      return isUpgrade(request)
-        ? rejectSocket(Code.RATE_LIMITED, "too many requests from this address")
-        : Response.json({ code: Code.RATE_LIMITED, message: "too many requests" }, { status: 429 });
+    try {
+      return await route(request, env);
+    } catch (err) {
+      console.error("worker: request failed", err);
+      return jsonError(500, Code.INTERNAL, "internal error");
     }
-    if (path === "/v1/connect") return connect(request, env, url);
-    const pairMatch = path.match(/^\/v1\/pair\/([^/]+)$/);
-    if (pairMatch) return pair(request, env, pairMatch[1]);
-    if (path === "/v1/blobs" || path.startsWith("/v1/blobs/")) return handleBlobs(request, env);
-    return Response.json({ code: Code.NOT_FOUND, message: "not found" }, { status: 404 });
   },
 } satisfies ExportedHandler<Env>;

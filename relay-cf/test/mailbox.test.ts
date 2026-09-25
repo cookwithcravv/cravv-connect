@@ -303,3 +303,16 @@ describe("request handling", () => {
     cb.close();
   });
 });
+
+describe("internal errors", () => {
+  it("sends a fixed internal error message, never exception details", async () => {
+    const id = await Identity.create();
+    const c = await member(id);
+    await runInDurableObject(testEnv.MAILBOX.getByName(id.mailboxId), (_inst, state) => {
+      state.storage.sql.exec("DROP TABLE allow");
+    });
+    c.send({ t: "allow", rid: "x", ik: id.ikB64 });
+    expect(await c.next()).toEqual({ t: "error", code: "internal", message: "internal error" });
+    await c.waitClosed();
+  });
+});

@@ -143,7 +143,8 @@ export class Mailbox extends DurableObject<Env> {
           return await this.onReady(ws, a, f);
       }
     } catch (err) {
-      failSocket(ws, Code.INTERNAL, err instanceof Error ? err.message : "internal error");
+      console.error("mailbox: request failed", err);
+      failSocket(ws, Code.INTERNAL, "internal error");
     }
   }
 
