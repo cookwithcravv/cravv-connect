@@ -8,7 +8,7 @@ import (
 )
 
 func (h *handlers) registerControl(s *ipc.Server) {
-	s.Register(ipc.MethodKill, ipc.Typed(h.kill), ipc.GateNone)
+	s.Register(ipc.MethodKill, ipc.Typed(h.kill), ipc.GateAllowWhenKilled)
 	s.Register(ipc.MethodResume, ipc.Typed(h.resume), ipc.GateUnlock|ipc.GateAllowWhenKilled)
 	s.Register(ipc.MethodAllowPathAdd, ipc.Typed(h.allowPath), ipc.GateUnlock)
 	s.Register(ipc.MethodResetIdentity, ipc.Typed(h.resetIdentity), ipc.GateUnlock)

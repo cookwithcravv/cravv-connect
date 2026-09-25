@@ -101,7 +101,7 @@ func TestEveryMethodRegisteredWithGate(t *testing.T) {
 		ipc.MethodPeerUnpair:      ipc.GateNone,
 		ipc.MethodPeerAlias:       ipc.GateNone,
 		ipc.MethodPeerTrust:       ipc.GateNone,
-		ipc.MethodKill:            ipc.GateNone,
+		ipc.MethodKill:            ipc.GateAllowWhenKilled,
 		ipc.MethodResume:          ipc.GateUnlock | ipc.GateAllowWhenKilled,
 		ipc.MethodAuthUnlock:      ipc.GateAllowWhenKilled,
 		ipc.MethodPairStart:       ipc.GateUnlock,
@@ -290,6 +290,10 @@ func TestKillSwitchBlocksAllButAllowed(t *testing.T) {
 	c := h.session(t)
 	if err := c.Call(bg, ipc.MethodKill, nil, nil); err != nil {
 		t.Fatal(err)
+	}
+	// Kill is idempotent: pulling it again while killed succeeds.
+	if err := c.Call(bg, ipc.MethodKill, nil, nil); err != nil {
+		t.Fatalf("second kill: %v", err)
 	}
 	if err := c.Call(bg, ipc.MethodChatSend, ipc.ChatSendParams{To: "gpu-box", Text: "x"}, nil); !errors.Is(err, core.ErrKilled) {
 		t.Fatalf("chat while killed: %v", err)
