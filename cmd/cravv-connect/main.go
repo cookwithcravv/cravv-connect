@@ -15,7 +15,7 @@ func main() {
 		run := install.ExecRunner{}
 		env.Agents = install.DefaultRegistry(home, run)
 		if paths, err := config.ResolvePaths(); err == nil {
-			svc, err := install.NewService(install.ServiceConfig{Home: home, CravvHome: paths.Home, LogPath: paths.Log}, run)
+			svc, err := install.NewService(install.ServiceConfig{Home: home, CravvHome: paths.Home, LogPath: paths.Log, StderrPath: paths.StderrLog()}, run)
 			if err == nil {
 				env.Service, env.ServiceSetup = svc, svc
 			}

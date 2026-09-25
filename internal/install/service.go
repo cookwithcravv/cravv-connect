@@ -18,7 +18,11 @@ type Service interface {
 type ServiceConfig struct {
 	Home      string // user's home directory
 	CravvHome string // state directory, passed to the daemon as CRAVV_HOME
-	LogPath   string // daemon stdout and stderr
+	// LogPath is the daemon's own log, rotated by the daemon (daemon run
+	// --log-file). StderrPath only catches output written before logging
+	// starts or a crash.
+	LogPath    string
+	StderrPath string
 }
 
 // ErrNoServiceManager is returned on systems without launchd or systemd.

@@ -476,7 +476,8 @@ func TestDaemonStartUsesServiceOrSpawn(t *testing.T) {
 	if code := Main([]string{"daemon", "start"}, env3); code != 0 || out3.String() != "Daemon started.\n" {
 		t.Fatalf("spawn: %q", out3.String())
 	}
-	if !slices.Equal(spawned, []string{"/usr/local/bin/cravv-connect", "daemon", "run", "daemon.log"}) {
+	// The daemon rotates its own log; the spawn only captures crash output.
+	if !slices.Equal(spawned, []string{"/usr/local/bin/cravv-connect", "daemon", "run", "--log-file", filepath.Join(fd2.home, "daemon.log"), "daemon-stderr.log"}) {
 		t.Fatalf("spawned %v", spawned)
 	}
 }

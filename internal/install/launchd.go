@@ -31,7 +31,16 @@ func xmlEscape(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;").Replace(s)
 }
 
-// Plist renders the job definition.
+// stderrPath is where launchd sends stderr (crash output only).
+func (l *Launchd) stderrPath() string {
+	if l.Cfg.StderrPath != "" {
+		return l.Cfg.StderrPath
+	}
+	return l.Cfg.LogPath + ".stderr"
+}
+
+// Plist renders the job definition. The daemon writes its own rotating log
+// (--log-file); launchd only captures stderr, for crashes.
 func (l *Launchd) Plist(bin string) string {
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -44,6 +53,8 @@ func (l *Launchd) Plist(bin string) string {
     <string>` + xmlEscape(bin) + `</string>
     <string>daemon</string>
     <string>run</string>
+    <string>--log-file</string>
+    <string>` + xmlEscape(l.Cfg.LogPath) + `</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -57,10 +68,8 @@ func (l *Launchd) Plist(bin string) string {
     <key>SuccessfulExit</key>
     <false/>
   </dict>
-  <key>StandardOutPath</key>
-  <string>` + xmlEscape(l.Cfg.LogPath) + `</string>
   <key>StandardErrorPath</key>
-  <string>` + xmlEscape(l.Cfg.LogPath) + `</string>
+  <string>` + xmlEscape(l.stderrPath()) + `</string>
 </dict>
 </plist>
 `

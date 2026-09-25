@@ -334,12 +334,12 @@ func TestLaunchd(t *testing.T) {
 func TestSystemd(t *testing.T) {
 	home := t.TempDir()
 	r := &fakeRunner{}
-	s := &Systemd{Cfg: ServiceConfig{Home: home, CravvHome: "/home/u/.cravv-connect"}, Run: r}
+	s := &Systemd{Cfg: ServiceConfig{Home: home, CravvHome: "/home/u/.cravv-connect", LogPath: "/home/u/.cravv-connect/daemon.log"}, Run: r}
 	if err := s.Install(bg, "/usr/local/bin/cravv-connect"); err != nil {
 		t.Fatal(err)
 	}
 	unit, _ := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", "cravv-connect.service"))
-	for _, line := range []string{"ExecStart=/usr/local/bin/cravv-connect daemon run", "Environment=CRAVV_HOME=/home/u/.cravv-connect", "WantedBy=default.target"} {
+	for _, line := range []string{"ExecStart=/usr/local/bin/cravv-connect daemon run --log-file /home/u/.cravv-connect/daemon.log", "Environment=CRAVV_HOME=/home/u/.cravv-connect", "WantedBy=default.target"} {
 		if !strings.Contains(string(unit), line+"\n") {
 			t.Fatalf("missing %q in\n%s", line, unit)
 		}
@@ -347,7 +347,7 @@ func TestSystemd(t *testing.T) {
 	if !slices.Equal(r.cmds, []string{"systemctl --user daemon-reload", "systemctl --user enable --now cravv-connect.service"}) {
 		t.Fatalf("%v", r.cmds)
 	}
-	if !strings.Contains(s.Unit("/opt/my tools/cravv-connect"), `ExecStart="/opt/my tools/cravv-connect" daemon run`) {
+	if !strings.Contains(s.Unit("/opt/my tools/cravv-connect"), `ExecStart="/opt/my tools/cravv-connect" daemon run --log-file`) {
 		t.Fatal(s.Unit("/opt/my tools/cravv-connect"))
 	}
 	r.cmds = nil
@@ -356,5 +356,36 @@ func TestSystemd(t *testing.T) {
 	}
 	if !slices.Equal(r.cmds, []string{"systemctl --user disable --now cravv-connect.service", "systemctl --user daemon-reload"}) {
 		t.Fatalf("%v", r.cmds)
+	}
+}
+
+func TestLaunchdLogsToRotatingFile(t *testing.T) {
+	home := t.TempDir()
+	l := &Launchd{Cfg: ServiceConfig{Home: home, CravvHome: home + "/.c", LogPath: home + "/.c/daemon.log", StderrPath: home + "/.c/daemon-stderr.log"}}
+	plist := l.Plist("/usr/local/bin/cravv-connect")
+	for _, want := range []string{
+		"<string>run</string>\n    <string>--log-file</string>\n    <string>" + home + "/.c/daemon.log</string>",
+		"<key>StandardErrorPath</key>\n  <string>" + home + "/.c/daemon-stderr.log</string>",
+	} {
+		if !strings.Contains(plist, want) {
+			t.Fatalf("plist lacks %q:\n%s", want, plist)
+		}
+	}
+	if strings.Contains(plist, "StandardOutPath") {
+		t.Fatalf("stdout still appended to a file:\n%s", plist)
+	}
+}
+
+func TestSystemdEscapesSpecifiersAndDollars(t *testing.T) {
+	s := &Systemd{Cfg: ServiceConfig{CravvHome: "/home/u/100%$HOME", LogPath: "/home/u/100%$HOME/daemon.log"}}
+	unit := s.Unit("/opt/50%off/$bin/cravv-connect")
+	for _, want := range []string{
+		"ExecStart=/opt/50%%off/$$bin/cravv-connect daemon run --log-file /home/u/100%%$$HOME/daemon.log\n",
+		// Environment= expands specifiers but not variables: only % is doubled.
+		"Environment=CRAVV_HOME=/home/u/100%%$HOME\n",
+	} {
+		if !strings.Contains(unit, want) {
+			t.Fatalf("unit lacks %q:\n%s", want, unit)
+		}
 	}
 }

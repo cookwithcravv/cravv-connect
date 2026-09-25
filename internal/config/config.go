@@ -33,6 +33,11 @@ type Paths struct{ Home, Config, DB, Audit, Socket, Files, Log string }
 // PIDFile is where a running daemon records its process ID.
 func (p Paths) PIDFile() string { return filepath.Join(p.Home, "daemon.pid") }
 
+// StderrLog catches the daemon's stderr when it runs in the background: only
+// output written before logging starts, or a crash. The log proper is Log,
+// which the daemon rotates itself.
+func (p Paths) StderrLog() string { return filepath.Join(p.Home, "daemon-stderr.log") }
+
 // EnvHome overrides the state directory (used by tests and multi-daemon setups).
 const EnvHome = "CRAVV_HOME"
 

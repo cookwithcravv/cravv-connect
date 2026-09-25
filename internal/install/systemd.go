@@ -23,16 +23,24 @@ func (s *Systemd) unitPath() string {
 
 func (s *Systemd) Installed() bool { _, err := os.Stat(s.unitPath()); return err == nil }
 
-// systemdQuote quotes a word for ExecStart and Environment lines.
+// systemdQuote quotes a word for ExecStart and Environment lines and doubles
+// '%' so systemd does not expand it as a specifier.
 func systemdQuote(v string) string {
+	v = strings.ReplaceAll(v, "%", "%%")
 	if !strings.ContainsAny(v, " \t\"\\'") {
 		return v
 	}
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v) + `"`
 }
 
-// Unit renders the unit file. Output goes to the journal; the daemon also
-// writes its own log in the state directory.
+// execWord quotes a word for ExecStart, where '$' also starts a variable
+// reference and must be doubled.
+func execWord(v string) string {
+	return systemdQuote(strings.ReplaceAll(v, "$", "$$"))
+}
+
+// Unit renders the unit file. The daemon writes its own rotating log
+// (--log-file); stderr goes to the journal.
 func (s *Systemd) Unit(bin string) string {
 	return `[Unit]
 Description=cravv-connect daemon
@@ -40,7 +48,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=` + systemdQuote(bin) + ` daemon run
+ExecStart=` + execWord(bin) + ` daemon run --log-file ` + execWord(s.Cfg.LogPath) + `
 Environment=` + systemdQuote("CRAVV_HOME="+s.Cfg.CravvHome) + `
 Restart=on-failure
 RestartSec=5

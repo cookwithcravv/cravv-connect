@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cravv/cravv-connect/internal/logfile"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +39,8 @@ func newDaemonCmd(env *Env) *cobra.Command {
 }
 
 func newDaemonRunCmd(env *Env) *cobra.Command {
-	return &cobra.Command{
+	var logFile string
+	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run the daemon in the foreground",
 		Args:  cobra.NoArgs,
@@ -48,12 +51,29 @@ func newDaemonRunCmd(env *Env) *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
+			var out io.Writer = env.Stderr
+			if logFile != "" {
+				// Rotated at 10 MiB, 3 old files kept.
+				f, err := logfile.Open(logFile, logfile.DefaultMaxBytes, logfile.DefaultKeep)
+				if err != nil {
+					return fmt.Errorf("open log file: %w", err)
+				}
+				defer f.Close()
+				out = f
+			}
 			// The daemon writes daemon.pid itself once it owns the socket.
-			logger := slog.New(slog.NewJSONHandler(env.Stderr, nil))
+			logger := slog.New(slog.NewJSONHandler(out, nil))
 			logger.Info("daemon starting", "home", paths.Home)
-			return env.RunDaemon(ctx, paths, logger)
+			if err := env.RunDaemon(ctx, paths, logger); err != nil {
+				logger.Error("daemon exited", "err", err)
+				return err
+			}
+			logger.Info("daemon stopped")
+			return nil
 		},
 	}
+	cmd.Flags().StringVar(&logFile, "log-file", "", "write the log to this file, rotated at 10 MiB (3 old files kept), instead of stderr")
+	return cmd
 }
 
 // daemonUp reports whether the daemon answers on its socket.
@@ -90,7 +110,9 @@ func newDaemonStartCmd(env *Env) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if _, err := env.Spawn(exe, []string{"daemon", "run"}, paths.Log); err != nil {
+				// The daemon rotates its own log; the spawn's output file only
+				// catches crash output.
+				if _, err := env.Spawn(exe, []string{"daemon", "run", "--log-file", paths.Log}, paths.StderrLog()); err != nil {
 					return err
 				}
 			}
@@ -103,7 +125,7 @@ func newDaemonStartCmd(env *Env) *cobra.Command {
 				time.Sleep(100 * time.Millisecond)
 			}
 			paths, _ := env.Paths()
-			return fmt.Errorf("daemon did not start within %s; see %s", startWait, paths.Log)
+			return fmt.Errorf("daemon did not start within %s; see %s and %s", startWait, paths.Log, paths.StderrLog())
 		},
 	}
 }
