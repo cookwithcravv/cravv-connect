@@ -1,6 +1,7 @@
 import { chunkKey, type BlobAction } from "./blobmeta";
 import { b64encode, decodeIK, randomBlobId, verifySignedRequest, type SignedCaller } from "./crypto";
 import type { Env } from "./env";
+import { jsonError } from "./http";
 import { readLimits, type Limits } from "./limits";
 import { BLOB_ID_RE, Code } from "./protocol";
 import { REGISTRY_NAME } from "./registry";
@@ -28,10 +29,6 @@ const ROUTES: Route[] = [
   { method: "GET", pattern: /^\/v1\/blobs\/([^/]+)\/chunks\/(\d{1,6})$/, handler: getChunk },
   { method: "DELETE", pattern: /^\/v1\/blobs\/([^/]+)$/, handler: deleteBlob },
 ];
-
-function jsonError(status: number, code: string, message: string): Response {
-  return Response.json({ code, message }, { status });
-}
 
 // handleBlobs serves every /v1/blobs request. Check order (relay-v1 6.3): rate limit (429, done
 // by the Worker), body size (413), signature (401), membership (403), blob exists (404),

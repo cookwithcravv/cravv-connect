@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { b64decode, sha256Hex } from "./crypto";
 import type { Env } from "./env";
+import { isUpgrade, notUpgrade, rejectSocket } from "./http";
 import { readLimits, type Limits } from "./limits";
 import { CLOSE_NORMAL, Code, failSocket, parseFrame, str, type ErrorCode } from "./protocol";
 
@@ -54,29 +55,27 @@ export class Room extends DurableObject<Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
-    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
-      return Response.json({ code: Code.BAD_REQUEST, message: "expected websocket upgrade" }, { status: 426 });
-    }
+    if (!isUpgrade(request)) return notUpgrade();
     const token = new URL(request.url).searchParams.get("token");
     const r = this.room();
-    if (!r) return reject(Code.NOT_FOUND, "no such pairing room");
+    if (!r) return rejectSocket(Code.NOT_FOUND, "no such pairing room");
     if (r.expires_at <= Date.now()) {
       await this.burn();
-      return reject(Code.GONE, "pairing room expired");
+      return rejectSocket(Code.GONE, "pairing room expired");
     }
     const gen = genTag(r);
 
     if (token !== null && token !== "") {
-      if ((await sha256Hex(token)) !== r.token_hash) return reject(Code.FORBIDDEN, "wrong creator token");
-      if (this.sockets("creator", gen).length > 0) return reject(Code.GONE, "creator already connected");
+      if ((await sha256Hex(token)) !== r.token_hash) return rejectSocket(Code.FORBIDDEN, "wrong creator token");
+      if (this.sockets("creator", gen).length > 0) return rejectSocket(Code.GONE, "creator already connected");
       const { client, server } = this.accept("creator", gen);
       server.send(JSON.stringify({ t: "waiting" }));
       return new Response(null, { status: 101, webSocket: client });
     }
 
     const creators = this.sockets("creator", gen);
-    if (creators.length === 0) return reject(Code.NOT_FOUND, "pairing room not open yet");
-    if (r.joined) return reject(Code.GONE, "pairing room already used");
+    if (creators.length === 0) return rejectSocket(Code.NOT_FOUND, "pairing room not open yet");
+    if (r.joined) return rejectSocket(Code.GONE, "pairing room already used");
     this.sql.exec("UPDATE room SET joined = 1 WHERE k = 1");
     const { client, server } = this.accept("joiner", gen);
     const joined = JSON.stringify({ t: "peer_joined" });
@@ -212,13 +211,4 @@ function genTag(r: RoomRow): string {
 
 function otherRole(r: Role): Role {
   return r === "creator" ? "joiner" : "creator";
-}
-
-// Accepts the upgrade only to deliver a protocol error frame, then closes.
-function reject(code: ErrorCode, message: string): Response {
-  const pair = new WebSocketPair();
-  const [client, server] = Object.values(pair);
-  server.accept();
-  failSocket(server, code, message);
-  return new Response(null, { status: 101, webSocket: client });
 }

@@ -2,29 +2,13 @@ import { handleBlobs } from "./blobs";
 import { b64encode, decodeIK, mailboxIdOf } from "./crypto";
 import type { Env } from "./env";
 import { rateLimitsEnabled } from "./limits";
-import { Code, failSocket, NAMEPLATE_RE, ROUTE_IK_HEADER, ROUTE_MAILBOX_HEADER, type ErrorCode } from "./protocol";
+import { isUpgrade, notUpgrade, rejectSocket } from "./http";
+import { Code, NAMEPLATE_RE, ROUTE_IK_HEADER, ROUTE_MAILBOX_HEADER } from "./protocol";
 
 export { BlobMeta } from "./blobmeta";
 export { Mailbox } from "./mailbox";
 export { Registry } from "./registry";
 export { Room } from "./room";
-
-function notUpgrade(): Response {
-  return Response.json({ code: Code.BAD_REQUEST, message: "expected websocket upgrade" }, { status: 426 });
-}
-
-function isUpgrade(request: Request): boolean {
-  return request.headers.get("Upgrade")?.toLowerCase() === "websocket";
-}
-
-// Completes the upgrade only to send a relay-v1 error frame, so clients see a protocol code.
-function rejectSocket(code: ErrorCode, message: string): Response {
-  const pair = new WebSocketPair();
-  const [client, server] = Object.values(pair);
-  server.accept();
-  failSocket(server, code, message);
-  return new Response(null, { status: 101, webSocket: client });
-}
 
 async function ipAllowed(request: Request, env: Env): Promise<boolean> {
   if (!env.IP_LIMITER || !rateLimitsEnabled(env)) return true;

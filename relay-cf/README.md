@@ -9,10 +9,12 @@ and nothing Cloudflare-specific leaks into the protocol. It only ever sees ciphe
 |---|---|
 | `src/index.ts` | Worker entry: routes `/v1/connect`, `/v1/pair/{nameplate}`, `/v1/blobs/...`, `/v1/health`; per-IP rate limit |
 | `src/protocol.ts` | relay-v1 constants, frame parsing, error and res frames |
+| `src/http.ts` | shared upgrade check, JSON error responses, and error-frame rejection of upgrades |
 | `src/crypto.ts` | base64, base32, SHA-256, Ed25519 verify, auth and HTTP signing strings |
 | `src/limits.ts` | limit values and their optional env overrides |
 | `src/registry.ts` | `Registry` Durable Object: members, single-use invites, blob quota |
 | `src/mailbox.ts` | `Mailbox` Durable Object (one per mailbox id): handshake, queue, allow-list, delivery |
+| `src/queue.ts` | SQLite queue and meta tables used by `Mailbox` |
 | `src/room.ts` | `Room` Durable Object (one per nameplate): pairing relay, one joiner, 10 minute life |
 | `src/blobmeta.ts` | `BlobMeta` Durable Object (one per blob): ACL, expiry, cleanup |
 | `src/blobs.ts` | signed HTTP handlers for `/v1/blobs`, chunk bytes in R2 |

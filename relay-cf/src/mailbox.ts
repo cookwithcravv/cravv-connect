@@ -12,6 +12,7 @@ import {
   verifyEd25519,
 } from "./crypto";
 import type { Env } from "./env";
+import { isUpgrade, notUpgrade } from "./http";
 import { rateLimitsEnabled, readLimits, type Limits } from "./limits";
 import {
   CLOSE_POLICY,
@@ -28,6 +29,7 @@ import {
   type Frame,
   type SendStatus,
 } from "./protocol";
+import { Meta, Queue } from "./queue";
 import { REGISTRY_NAME } from "./registry";
 
 type Stage = "hello" | "auth" | "register" | "ready";
@@ -53,6 +55,8 @@ export class Mailbox extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private readonly limits: Limits;
   private readonly ops: Record<string, Op>;
+  private readonly meta: Meta;
+  private readonly queue: Queue;
   private chain: Promise<void> = Promise.resolve();
   private tokens: number;
   private refilledAt: number;
@@ -63,16 +67,9 @@ export class Mailbox extends DurableObject<Env> {
     this.limits = readLimits(env);
     this.tokens = this.limits.requestBurst;
     this.refilledAt = Date.now();
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS queue (
-      seq INTEGER PRIMARY KEY,
-      from_ik TEXT NOT NULL,
-      id TEXT NOT NULL,
-      frame TEXT NOT NULL,
-      size INTEGER NOT NULL,
-      created_at INTEGER NOT NULL
-    )`);
+    this.meta = new Meta(this.sql);
+    this.queue = new Queue(this.sql, this.meta, this.limits);
     this.sql.exec("CREATE TABLE IF NOT EXISTS allow (mailbox_id TEXT PRIMARY KEY)");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
     this.ops = {
       allow: (ws, _a, f, rid) => this.opAllow(ws, f, rid, true),
       deny: (ws, _a, f, rid) => this.opAllow(ws, f, rid, false),
@@ -88,9 +85,7 @@ export class Mailbox extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     const ik = request.headers.get(ROUTE_IK_HEADER);
     const mailboxId = request.headers.get(ROUTE_MAILBOX_HEADER);
-    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket" || !ik || !mailboxId) {
-      return new Response("expected websocket upgrade", { status: 426 });
-    }
+    if (!isUpgrade(request) || !ik || !mailboxId) return notUpgrade();
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
@@ -199,7 +194,7 @@ export class Mailbox extends DurableObject<Env> {
     let registered = this.isRegistered();
     if (!registered) {
       registered = await this.registry().isMember(mailboxId);
-      if (registered) this.setMeta("registered", "1");
+      if (registered) this.meta.set("registered", "1");
     }
     ws.send(JSON.stringify({ t: "auth_ok", registered, mailbox_id: mailboxId }));
     if (registered) {
@@ -231,7 +226,7 @@ export class Mailbox extends DurableObject<Env> {
       }
       return;
     }
-    this.setMeta("registered", "1");
+    this.meta.set("registered", "1");
     ws.send(resFrame(rid, { status: Status.OK }));
     this.activate(ws, a);
   }
@@ -245,11 +240,8 @@ export class Mailbox extends DurableObject<Env> {
     }
     a.stage = "ready";
     ws.serializeAttachment(a);
-    this.dropExpired(Date.now());
-    const rows = this.sql.exec<{ seq: number; from_ik: string; id: string; frame: string }>(
-      "SELECT seq, from_ik, id, frame FROM queue ORDER BY seq",
-    );
-    for (const r of rows) ws.send(deliverFrame(r.seq, r.from_ik, r.id, r.frame));
+    this.queue.dropExpired(Date.now());
+    for (const r of this.queue.backlog()) ws.send(deliverFrame(r.seq, r.from_ik, r.id, r.frame));
   }
 
   // ---------- operations after authentication ----------
@@ -344,7 +336,7 @@ export class Mailbox extends DurableObject<Env> {
       failSocket(ws, Code.BAD_REQUEST, "ack needs a non-negative integer seq");
       return;
     }
-    this.sql.exec("DELETE FROM queue WHERE seq <= ?", seq);
+    this.queue.ack(seq);
   }
 
   // ---------- RPC: called by the sender's Mailbox DO ----------
@@ -355,23 +347,9 @@ export class Mailbox extends DurableObject<Env> {
       return Status.NOT_ALLOWED;
     }
     const now = Date.now();
-    this.dropExpired(now);
-    const stats = this.sql
-      .exec<{ n: number; bytes: number }>("SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS bytes FROM queue")
-      .one();
-    if (stats.n + 1 > this.limits.queueMaxFrames || stats.bytes + size > this.limits.queueMaxBytes) {
-      return Status.QUEUE_FULL;
-    }
-    const seq = this.nextSeq();
-    this.sql.exec(
-      "INSERT INTO queue (seq, from_ik, id, frame, size, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-      seq,
-      fromIk,
-      id,
-      frame,
-      size,
-      now,
-    );
+    this.queue.dropExpired(now);
+    if (this.queue.wouldOverflow(size)) return Status.QUEUE_FULL;
+    const seq = this.queue.append(fromIk, id, frame, size, now);
     const live = this.liveSocket();
     if (live) {
       try {
@@ -388,19 +366,15 @@ export class Mailbox extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     const now = Date.now();
-    this.dropExpired(now);
-    const row = this.sql.exec<{ oldest: number | null }>("SELECT MIN(created_at) AS oldest FROM queue").one();
-    if (row.oldest !== null) await this.ctx.storage.setAlarm(row.oldest + this.limits.queueTtlMs);
+    this.queue.dropExpired(now);
+    const oldest = this.queue.oldest();
+    if (oldest !== null) await this.ctx.storage.setAlarm(oldest + this.limits.queueTtlMs);
   }
 
   private async ensureAlarm(now: number): Promise<void> {
     if ((await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(now + this.limits.queueTtlMs);
     }
-  }
-
-  private dropExpired(now: number): void {
-    this.sql.exec("DELETE FROM queue WHERE created_at <= ?", now - this.limits.queueTtlMs);
   }
 
   // ---------- helpers ----------
@@ -418,22 +392,7 @@ export class Mailbox extends DurableObject<Env> {
   }
 
   private isRegistered(): boolean {
-    return this.getMeta("registered") === "1";
-  }
-
-  private nextSeq(): number {
-    const cur = Number(this.getMeta("next_seq") ?? "1");
-    this.setMeta("next_seq", String(cur + 1));
-    return cur;
-  }
-
-  private getMeta(key: string): string | undefined {
-    const rows = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key).toArray();
-    return rows.length > 0 ? rows[0].value : undefined;
-  }
-
-  private setMeta(key: string, value: string): void {
-    this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", key, value);
+    return this.meta.get("registered") === "1";
   }
 
   // Token bucket for requests on the live connection (relay-v1 section 7): burst
