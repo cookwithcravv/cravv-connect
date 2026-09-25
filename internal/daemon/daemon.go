@@ -118,8 +118,9 @@ func (d *Daemon) EnsureRegistered(ctx context.Context, invite string) error {
 		if mb != nil {
 			return nil
 		}
-		if lastErr != nil && errors.Is(lastErr, transport.ErrRelayForbidden) {
-			return lastErr
+		var refused *registerError
+		if errors.As(lastErr, &refused) && errors.Is(lastErr, transport.ErrRelayForbidden) {
+			return lastErr // a dial that carried credentials was refused
 		}
 		select {
 		case <-ch:
@@ -135,6 +136,15 @@ func (d *Daemon) poke() {
 	default:
 	}
 }
+
+// registerError marks a failed dial that carried an admin token or invite.
+// EnsureRegistered gives up only on these: a refusal of an earlier dial that
+// had nothing to register with (still in flight when the invite was stored)
+// must not abort the registration.
+type registerError struct{ err error }
+
+func (e *registerError) Error() string { return e.err.Error() }
+func (e *registerError) Unwrap() error { return e.err }
 
 // setState records the live mailbox (nil when offline) and the last dial error.
 func (d *Daemon) setState(mb transport.Mailbox, err error) {
@@ -222,6 +232,9 @@ func (d *Daemon) connectLoop(ctx context.Context, g *services) {
 				return
 			}
 			d.log.Warn("relay dial failed", "err", err, "retry_in", backoff)
+			if creds.AdminToken != "" || creds.Invite != "" {
+				err = &registerError{err: err}
+			}
 			d.setState(nil, err)
 			d.sleep(ctx, backoff)
 			backoff = min(backoff*2, core.BackoffMax)
