@@ -48,6 +48,13 @@ type TrustObserver interface {
 	TrustLowered(ctx context.Context, peer store.Peer) error
 }
 
+// PeerCutOffObserver is told when we pause or unpair a peer (or it unpairs
+// us), before its outbox is held or deleted: TaskService rejects its tasks
+// awaiting approval and FileService declines its held files.
+type PeerCutOffObserver interface {
+	PeerCutOff(ctx context.Context, peer store.Peer, reason string) error
+}
+
 // Resealer re-queues an outbox item for a fresh seal. Implemented by *Outbound.
 type Resealer interface {
 	Reseal(ctx context.Context, to core.MachineID, msgID string) error

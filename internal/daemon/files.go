@@ -328,7 +328,13 @@ func (s *FileService) Accept(ctx context.Context, fileID string, unlocked bool) 
 	}
 	peer, err := s.d.Peers.GetPeer(ctx, rec.Peer)
 	if err != nil {
-		return err
+		return fmt.Errorf("peer %s: %w", rec.Peer.Short(), err)
+	}
+	if peer.Paused {
+		return fmt.Errorf("%s: %w", peer.Alias, core.ErrPaused)
+	}
+	if s.d.Policy.Decide(peer.TrustIn, core.KindFileOffer) == DecisionReject {
+		return fmt.Errorf("%s is %s: %w", peer.Alias, peer.TrustIn, core.ErrNotPermitted)
 	}
 	if aerr := s.admit(ctx, rec); aerr != nil {
 		rec, err = s.d.Files.UpdateFile(ctx, fileID, func(f *store.FileRecord) error {
@@ -351,6 +357,35 @@ func (s *FileService) Accept(ctx context.Context, fileID string, unlocked bool) 
 	}
 	_ = s.d.Audit.Record(audit.Event{Type: audit.EvFileAccept, Peer: rec.Peer, Alias: peer.Alias, ItemID: fileID, Hash: hex.EncodeToString(rec.SHA256)})
 	s.startDownload(fileID)
+	return nil
+}
+
+// PeerCutOff implements PeerCutOffObserver: the peer's held files are declined
+// and the sender is told (best effort).
+func (s *FileService) PeerCutOff(ctx context.Context, peer store.Peer, reason string) error {
+	recs, err := s.d.Files.ListFiles(ctx, store.FileHeld)
+	if err != nil {
+		return err
+	}
+	for _, r := range recs {
+		if r.Direction != store.TaskInbound || r.Peer != peer.MachineID {
+			continue
+		}
+		rec, err := s.d.Files.UpdateFile(ctx, r.FileID, func(f *store.FileRecord) error {
+			if f.State != store.FileHeld {
+				return core.ErrBadTransition
+			}
+			f.State, f.Reason = store.FileDeclined, reason
+			return nil
+		})
+		if errors.Is(err, core.ErrBadTransition) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		_ = s.declined(ctx, peer, rec)
+	}
 	return nil
 }
 

@@ -553,8 +553,14 @@ func (s *TaskService) Decide(ctx context.Context, id string, approve, unlocked b
 	if !unlocked {
 		return core.ErrAuthRequired
 	}
-	if _, err := s.inboundTask(ctx, id); err != nil {
+	cur, err := s.inboundTask(ctx, id)
+	if err != nil {
 		return err
+	}
+	if approve {
+		if err := s.checkPeerForApproval(ctx, cur.Peer); err != nil {
+			return err
+		}
 	}
 	now := s.d.Clock.Now()
 	t, err := s.d.Tasks.Transition(ctx, id, []core.TaskState{core.TaskAwaitingApproval}, func(t *store.Task) error {
@@ -582,6 +588,50 @@ func (s *TaskService) Decide(ctx context.Context, id string, approve, unlocked b
 	}
 	s.sendUpdate(ctx, t, core.TaskUpdateBody{TaskID: t.ID, State: core.TaskQueued})
 	return s.deliverTask(ctx, t, t.ID)
+}
+
+// checkPeerForApproval refuses an approval when the peer is no longer paired,
+// is paused by us, or its trust level no longer allows tasks.
+func (s *TaskService) checkPeerForApproval(ctx context.Context, id core.MachineID) error {
+	p, err := s.d.Peers.GetPeer(ctx, id)
+	if err != nil {
+		return fmt.Errorf("peer %s: %w", id.Short(), err)
+	}
+	if p.Paused {
+		return fmt.Errorf("%s: %w", p.Alias, core.ErrPaused)
+	}
+	if s.d.Policy.Decide(p.TrustIn, core.KindTaskCreate) == DecisionReject {
+		return fmt.Errorf("%s is %s: %w", p.Alias, p.TrustIn, core.ErrNotPermitted)
+	}
+	return nil
+}
+
+// PeerCutOff implements PeerCutOffObserver: the peer's tasks awaiting approval
+// are rejected and the sender is told (best effort).
+func (s *TaskService) PeerCutOff(ctx context.Context, peer store.Peer, reason string) error {
+	ts, err := s.d.Tasks.ListTasks(ctx, store.TaskFilter{Direction: store.TaskInbound,
+		States: []core.TaskState{core.TaskAwaitingApproval}, Peer: peer.MachineID})
+	if err != nil {
+		return err
+	}
+	now := s.d.Clock.Now()
+	for _, cand := range ts {
+		t, err := s.d.Tasks.Transition(ctx, cand.ID, []core.TaskState{core.TaskAwaitingApproval}, func(t *store.Task) error {
+			t.State = core.TaskRejected
+			t.ExpiresAt = time.Time{}
+			t.Notes = append(t.Notes, store.TaskNote{At: now, Text: reason})
+			t.UpdatedAt = now
+			return nil
+		})
+		if errors.Is(err, core.ErrBadTransition) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		s.sendUpdate(ctx, t, core.TaskUpdateBody{TaskID: t.ID, State: core.TaskRejected, Note: reason})
+	}
+	return nil
 }
 
 // ExpireDue expires held and unclaimed tasks past ExpiresAt and tells senders.

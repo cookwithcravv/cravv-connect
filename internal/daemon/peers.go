@@ -25,6 +25,7 @@ type PeerService struct {
 	mu          sync.Mutex
 	pendingDeny map[core.MachineID]ed25519.PublicKey // removed peers to deny on next connect
 	observers   []TrustObserver
+	cutoffs     []PeerCutOffObserver
 }
 
 // NewPeerService wires a PeerService. out is normally the *Outbound.
@@ -44,6 +45,25 @@ func (s *PeerService) AddTrustObserver(o TrustObserver) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.observers = append(s.observers, o)
+}
+
+// AddCutOffObserver registers o to be told whenever a peer is paused or removed.
+func (s *PeerService) AddCutOffObserver(o PeerCutOffObserver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cutoffs = append(s.cutoffs, o)
+}
+
+// cutOff tells the observers; their errors never stop the pause or removal.
+func (s *PeerService) cutOff(ctx context.Context, p store.Peer, reason string) error {
+	s.mu.Lock()
+	obs := append([]PeerCutOffObserver(nil), s.cutoffs...)
+	s.mu.Unlock()
+	var errs []error
+	for _, o := range obs {
+		errs = append(errs, o.PeerCutOff(ctx, p, reason))
+	}
+	return errors.Join(errs...)
 }
 
 // List returns every paired peer.
@@ -122,7 +142,10 @@ func (s *PeerService) SetTrust(ctx context.Context, alias string, level core.Tru
 
 // Pause stops traffic with a peer in both directions. control.paused is sent (best effort)
 // before the relay allow-list entry is removed. When offline, the deny happens on the next
-// connect through SyncAllowList, because the peer record is marked Paused.
+// connect through SyncAllowList, because the peer record is marked Paused. The peer's
+// tasks awaiting approval are rejected and its held files declined; the notices to the
+// peer wait in the outbox until resume-peer. An error from that cleanup is returned after
+// the pause took effect.
 func (s *PeerService) Pause(ctx context.Context, alias string) error {
 	p, _, err := s.Resolve(ctx, alias)
 	if err != nil {
@@ -132,6 +155,7 @@ func (s *PeerService) Pause(ctx context.Context, alias string) error {
 		return nil
 	}
 	_ = s.out.SendDirect(ctx, p, core.KindControlPaused, core.EmptyBody{})
+	cutErr := s.cutOff(ctx, p, "peer paused")
 	if err := s.out.Hold(ctx, p.MachineID); err != nil {
 		return err
 	}
@@ -143,7 +167,7 @@ func (s *PeerService) Pause(ctx context.Context, alias string) error {
 		_ = mb.Deny(ctx, p.IK) // a failure is repaired by SyncAllowList on the next connect
 	}
 	s.record(audit.Event{Type: audit.EvPause, Peer: p.MachineID, Alias: p.Alias})
-	return nil
+	return cutErr
 }
 
 // Resume undoes Pause: allow-list entry restored, held outbox released, control.resumed sent.
@@ -198,6 +222,7 @@ func (s *PeerService) RemoveByPeer(ctx context.Context, id core.MachineID) error
 }
 
 func (s *PeerService) remove(ctx context.Context, p store.Peer, byPeer bool) error {
+	cutErr := s.cutOff(ctx, p, "peer unpaired")
 	denied := false
 	if mb, ok := s.mailboxes.Mailbox(); ok {
 		denied = mb.Deny(ctx, p.IK) == nil
@@ -215,7 +240,7 @@ func (s *PeerService) remove(ctx context.Context, p store.Peer, byPeer bool) err
 	}
 	s.record(audit.Event{Type: audit.EvUnpair, Peer: p.MachineID, Alias: p.Alias,
 		Detail: map[string]any{"by_peer": byPeer}})
-	return nil
+	return cutErr
 }
 
 // MarkPausedByPeer records that the peer paused (true) or resumed (false) us.
