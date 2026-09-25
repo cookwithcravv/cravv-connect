@@ -209,8 +209,16 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 				d.log.Warn("fail tasks on kill", "err", err)
 			}
 		},
-		AfterKill:   func(context.Context) { d.disconnect() },
-		AfterResume: func(context.Context) { d.poke() },
+		AfterKill: func(context.Context) {
+			d.svc.Load().files.StopDownloads()
+			d.disconnect()
+		},
+		AfterResume: func(ctx context.Context) {
+			if err := d.svc.Load().files.ResumeDownloads(ctx); err != nil {
+				d.log.Warn("resume downloads", "err", err)
+			}
+			d.poke()
+		},
 	})
 	return d, nil
 }
@@ -226,6 +234,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 		Blobs: func() transport.BlobStore { return d.blobs(id) }, Peers: db, Files: db, Inbox: d.inbox,
 		Sender: g.outbound, Guard: d.allow, FilesDir: d.opts.Paths.Files, Quota: d.opts.Config.PeerQuota,
 		Policy: TrustPolicy{}, Clock: clock, Audit: lg, Log: d.log, RetryDelay: d.opts.FileRetryDelay,
+		Killed: d.kill.Killed,
 	})
 	g.tasks = NewTaskService(TaskDeps{
 		Tasks: db, Peers: db, Resolver: g.peers, Inbox: d.inbox, Sender: g.outbound, Policy: TrustPolicy{},

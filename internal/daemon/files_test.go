@@ -29,6 +29,7 @@ type d2Blobs struct {
 	deleted  map[string]bool
 	getCalls map[uint32]int
 	failGet  map[uint32]int // chunk -> remaining transient failures
+	onGet    func(n uint32) // called before GetChunk serves chunk n (outside the lock)
 }
 
 func newD2Blobs() *d2Blobs {
@@ -51,6 +52,12 @@ func (b *d2Blobs) PutChunk(ctx context.Context, blobID string, n uint32, data []
 }
 
 func (b *d2Blobs) GetChunk(ctx context.Context, blobID string, n uint32) ([]byte, error) {
+	b.mu.Lock()
+	hook := b.onGet
+	b.mu.Unlock()
+	if hook != nil {
+		hook(n)
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.getCalls[n]++
@@ -468,5 +475,87 @@ func TestRejectsMalformedOffer(t *testing.T) {
 		if err := e.files.HandleOffer(context.Background(), peer, env); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// blobRelay is a d2Relay whose blob store is an in-memory d2Blobs.
+type blobRelay struct {
+	d2Relay
+	blobs *d2Blobs
+}
+
+func (r *blobRelay) Dialer() transport.Dialer                   { return r }
+func (r *blobRelay) Blobs(transport.Signer) transport.BlobStore { return r.blobs }
+
+// The kill switch stops a running download: nothing more is fetched, no inbox
+// notice appears, and Start does not resume it while killed. Resume finishes it.
+func TestKillStopsDownloadsAndResumeFinishes(t *testing.T) {
+	ctx := context.Background()
+	blobs := newD2Blobs()
+	d := d2NewDaemon(t, t.TempDir(), &blobRelay{blobs: blobs})
+	defer d.Close()
+	peer := newTestPeer(t, "gpu-box", core.TrustAutonomous)
+	mustPut(t, d.store, peer.rec)
+	session, _ := d.Sessions().Register(ctx, "claude", "/w/p")
+	content := randomBytes(t, 4*core.FileChunkBytes)
+	body := blobs.put(t, "big.bin", content)
+
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	blobs.onGet = func(n uint32) {
+		if n == 1 {
+			close(reached)
+			<-release
+		}
+	}
+	env := d2Env(t, peer.rec, core.KindFileOffer, "", "", body)
+	if err := d.Files().HandleOffer(ctx, peer.rec, env); err != nil {
+		t.Fatal(err)
+	}
+	<-reached
+	blobs.mu.Lock()
+	blobs.onGet = nil
+	blobs.mu.Unlock()
+	killed := make(chan error, 1)
+	go func() { killed <- d.Kill().Kill(ctx) }()
+	d2Eventually(t, "switch on", d.Kill().Killed)
+	close(release)
+	if err := <-killed; err != nil {
+		t.Fatal(err)
+	}
+	d.Files().Wait()
+
+	r, err := d.store.GetFile(ctx, body.FileID)
+	if err != nil || r.State != store.FileDownloading || r.Attempts != 0 {
+		t.Fatalf("after kill: %+v %v", r, err)
+	}
+	if n := blobs.getCalls[2] + blobs.getCalls[3]; n != 0 {
+		t.Fatalf("chunks fetched after kill: %v", blobs.getCalls)
+	}
+	if items, _ := d.Inbox().Check(ctx, session, 10); len(items) != 0 {
+		t.Fatalf("inbox notice while killed: %+v", items)
+	}
+	if err := d.Files().Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	d.Files().Wait()
+	if n := blobs.getCalls[2] + blobs.getCalls[3]; n != 0 {
+		t.Fatalf("Start resumed a download while killed: %v", blobs.getCalls)
+	}
+
+	if err := d.Kill().Resume(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	d2Eventually(t, "download finished after resume", func() bool {
+		r, _ := d.store.GetFile(ctx, body.FileID)
+		return r.State == store.FileDone
+	})
+	d.Files().Wait()
+	r, _ = d.store.GetFile(ctx, body.FileID)
+	if got, _ := os.ReadFile(r.LocalPath); !bytes.Equal(got, content) {
+		t.Fatal("resumed file differs")
+	}
+	if items, _ := d.Inbox().Check(ctx, session, 10); len(items) != 1 || items[0].FileID != body.FileID {
+		t.Fatalf("inbox after resume = %+v", items)
 	}
 }

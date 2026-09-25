@@ -15,9 +15,9 @@ type KillHooks struct {
 	// BeforeKill runs while traffic can still be queued: it fails claimed tasks
 	// so their senders get task.update failed(killed) (best effort).
 	BeforeKill func(ctx context.Context)
-	// AfterKill disconnects from the relay.
+	// AfterKill stops running file downloads and disconnects from the relay.
 	AfterKill func(ctx context.Context)
-	// AfterResume lets the connection loop dial again.
+	// AfterResume restarts stopped downloads and lets the connection loop dial again.
 	AfterResume func(ctx context.Context)
 }
 

@@ -31,7 +31,11 @@ const (
 	DiskHeadroom = 64 << 20
 )
 
-var errDiskFull = errors.New("not enough disk space")
+var (
+	errDiskFull = errors.New("not enough disk space")
+	// errKilled stops a download when the kill switch flips; it resumes on resume.
+	errKilled = errors.New("kill switch on")
+)
 
 // OutboundChecker validates a path a session wants to send and opens it.
 // The returned file is the very file the checks approved (no symlink swap,
@@ -57,6 +61,7 @@ type FileDeps struct {
 	Log        *slog.Logger
 	FreeSpace  func(dir string) (uint64, error) // nil means statfs
 	RetryDelay time.Duration                    // pause between download attempts
+	Killed     func() bool                      // kill switch state; nil means never killed
 }
 
 // FileService sends files through relay blobs and receives offered files (spec 5.3, 7.1, 7.4).
@@ -65,7 +70,7 @@ type FileService struct {
 
 	mu       sync.Mutex
 	baseCtx  context.Context
-	inflight map[string]bool
+	inflight map[string]context.CancelFunc // running downloads by file ID
 	wg       sync.WaitGroup
 }
 
@@ -83,15 +88,28 @@ func NewFileService(d FileDeps) *FileService {
 	if d.FreeSpace == nil {
 		d.FreeSpace = diskFree
 	}
-	return &FileService{d: d, baseCtx: context.Background(), inflight: map[string]bool{}}
+	if d.Killed == nil {
+		d.Killed = func() bool { return false }
+	}
+	return &FileService{d: d, baseCtx: context.Background(), inflight: map[string]context.CancelFunc{}}
 }
 
 // Start sets the context downloads run under and resumes downloads that were
-// in progress when the daemon stopped.
+// in progress when the daemon stopped (none while the kill switch is on).
 func (s *FileService) Start(ctx context.Context) error {
 	s.mu.Lock()
 	s.baseCtx = ctx
 	s.mu.Unlock()
+	return s.ResumeDownloads(ctx)
+}
+
+// ResumeDownloads starts every inbound download left in the downloading state
+// (after a restart or when the kill switch is turned off). It does nothing
+// while killed. Downloads run under the context given to Start.
+func (s *FileService) ResumeDownloads(ctx context.Context) error {
+	if s.d.Killed() {
+		return nil
+	}
 	recs, err := s.d.Files.ListFiles(ctx, store.FileDownloading)
 	if err != nil {
 		return err
@@ -102,6 +120,17 @@ func (s *FileService) Start(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// StopDownloads cancels every running download (kill switch). Stopped
+// downloads stay in the downloading state and continue from their last chunk
+// on ResumeDownloads.
+func (s *FileService) StopDownloads() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, cancel := range s.inflight {
+		cancel()
+	}
 }
 
 // Wait blocks until every running download has finished.
@@ -343,14 +372,17 @@ func (s *FileService) admit(ctx context.Context, rec store.FileRecord) error {
 	return nil
 }
 
+// startDownload runs one download in the background. The kill check and the
+// registration happen under s.mu, so StopDownloads cancels every download that
+// started before the switch flipped and none starts after.
 func (s *FileService) startDownload(fileID string) {
 	s.mu.Lock()
-	if s.inflight[fileID] {
+	if _, running := s.inflight[fileID]; running || s.d.Killed() {
 		s.mu.Unlock()
 		return
 	}
-	s.inflight[fileID] = true
-	ctx := s.baseCtx
+	ctx, cancel := context.WithCancel(s.baseCtx)
+	s.inflight[fileID] = cancel
 	s.wg.Add(1)
 	s.mu.Unlock()
 	go func() {
@@ -359,6 +391,7 @@ func (s *FileService) startDownload(fileID string) {
 			s.mu.Lock()
 			delete(s.inflight, fileID)
 			s.mu.Unlock()
+			cancel()
 		}()
 		s.download(ctx, fileID)
 	}()
@@ -371,6 +404,9 @@ func (s *FileService) download(ctx context.Context, fileID string) {
 			return
 		}
 		ferr := s.fetch(ctx, rec)
+		if s.d.Killed() || errors.Is(ferr, errKilled) {
+			return // stopped by the kill switch: ResumeDownloads continues it
+		}
 		if ferr == nil {
 			s.finish(ctx, rec)
 			return
@@ -402,6 +438,9 @@ func (s *FileService) download(ctx context.Context, fileID string) {
 // fetch downloads the remaining chunks into <LocalPath>.part, verifies the
 // SHA-256, and links the result to LocalPath (never overwriting a file).
 func (s *FileService) fetch(ctx context.Context, rec store.FileRecord) error {
+	if rec.NextChunk >= rec.Chunks && verifyFile(rec.LocalPath, rec.Size, rec.SHA256) == nil {
+		return nil // finished before a stop; only the bookkeeping is left
+	}
 	if err := os.MkdirAll(filepath.Dir(rec.LocalPath), 0o700); err != nil {
 		return err
 	}
@@ -420,6 +459,9 @@ func (s *FileService) fetch(ctx context.Context, rec store.FileRecord) error {
 	}
 	blobs := s.d.Blobs()
 	for i := rec.NextChunk; i < rec.Chunks; i++ {
+		if s.d.Killed() {
+			return errKilled
+		}
 		ct, err := blobs.GetChunk(ctx, rec.BlobID, i)
 		if err != nil {
 			return fmt.Errorf("chunk %d: %w", i, err)
@@ -447,6 +489,9 @@ func (s *FileService) fetch(ctx context.Context, rec store.FileRecord) error {
 	}
 	if err := f.Close(); err != nil {
 		return err
+	}
+	if s.d.Killed() {
+		return errKilled
 	}
 	if err := verifyFile(part, rec.Size, rec.SHA256); err != nil {
 		os.Remove(part)
