@@ -12,7 +12,7 @@ const (
 	KindOffline         = "offline"
 	KindPairingFailed   = "pairing_failed"
 	KindPairingExpired  = "pairing_expired"
-	KindBusy            = "busy"
+	KindBusy            = ipc.KindBusy
 )
 
 // INTEGRATION SEAM: the daemon's exported errors (Tasks 13-20). Registered at

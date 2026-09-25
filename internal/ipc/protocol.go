@@ -11,6 +11,17 @@ const Version = "2.0"
 // MaxLineBytes caps one request or response line (8 MiB).
 const MaxLineBytes = 8 << 20
 
+// MethodCancel is the notification a client sends when it stops waiting for
+// a request: {"jsonrpc":"2.0","method":"$/cancel","params":{"id":<id>}}. The
+// server cancels that request's context. A cancelled inbox.check or
+// inbox.wait does not mark anything read.
+const MethodCancel = "$/cancel"
+
+// CancelParams are the params of MethodCancel.
+type CancelParams struct {
+	ID json.RawMessage `json:"id"`
+}
+
 // JSON-RPC error codes used by this protocol.
 const (
 	CodeParseError     = -32700

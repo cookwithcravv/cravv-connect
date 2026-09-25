@@ -118,6 +118,7 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 			return ErrClosed
 		}
 	case <-ctx.Done():
+		c.sendCancel(id)
 		return ctx.Err()
 	}
 	if resp.Error != nil {
@@ -129,4 +130,18 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 		}
 	}
 	return nil
+}
+
+// sendCancel tells the daemon to stop request id (best effort): a cancelled
+// inbox.wait then leaves its items unread instead of handing them to a reply
+// nobody reads.
+func (c *Client) sendCancel(id uint64) {
+	params, _ := json.Marshal(CancelParams{ID: json.RawMessage(strconv.FormatUint(id, 10))})
+	line, err := json.Marshal(Request{JSONRPC: Version, Method: MethodCancel, Params: params})
+	if err != nil {
+		return
+	}
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	_, _ = c.conn.Write(append(line, '\n'))
 }

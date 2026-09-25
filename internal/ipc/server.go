@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cravv/cravv-connect/internal/core"
 )
@@ -34,6 +35,7 @@ type Server struct {
 	mu      sync.RWMutex
 	methods map[string]method
 	conns   sync.WaitGroup
+	active  atomic.Int64 // requests running on all connections
 }
 
 // NewServer returns a Server with no methods registered.
@@ -91,8 +93,17 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	}
 }
 
+// MaxInflight caps the requests one connection may have running at once.
+// Requests over the cap get an error of kind busy.
+const MaxInflight = 32
+
+// running tracks one in-flight request so $/cancel can cancel it.
+type running struct{ cancel context.CancelFunc }
+
 // ServeConn handles one connection until the peer closes it or ctx ends.
-// Requests are handled concurrently; responses are written one line at a time.
+// Requests are handled concurrently (at most MaxInflight at a time); responses
+// are written one line at a time. A $/cancel notification cancels the context
+// of the request it names.
 func (s *Server) ServeConn(ctx context.Context, conn net.Conn) {
 	cctx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(cctx, func() { conn.Close() })
@@ -100,16 +111,18 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) {
 	var (
 		wmu      sync.Mutex
 		inflight sync.WaitGroup
+		rmu      sync.Mutex
+		active   = map[string]*running{}
+		count    int
 	)
 	write := func(r Response) {
-		b, err := json.Marshal(r)
-		if err != nil {
-			s.opts.Logger.Error("ipc: marshal response", "err", err)
+		b := s.encodeResponse(r)
+		if b == nil {
 			return
 		}
 		wmu.Lock()
 		defer wmu.Unlock()
-		if _, err := conn.Write(append(b, '\n')); err != nil {
+		if _, err := conn.Write(b); err != nil {
 			s.opts.Logger.Debug("ipc: write response", "err", err)
 		}
 	}
@@ -127,10 +140,49 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) {
 				Code: CodeParseError, Message: "parse error", Data: &ErrorData{Kind: KindBadRequest}}})
 			continue
 		}
+		if req.Method == MethodCancel {
+			var p CancelParams
+			if json.Unmarshal(req.Params, &p) == nil {
+				rmu.Lock()
+				if r, ok := active[idKey(p.ID)]; ok {
+					r.cancel()
+				}
+				rmu.Unlock()
+			}
+			if len(req.ID) > 0 {
+				write(Response{JSONRPC: Version, ID: req.ID, Result: json.RawMessage("{}")})
+			}
+			continue
+		}
+		key := idKey(req.ID)
+		rmu.Lock()
+		if count >= MaxInflight {
+			rmu.Unlock()
+			if len(req.ID) > 0 {
+				write(Response{JSONRPC: Version, ID: req.ID, Error: toWire(ErrBusy)})
+			}
+			continue
+		}
+		count++
+		s.active.Add(1)
+		rctx, rcancel := context.WithCancel(cctx)
+		r := &running{cancel: rcancel}
+		if key != "" {
+			active[key] = r
+		}
+		rmu.Unlock()
 		inflight.Add(1)
 		go func(req Request) {
 			defer inflight.Done()
-			resp := s.dispatch(cctx, cs, req)
+			resp := s.dispatch(rctx, cs, req)
+			rmu.Lock()
+			count--
+			s.active.Add(-1)
+			if active[key] == r {
+				delete(active, key)
+			}
+			rmu.Unlock()
+			rcancel()
 			if len(req.ID) == 0 {
 				return // notification: no response
 			}
@@ -138,6 +190,11 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) {
 		}(req)
 	}
 	if err := sc.Err(); err != nil && !errors.Is(err, net.ErrClosed) {
+		if errors.Is(err, bufio.ErrTooLong) {
+			write(Response{JSONRPC: Version, ID: json.RawMessage("null"), Error: &Error{
+				Code: CodeServerError, Message: fmt.Sprintf("request line longer than %d bytes", MaxLineBytes),
+				Data: &ErrorData{Kind: KindTooLarge}}})
+		}
 		s.opts.Logger.Debug("ipc: connection read ended", "err", err)
 	}
 	cancel()
@@ -147,6 +204,46 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) {
 	if name := cs.Session(); name != "" && s.opts.OnDisconnect != nil {
 		s.opts.OnDisconnect(name)
 	}
+}
+
+// idKey normalizes a JSON-RPC id for the cancel table.
+func idKey(id json.RawMessage) string {
+	return string(bytes.TrimSpace(id))
+}
+
+// encodeResponse encodes r as one line without HTML escaping. A line longer
+// than MaxLineBytes would break the client's stream, so it is replaced by an
+// error of kind too_large for the same id.
+func (s *Server) encodeResponse(r Response) []byte {
+	b, err := encodeLine(r)
+	if err != nil {
+		s.opts.Logger.Error("ipc: marshal response", "err", err)
+		r = Response{JSONRPC: Version, ID: r.ID, Error: &Error{
+			Code: CodeServerError, Message: "internal error", Data: &ErrorData{Kind: KindInternal}}}
+		b, _ = encodeLine(r)
+		return b
+	}
+	if len(b) > MaxLineBytes {
+		s.opts.Logger.Warn("ipc: response too large", "bytes", len(b))
+		b, _ = encodeLine(Response{JSONRPC: Version, ID: r.ID, Error: &Error{
+			Code:    CodeServerError,
+			Message: fmt.Sprintf("response of %d bytes is over the %d byte limit; ask for less", len(b), MaxLineBytes),
+			Data:    &ErrorData{Kind: KindTooLarge},
+		}})
+	}
+	return b
+}
+
+// encodeLine marshals v as JSON followed by a newline, without escaping
+// '<', '>' and '&' (which would cost 6 bytes each in wrapped peer text).
+func encodeLine(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // dispatch runs gates and the handler for one request.
@@ -179,12 +276,12 @@ func (s *Server) dispatch(ctx context.Context, cs *ConnState, req Request) (resp
 	if result == nil {
 		result = Empty{}
 	}
-	b, err := json.Marshal(result)
+	b, err := encodeLine(result)
 	if err != nil {
 		resp.Error = toWire(fmt.Errorf("marshal result: %w", err))
 		return resp
 	}
-	resp.Result = b
+	resp.Result = bytes.TrimSuffix(b, []byte("\n"))
 	return resp
 }
 

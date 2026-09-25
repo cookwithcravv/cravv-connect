@@ -15,6 +15,9 @@ var (
 	ErrDaemonNotRunning = errors.New("daemon not running: run `cravv-connect daemon start`")
 	// ErrClosed is returned by Call when the connection has ended.
 	ErrClosed = errors.New("connection to daemon closed")
+	// ErrBusy is returned when a connection already has MaxInflight requests
+	// running. Retry after one of them finishes.
+	ErrBusy = errors.New("too many requests in flight on this connection")
 )
 
 // Error kinds carried in Error.Data.Kind.
@@ -34,6 +37,7 @@ const (
 	KindQuota          = "quota"
 	KindNoSession      = "no_session"
 	KindBadRequest     = "bad_request"
+	KindBusy           = "busy"
 	KindInternal       = "internal"
 )
 
@@ -62,6 +66,7 @@ var (
 		{KindQuota, core.ErrQuota},
 		{KindNoSession, core.ErrNoSession},
 		{KindBadRequest, ErrBadRequest},
+		{KindBusy, ErrBusy},
 	}
 )
 

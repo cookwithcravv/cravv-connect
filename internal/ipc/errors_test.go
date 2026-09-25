@@ -87,8 +87,8 @@ func TestRegisterErrorKindBothDirections(t *testing.T) {
 }
 
 func TestUnknownKindKeepsKindAndMessage(t *testing.T) {
-	back := fromWire(&Error{Code: CodeServerError, Message: "someone else is pairing", Data: &ErrorData{Kind: "busy"}})
-	if !IsKind(back, "busy") || back.Error() != "someone else is pairing" || errors.Unwrap(back) != nil {
+	back := fromWire(&Error{Code: CodeServerError, Message: "someone else is pairing", Data: &ErrorData{Kind: "someone_else"}})
+	if !IsKind(back, "someone_else") || back.Error() != "someone else is pairing" || errors.Unwrap(back) != nil {
 		t.Fatalf("got %#v", back)
 	}
 }
