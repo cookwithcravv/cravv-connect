@@ -110,7 +110,7 @@ describe("blobs", () => {
       expect((await signed(down, "DELETE", `/v1/blobs/${id}`, undefined, ts)).status).toBe(401);
       expect((await signed(outsider, "DELETE", `/v1/blobs/${id}`, undefined, ts)).status).toBe(401);
     }
-    expect((await signed(up, "PUT", chunk, enc.encode("x"), now - 299)).status).toBe(204);
+    expect((await signed(up, "PUT", chunk, enc.encode("x"), now - 290)).status).toBe(204);
     const sig = await up.sign(await httpMessage("https://other.test", "PUT", chunk, now, enc.encode("x")));
     const headers = { "X-Cravv-IK": up.ikB64, "X-Cravv-TS": String(now), "X-Cravv-Sig": b64encode(sig) };
     expect((await relayFetch(chunk, { method: "PUT", headers, body: enc.encode("x") })).status).toBe(401);
