@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -106,8 +107,20 @@ func (s *InboxService) RedirectOrphans(ctx context.Context, session string) erro
 	return err
 }
 
-// Check returns up to limit unread items for the session, marks them read and
-// advances the session's cursor.
+// MaxInboxPageBytes caps one Check or Wait page: the JSON-encoded wrapped
+// text of the items returned, plus a fixed allowance per item for the other
+// fields. It keeps every inbox response well under the IPC line limit
+// (ipc.MaxLineBytes, 8 MiB). A page always holds at least one item.
+const MaxInboxPageBytes = 4 << 20
+
+// inboxItemOverhead is the per-item allowance for fields besides Wrapped.
+const inboxItemOverhead = 512
+
+// Check returns up to limit unread items for the session, and at most
+// MaxInboxPageBytes of them, marks them read and advances the session's
+// cursor past the last one returned. Items that did not fit stay unread for
+// the next call. If ctx is cancelled before the items are marked read
+// (the client stopped waiting), nothing is marked and ctx.Err() is returned.
 func (s *InboxService) Check(ctx context.Context, session string, limit int) ([]InboxEntry, error) {
 	if limit <= 0 {
 		limit = DefaultInboxLimit
@@ -120,9 +133,25 @@ func (s *InboxService) Check(ctx context.Context, session string, limit int) ([]
 	if err != nil || len(items) == 0 {
 		return nil, err
 	}
-	seqs := make([]int64, len(items))
-	for i, it := range items {
-		seqs[i] = it.Seq
+	out := make([]InboxEntry, 0, len(items))
+	budget := MaxInboxPageBytes
+	for _, it := range items {
+		e := s.entry(ctx, it)
+		cost := jsonStringLen(e.Wrapped) + inboxItemOverhead
+		if len(out) > 0 && cost > budget {
+			break
+		}
+		budget -= cost
+		out = append(out, e)
+	}
+	seqs := make([]int64, len(out))
+	for i, e := range out {
+		seqs[i] = e.Item.Seq
+	}
+	// Two-phase: the page is built; mark it read only if the caller is still
+	// there to receive it.
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if err := s.inbox.MarkRead(ctx, seqs); err != nil {
 		return nil, err
@@ -130,11 +159,26 @@ func (s *InboxService) Check(ctx context.Context, session string, limit int) ([]
 	if err := s.sessions.SetCursor(ctx, session, seqs[len(seqs)-1]); err != nil {
 		return nil, err
 	}
-	out := make([]InboxEntry, len(items))
-	for i, it := range items {
-		out[i] = s.entry(ctx, it)
-	}
 	return out, nil
+}
+
+// jsonStringLen is the length of s encoded as a JSON string without HTML
+// escaping: control characters cost up to 6 bytes each.
+func jsonStringLen(s string) int {
+	n := 2
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t':
+			n += 2
+		case c < 0x20:
+			n += 6
+		default:
+			n++
+		}
+	}
+	// U+2028 and U+2029 are escaped as \u2028 and \u2029 (3 bytes -> 6).
+	n += 3 * (strings.Count(s, "\u2028") + strings.Count(s, "\u2029"))
+	return n
 }
 
 // Wait blocks until the session has unread items or the timeout passes, then
