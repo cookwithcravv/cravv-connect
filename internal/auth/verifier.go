@@ -55,7 +55,7 @@ var ErrServiceNotAllowed = errors.New("pam service not allowed")
 // "passwd" is deliberately absent: it is the password-change stack.
 var allowedPAMServices = map[string][]string{
 	"darwin": {"chkpasswd", "checkpw"},
-	"linux":  {"login", "common-auth", "system-auth"},
+	"linux":  {"login", "system-auth"},
 }
 
 // AllowedPAMServices returns the PAM services allowed on this OS.

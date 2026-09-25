@@ -66,7 +66,7 @@ func TestPAMServiceAllowlist(t *testing.T) {
 	case "darwin":
 		allowed = []string{"chkpasswd", "checkpw"}
 	case "linux":
-		allowed = []string{"login", "common-auth", "system-auth"}
+		allowed = []string{"login", "system-auth"}
 	}
 	for _, s := range allowed {
 		if !PAMServiceAllowed(s) {
