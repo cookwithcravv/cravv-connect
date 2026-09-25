@@ -172,3 +172,36 @@ func TestOutboundCopiesRoots(t *testing.T) {
 		t.Fatalf("caller mutation of roots slice widened access: %v", err)
 	}
 }
+
+func TestOutboundRefusesMoreSecretFiles(t *testing.T) {
+	proj := t.TempDir()
+	secrets := []string{
+		"prod.env", "config/Staging.ENV",
+		"certs/client.p12", "certs/client.PFX",
+		"java/app.jks", "java/release.keystore",
+		"vault/passwords.kdbx",
+		"putty/server.ppk",
+		"credentials.json", "gcp/credentials-prod.json", "Credentials.JSON",
+		"service-account.json", "gcp/service-account-ci.json",
+		"vpn/office.ovpn",
+		".netrc", ".npmrc", ".pypirc",
+		"id_rsa", "keys/id_ecdsa.pub",
+	}
+	for _, s := range secrets {
+		writeFile(t, proj, s)
+	}
+	o := NewOutbound(nil)
+	for _, s := range secrets {
+		if _, _, err := o.Check(proj, s); !errors.Is(err, core.ErrPathRefused) {
+			t.Errorf("Check(%q) err = %v, want ErrPathRefused", s, err)
+		}
+	}
+	// Near misses stay allowed.
+	fine := []string{"environment.md", "envelope.go", "credentials.md", "my-credentials.json", "service-accounts.md", "keystore.go", "p12.txt"}
+	for _, s := range fine {
+		writeFile(t, proj, s)
+		if _, _, err := o.Check(proj, s); err != nil {
+			t.Errorf("Check(%q) refused an ordinary file: %v", s, err)
+		}
+	}
+}

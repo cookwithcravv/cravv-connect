@@ -130,11 +130,31 @@ func checkComponents(rel string) error {
 	return nil
 }
 
-// isSecretName matches .env*, *.pem, id_*, *.key (case-insensitive).
+// secretSuffixes are file extensions of keys, certificates, keystores,
+// password databases, VPN profiles and env files.
+var secretSuffixes = []string{
+	".pem", ".key", ".env",
+	".p12", ".pfx", ".jks", ".keystore",
+	".kdbx", ".ppk", ".ovpn",
+}
+
+// isSecretName matches (case-insensitive) .env*, id_*, credentials*.json,
+// service-account*.json and names ending in one of secretSuffixes.
+// Dotfiles such as .netrc, .npmrc and .pypirc are refused earlier as
+// hidden files.
 func isSecretName(name string) bool {
 	n := strings.ToLower(name)
-	return strings.HasPrefix(n, ".env") ||
-		strings.HasSuffix(n, ".pem") ||
-		strings.HasPrefix(n, "id_") ||
-		strings.HasSuffix(n, ".key")
+	if strings.HasPrefix(n, ".env") || strings.HasPrefix(n, "id_") {
+		return true
+	}
+	if strings.HasSuffix(n, ".json") &&
+		(strings.HasPrefix(n, "credentials") || strings.HasPrefix(n, "service-account")) {
+		return true
+	}
+	for _, suf := range secretSuffixes {
+		if strings.HasSuffix(n, suf) {
+			return true
+		}
+	}
+	return false
 }
