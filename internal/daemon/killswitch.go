@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/cravv/cravv-connect/internal/audit"
+	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/store"
 )
 
@@ -76,8 +77,12 @@ func (k *KillSwitch) Kill(ctx context.Context) error {
 	return nil
 }
 
-// Resume turns the switch off. The API layer enforces the password unlock.
-func (k *KillSwitch) Resume(ctx context.Context) error {
+// Resume turns the switch off. It is a human-only action: unlocked must be
+// true (set by the IPC layer after auth.unlock), otherwise core.ErrAuthRequired.
+func (k *KillSwitch) Resume(ctx context.Context, unlocked bool) error {
+	if !unlocked {
+		return core.ErrAuthRequired
+	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if !k.killed.Load() {

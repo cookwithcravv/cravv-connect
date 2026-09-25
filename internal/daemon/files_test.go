@@ -197,7 +197,7 @@ func TestSendFileRefusesSecrets(t *testing.T) {
 			t.Errorf("SendFile(%s) err = %v, want ErrPathRefused", p, err)
 		}
 	}
-	if err := e.files.d.Guard.(*AllowPaths).Add(ctx, filepath.Dir(outside)); err != nil {
+	if err := e.files.d.Guard.(*AllowPaths).Add(ctx, filepath.Dir(outside), true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.files.SendFile(ctx, peer.MachineID, e.project, outside, ""); err != nil {
@@ -432,7 +432,7 @@ func TestHeldForChatOnlyThenAccepted(t *testing.T) {
 	if len(items) != 1 || !strings.Contains(items[0].Wrapped, "files accept "+body.FileID) {
 		t.Fatalf("held notice = %+v", items)
 	}
-	if err := e.files.Accept(ctx, body.FileID); err != nil {
+	if err := e.files.Accept(ctx, body.FileID, true); err != nil {
 		t.Fatal(err)
 	}
 	e.files.Wait()
@@ -446,7 +446,7 @@ func TestHeldForChatOnlyThenAccepted(t *testing.T) {
 	if len(e.te.audit.ofType(audit.EvFileAccept)) != 1 {
 		t.Fatal("accept not audited")
 	}
-	if err := e.files.Accept(ctx, body.FileID); !errors.Is(err, core.ErrBadTransition) {
+	if err := e.files.Accept(ctx, body.FileID, true); !errors.Is(err, core.ErrBadTransition) {
 		t.Fatalf("second accept err = %v", err)
 	}
 }

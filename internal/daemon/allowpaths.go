@@ -10,12 +10,13 @@ import (
 	"sync"
 
 	"github.com/cravv/cravv-connect/internal/audit"
+	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/pathguard"
 	"github.com/cravv/cravv-connect/internal/store"
 )
 
 // AllowPaths holds the extra folders a human allowed for send_file
-// (`cravv-connect allow-path <dir>`, password-gated in the API layer) and
+// (`cravv-connect allow-path <dir>`, password-gated) and
 // checks outbound paths against them plus the session's project folder.
 type AllowPaths struct {
 	mu       sync.Mutex
@@ -44,8 +45,13 @@ func (a *AllowPaths) List(ctx context.Context) ([]string, error) {
 	return roots, nil
 }
 
-// Add allows an existing directory as an extra send_file root.
-func (a *AllowPaths) Add(ctx context.Context, dir string) error {
+// Add allows an existing directory as an extra send_file root. It is a
+// human-only action: unlocked must be true (set by the IPC layer after
+// auth.unlock), otherwise core.ErrAuthRequired.
+func (a *AllowPaths) Add(ctx context.Context, dir string, unlocked bool) error {
+	if !unlocked {
+		return core.ErrAuthRequired
+	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return err

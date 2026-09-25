@@ -361,8 +361,12 @@ func (d *Daemon) maintain(ctx context.Context, g *services) error {
 // ResetIdentity turns the kill switch on (if needed), wipes peers, prekeys and
 // the outbox, and switches to a fresh identity. The new identity has no relay
 // mailbox yet: the machine registers again with `init --relay-token` or an
-// invite received while joining. The API layer enforces the password unlock.
-func (d *Daemon) ResetIdentity(ctx context.Context) error {
+// invite received while joining. It is a human-only action: unlocked must be
+// true (set by the IPC layer after auth.unlock), otherwise core.ErrAuthRequired.
+func (d *Daemon) ResetIdentity(ctx context.Context, unlocked bool) error {
+	if !unlocked {
+		return core.ErrAuthRequired
+	}
 	if err := d.kill.Kill(ctx); err != nil {
 		return err
 	}

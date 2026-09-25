@@ -291,10 +291,10 @@ func TestApprovalFlow(t *testing.T) {
 		t.Fatalf("claim before approval err = %v", err)
 	}
 
-	if err := e.tasks.Decide(ctx, approveID, true); err != nil {
+	if err := e.tasks.Decide(ctx, approveID, true, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.tasks.Decide(ctx, denyID, false); err != nil {
+	if err := e.tasks.Decide(ctx, denyID, false, true); err != nil {
 		t.Fatal(err)
 	}
 	if tk := e.state(t, approveID); tk.State != core.TaskQueued || !tk.ExpiresAt.Equal(e.clock.Now().Add(core.UnclaimedExpiry)) {
@@ -315,7 +315,7 @@ func TestApprovalFlow(t *testing.T) {
 	if last.TaskID != denyID || last.State != core.TaskRejected {
 		t.Fatalf("deny update = %+v", last)
 	}
-	if err := e.tasks.Decide(ctx, approveID, true); !errors.Is(err, core.ErrBadTransition) {
+	if err := e.tasks.Decide(ctx, approveID, true, true); !errors.Is(err, core.ErrBadTransition) {
 		t.Fatalf("second decision err = %v", err)
 	}
 	if _, err := e.tasks.Claim(ctx, session, approveID); err != nil {

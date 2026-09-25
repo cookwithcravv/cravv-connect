@@ -284,8 +284,12 @@ func (s *FileService) handleOffer(ctx context.Context, peer store.Peer, env core
 	return nil
 }
 
-// Accept downloads a held file. The API layer enforces the password unlock.
-func (s *FileService) Accept(ctx context.Context, fileID string) error {
+// Accept downloads a held file. It is a human-only action: unlocked must be
+// true (set by the IPC layer after auth.unlock), otherwise core.ErrAuthRequired.
+func (s *FileService) Accept(ctx context.Context, fileID string, unlocked bool) error {
+	if !unlocked {
+		return core.ErrAuthRequired
+	}
 	rec, err := s.d.Files.GetFile(ctx, fileID)
 	if err != nil {
 		return err

@@ -46,7 +46,7 @@ func TestKillSwitchPersistsAndRunsHooks(t *testing.T) {
 	if err != nil || !again.Killed() {
 		t.Fatalf("state not restored: %v", err)
 	}
-	if err := k.Resume(ctx); err != nil {
+	if err := k.Resume(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	if k.Killed() || calls[len(calls)-1] != "resume" {

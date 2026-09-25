@@ -502,8 +502,12 @@ func (s *TaskService) PendingApprovals(ctx context.Context) (int, error) {
 }
 
 // Decide approves (queued, delivered to sessions) or denies (rejected) a held task.
-// The caller (API layer) enforces the password unlock.
-func (s *TaskService) Decide(ctx context.Context, id string, approve bool) error {
+// It is a human-only action: unlocked must be true (the IPC layer sets it after
+// auth.unlock), otherwise it fails with core.ErrAuthRequired.
+func (s *TaskService) Decide(ctx context.Context, id string, approve, unlocked bool) error {
+	if !unlocked {
+		return core.ErrAuthRequired
+	}
 	if _, err := s.inboundTask(ctx, id); err != nil {
 		return err
 	}

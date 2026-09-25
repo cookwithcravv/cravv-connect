@@ -312,7 +312,7 @@ func TestKillBlocksOutboundAndPersists(t *testing.T) {
 	if relay.dials() != 1 {
 		t.Fatalf("dialed while killed after restart: %d", relay.dials())
 	}
-	if err := d2.Kill().Resume(ctx); err != nil {
+	if err := d2.Kill().Resume(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	d2Eventually(t, "dial after resume", func() bool { return relay.dials() == 2 })
@@ -372,7 +372,7 @@ func TestResetIdentity(t *testing.T) {
 	d2Eventually(t, "connection", func() bool { _, ok := d.Mailbox(); return ok })
 	old := d.Identity().MachineID()
 
-	if err := d.ResetIdentity(ctx); err != nil {
+	if err := d.ResetIdentity(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	if !d.Kill().Killed() || d.Registered() {
@@ -605,7 +605,7 @@ func TestCloseAndResetStopPairing(t *testing.T) {
 	ctx := context.Background()
 	d := d2NewDaemon(t, t.TempDir(), &d2Relay{})
 	old := d.Pairing()
-	if err := d.ResetIdentity(ctx); err != nil {
+	if err := d.ResetIdentity(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := old.Start(ctx); !errors.Is(err, ErrPairingClosed) {
