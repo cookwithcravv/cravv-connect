@@ -140,7 +140,13 @@ func (f fTasks) Cancel(_ context.Context, _, id string) (store.Task, error) {
 	return task(id, core.TaskCancelled), nil
 }
 func (f fTasks) Approvals(context.Context) ([]store.Task, error) { return f.approvals, nil }
-func (f fTasks) Decide(_ context.Context, id string, approve bool) error {
+
+// The fakes for human-only actions refuse unlocked == false, as the daemon
+// does, so a handler that drops the connection's unlock state fails the tests.
+func (f fTasks) Decide(_ context.Context, id string, approve, unlocked bool) error {
+	if !unlocked {
+		return core.ErrAuthRequired
+	}
 	if approve {
 		f.record("approve " + id)
 	} else {
@@ -155,7 +161,13 @@ func (f fFiles) Send(_ context.Context, to, dir, path string) (core.FileRef, err
 	f.record("file " + to + " " + dir + " " + path)
 	return core.FileRef{FileID: "F1", Name: "a.txt", Size: 3}, nil
 }
-func (f fFiles) Accept(_ context.Context, id string) error { f.record("accept " + id); return nil }
+func (f fFiles) Accept(_ context.Context, id string, unlocked bool) error {
+	if !unlocked {
+		return core.ErrAuthRequired
+	}
+	f.record("accept " + id)
+	return nil
+}
 func (f fFiles) List(context.Context) ([]store.FileRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -229,14 +241,29 @@ func (f fControl) Kill(context.Context) error {
 	f.killed = true
 	return nil
 }
-func (f fControl) Resume(context.Context) error {
+func (f fControl) Resume(_ context.Context, unlocked bool) error {
+	if !unlocked {
+		return core.ErrAuthRequired
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.killed = false
 	return nil
 }
-func (f fControl) AddAllowPath(_ context.Context, d string) error { f.record("allow " + d); return nil }
-func (f fControl) ResetIdentity(context.Context) error            { f.record("reset"); return nil }
+func (f fControl) AddAllowPath(_ context.Context, d string, unlocked bool) error {
+	if !unlocked {
+		return core.ErrAuthRequired
+	}
+	f.record("allow " + d)
+	return nil
+}
+func (f fControl) ResetIdentity(_ context.Context, unlocked bool) error {
+	if !unlocked {
+		return core.ErrAuthRequired
+	}
+	f.record("reset")
+	return nil
+}
 
 type fStatus struct{ *world }
 

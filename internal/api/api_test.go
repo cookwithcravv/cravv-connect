@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -441,5 +443,59 @@ func TestHookCounts(t *testing.T) {
 	h.w.unread, h.w.pending = nil, 0
 	if err := c.Call(bg, ipc.MethodHookCounts, ipc.HookCountsParams{Cwd: "/work/proj"}, &r); err != nil || r.Notice != "" {
 		t.Fatalf("empty: %v %+v", err, r)
+	}
+}
+
+// The daemon queues outbound envelopes while killed instead of refusing them,
+// so the IPC kill gate is what stops agents from sending: every send method
+// must come back with kind "killed" and never reach the ports.
+func TestKillGateRefusesSends(t *testing.T) {
+	h := newHarness(t)
+	c := h.session(t)
+	if err := c.Call(bg, ipc.MethodKill, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	before := h.w.lastCall()
+	sends := map[string]any{
+		ipc.MethodChatSend:   ipc.ChatSendParams{To: "gpu-box", Text: "x"},
+		ipc.MethodTaskCreate: ipc.TaskCreateParams{To: "gpu-box", Instructions: "go"},
+		ipc.MethodFileSend:   ipc.FileSendParams{To: "gpu-box", Path: "a.txt"},
+	}
+	for m, params := range sends {
+		err := c.Call(bg, m, params, nil)
+		if !ipc.IsKind(err, ipc.KindKilled) || !errors.Is(err, core.ErrKilled) {
+			t.Errorf("%s while killed: %v, want kind killed", m, err)
+		}
+	}
+	if got := h.w.lastCall(); got != before {
+		t.Fatalf("a send reached the ports while killed: %q", got)
+	}
+}
+
+func TestHumanOnlyActionsPassUnlockState(t *testing.T) {
+	h := newHarness(t)
+	c := h.dial(t)
+	unlock(t, c)
+	if err := c.Call(bg, ipc.MethodResetIdentity, nil, nil); err != nil || h.w.lastCall() != "reset" {
+		t.Fatalf("reset identity: %v %q", err, h.w.lastCall())
+	}
+	if err := c.Call(bg, ipc.MethodApprovalsDecide, ipc.ApprovalsDecideParams{TaskID: "T3", Approve: false}, nil); err != nil || h.w.lastCall() != "deny T3" {
+		t.Fatalf("decide: %v %q", err, h.w.lastCall())
+	}
+}
+
+func TestFileViewsNeverCarryKeys(t *testing.T) {
+	h := newHarness(t)
+	key := []byte("0123456789abcdef0123456789abcdef")
+	h.w.files["F7"] = store.FileRecord{FileID: "F7", Direction: store.TaskInbound, Peer: gpuID, Name: "k.bin", State: store.FileDone, Key: key, SHA256: key}
+	c := h.dial(t)
+	var raw json.RawMessage
+	if err := c.Call(bg, ipc.MethodFilesList, nil, &raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, leak := range []string{base64.StdEncoding.EncodeToString(key), string(key), `"key"`} {
+		if strings.Contains(string(raw), leak) {
+			t.Fatalf("files.list leaked key material %q: %s", leak, raw)
+		}
 	}
 }

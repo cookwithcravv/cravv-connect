@@ -18,17 +18,17 @@ func (h *handlers) kill(ctx context.Context, _ *ipc.ConnState, _ ipc.Empty) (any
 	return nil, h.p.Control.Kill(ctx)
 }
 
-func (h *handlers) resume(ctx context.Context, _ *ipc.ConnState, _ ipc.Empty) (any, error) {
-	return nil, h.p.Control.Resume(ctx)
+func (h *handlers) resume(ctx context.Context, cs *ipc.ConnState, _ ipc.Empty) (any, error) {
+	return nil, h.p.Control.Resume(ctx, cs.Unlocked())
 }
 
-func (h *handlers) allowPath(ctx context.Context, _ *ipc.ConnState, p ipc.AllowPathParams) (any, error) {
+func (h *handlers) allowPath(ctx context.Context, cs *ipc.ConnState, p ipc.AllowPathParams) (any, error) {
 	if err := absPath("path", p.Path); err != nil {
 		return nil, err
 	}
-	return nil, h.p.Control.AddAllowPath(ctx, filepath.Clean(p.Path))
+	return nil, h.p.Control.AddAllowPath(ctx, filepath.Clean(p.Path), cs.Unlocked())
 }
 
-func (h *handlers) resetIdentity(ctx context.Context, _ *ipc.ConnState, _ ipc.Empty) (any, error) {
-	return nil, h.p.Control.ResetIdentity(ctx)
+func (h *handlers) resetIdentity(ctx context.Context, cs *ipc.ConnState, _ ipc.Empty) (any, error) {
+	return nil, h.p.Control.ResetIdentity(ctx, cs.Unlocked())
 }

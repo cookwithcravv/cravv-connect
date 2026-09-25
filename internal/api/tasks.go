@@ -101,9 +101,9 @@ func (h *handlers) approvalsList(ctx context.Context, _ *ipc.ConnState, _ ipc.Em
 	return out, nil
 }
 
-func (h *handlers) approvalsDecide(ctx context.Context, _ *ipc.ConnState, p ipc.ApprovalsDecideParams) (any, error) {
+func (h *handlers) approvalsDecide(ctx context.Context, cs *ipc.ConnState, p ipc.ApprovalsDecideParams) (any, error) {
 	if err := required("task_id", p.TaskID); err != nil {
 		return nil, err
 	}
-	return nil, h.p.Tasks.Decide(ctx, p.TaskID, p.Approve)
+	return nil, h.p.Tasks.Decide(ctx, p.TaskID, p.Approve, cs.Unlocked())
 }

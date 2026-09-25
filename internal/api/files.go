@@ -38,9 +38,9 @@ func (h *handlers) filesList(ctx context.Context, _ *ipc.ConnState, _ ipc.Empty)
 	return out, nil
 }
 
-func (h *handlers) filesAccept(ctx context.Context, _ *ipc.ConnState, p ipc.FileIDParams) (any, error) {
+func (h *handlers) filesAccept(ctx context.Context, cs *ipc.ConnState, p ipc.FileIDParams) (any, error) {
 	if err := required("file_id", p.FileID); err != nil {
 		return nil, err
 	}
-	return nil, h.p.Files.Accept(ctx, p.FileID)
+	return nil, h.p.Files.Accept(ctx, p.FileID, cs.Unlocked())
 }

@@ -42,13 +42,16 @@ type TaskPort interface {
 	Fail(ctx context.Context, session, id, reason string) (store.Task, error)
 	Cancel(ctx context.Context, session, id string) (store.Task, error)
 	Approvals(ctx context.Context) ([]store.Task, error)
-	Decide(ctx context.Context, id string, approve bool) error
+	// Decide approves or denies a held task. unlocked reports whether this
+	// IPC connection holds a fresh password unlock; the daemon re-checks it.
+	Decide(ctx context.Context, id string, approve, unlocked bool) error
 }
 
 // FilePort sends, lists, and accepts files. to is "alias" or "alias/session".
 type FilePort interface {
 	Send(ctx context.Context, to, projectDir, path string) (core.FileRef, error)
-	Accept(ctx context.Context, id string) error
+	// Accept releases a held file. unlocked is the connection's unlock state.
+	Accept(ctx context.Context, id string, unlocked bool) error
 	List(ctx context.Context) ([]store.FileRecord, error)
 }
 
@@ -74,13 +77,14 @@ type PairingPort interface {
 }
 
 // ControlPort holds machine-wide controls. AddAllowPath validates the
-// directory and audits the change.
+// directory and audits the change. The human-only methods take unlocked, the
+// IPC connection's unlock state, so the daemon enforces the gate as well.
 type ControlPort interface {
 	Killed() bool
 	Kill(ctx context.Context) error
-	Resume(ctx context.Context) error
-	AddAllowPath(ctx context.Context, dir string) error
-	ResetIdentity(ctx context.Context) error
+	Resume(ctx context.Context, unlocked bool) error
+	AddAllowPath(ctx context.Context, dir string, unlocked bool) error
+	ResetIdentity(ctx context.Context, unlocked bool) error
 }
 
 // StatusPort reports machine status, including peers with their Online flag.
