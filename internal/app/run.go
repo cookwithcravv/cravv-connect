@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 
 	"github.com/cravv/cravv-connect/internal/api"
 	"github.com/cravv/cravv-connect/internal/config"
@@ -35,8 +36,14 @@ func Run(ctx context.Context, paths config.Paths, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	srv := api.NewServer(Ports(d), clock, logger)
+	return Serve(ctx, d, ln, clock, logger)
+}
 
+// Serve runs the daemon and the ipc-v1 API on ln until ctx ends or one of
+// them fails. It does not close d. Run and the e2e harness both use it, so
+// tests serve the daemon exactly as `cravv-connect daemon run` does.
+func Serve(ctx context.Context, d *daemon.Daemon, ln net.Listener, clock core.Clock, logger *slog.Logger) error {
+	srv := api.NewServer(Ports(d), clock, logger)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	errc := make(chan error, 2)
