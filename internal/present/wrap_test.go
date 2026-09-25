@@ -92,3 +92,47 @@ func TestWrapCapsAttributeLength(t *testing.T) {
 		t.Fatalf("session not capped at %d runes: %s", MaxAttrRunes, out)
 	}
 }
+
+// invisibles are characters a peer could use to hide or reorder text an
+// agent reads: Unicode tag characters (ASCII smuggling), bidi embeddings,
+// overrides and isolates, zero-width characters and marks, and the BOM.
+var invisibles = []rune{
+	0xE0000, 0xE0001, 0xE0041, 0xE0061, 0xE007F,
+	0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
+	0x2066, 0x2067, 0x2068, 0x2069,
+	0x200B, 0x200C, 0x200D, 0x200E, 0x200F,
+	0xFEFF,
+}
+
+func TestWrapStripsInvisiblesFromBody(t *testing.T) {
+	var body strings.Builder
+	body.WriteString("line one\n")
+	for _, r := range invisibles {
+		body.WriteString("a")
+		body.WriteRune(r)
+	}
+	body.WriteString("\nline two é 日本 🙂")
+	out := Wrap(Item{Alias: "a", Trust: "t", ID: "1", Kind: "chat", Body: body.String()})
+	for _, r := range invisibles {
+		if strings.ContainsRune(out, r) {
+			t.Errorf("body kept U+%04X", r)
+		}
+	}
+	wantBody := "line one\n" + strings.Repeat("a", len(invisibles)) + "\nline two é 日本 🙂"
+	if !strings.Contains(out, ">\n"+wantBody+"\n</remote_message>") {
+		t.Fatalf("visible body text changed:\n%q", out)
+	}
+}
+
+func TestWrapStripsInvisiblesAndLineSeparatorsFromAttributes(t *testing.T) {
+	var s strings.Builder
+	s.WriteString("claude")
+	for _, r := range append(invisibles, 0x2028, 0x2029) {
+		s.WriteRune(r)
+	}
+	s.WriteString("@proj")
+	out := Wrap(Item{Alias: "a", Session: s.String(), Trust: "t", ID: "1", Kind: "chat", Body: "x"})
+	if !strings.Contains(out, `session="claude@proj"`) {
+		t.Fatalf("attribute not cleaned: %q", out)
+	}
+}
