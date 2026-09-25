@@ -390,8 +390,10 @@ func (s *FileService) PeerCutOff(ctx context.Context, peer store.Peer, reason st
 }
 
 // admit checks the per-peer quota and free disk space for an incoming file.
+// The quota counts running downloads and files downloaded within
+// core.InboxRetention (older records are purged by maintenance).
 func (s *FileService) admit(ctx context.Context, rec store.FileRecord) error {
-	used, err := s.d.Files.InboundBytes(ctx, rec.Peer)
+	used, err := s.d.Files.InboundBytes(ctx, rec.Peer, s.d.Clock.Now().Add(-core.InboxRetention))
 	if err != nil {
 		return err
 	}

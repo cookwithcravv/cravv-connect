@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -674,5 +675,42 @@ func TestKillWhileConnectingClosesTheMailbox(t *testing.T) {
 	d.mu.Unlock()
 	if live != nil {
 		t.Fatal("mailbox recorded as live while killed")
+	}
+}
+
+func TestMaintainPurgesOldFileRecords(t *testing.T) {
+	ctx := context.Background()
+	opts := d2Options(t.TempDir(), &d2Relay{})
+	clock := core.NewFakeClock(d2Epoch)
+	opts.Clock = clock
+	d, err := New(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	onDisk := filepath.Join(t.TempDir(), "kept.bin")
+	if err := os.WriteFile(onDisk, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []store.FileRecord{
+		{FileID: "done", Direction: store.TaskInbound, Peer: "p", State: store.FileDone, LocalPath: onDisk, CreatedAt: d2Epoch},
+		{FileID: "held", Direction: store.TaskInbound, Peer: "p", State: store.FileHeld, CreatedAt: d2Epoch},
+	} {
+		if err := d.store.PutFile(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clock.Advance(core.InboxRetention + time.Minute)
+	if err := d.Maintain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.store.GetFile(ctx, "done"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("old done record kept: %v", err)
+	}
+	if _, err := d.store.GetFile(ctx, "held"); err != nil {
+		t.Fatalf("held record purged: %v", err)
+	}
+	if _, err := os.Stat(onDisk); err != nil {
+		t.Fatalf("file on disk touched: %v", err)
 	}
 }

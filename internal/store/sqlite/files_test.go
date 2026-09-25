@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -95,12 +96,13 @@ func TestListFilesByState(t *testing.T) {
 	}
 }
 
-func TestInboundBytesCountsOnlyInboundDownloadingOrDone(t *testing.T) {
+func TestInboundBytesCountsOnlyInboundDownloadingOrRecentDone(t *testing.T) {
 	ctx := context.Background()
 	fs := newTestDB(t)
 	for _, f := range []store.FileRecord{
-		testFile("dl", store.TaskInbound, "A", store.FileDownloading, 1000, t0),
+		testFile("dl-old", store.TaskInbound, "A", store.FileDownloading, 1000, t0.Add(-time.Hour)),
 		testFile("done", store.TaskInbound, "A", store.FileDone, 200, t0),
+		testFile("done-old", store.TaskInbound, "A", store.FileDone, 3000, t0.Add(-time.Minute)),
 		testFile("held", store.TaskInbound, "A", store.FileHeld, 50000, t0),
 		testFile("failed", store.TaskInbound, "A", store.FileFailed, 70000, t0),
 		testFile("offered", store.TaskInbound, "A", store.FileOffered, 80000, t0),
@@ -111,11 +113,48 @@ func TestInboundBytesCountsOnlyInboundDownloadingOrDone(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	n, err := fs.InboundBytes(ctx, "A")
+	n, err := fs.InboundBytes(ctx, "A", t0)
 	if err != nil || n != 1200 {
-		t.Fatalf("InboundBytes(A) = %d, %v; want 1200", n, err)
+		t.Fatalf("InboundBytes(A, t0) = %d, %v; want 1200 (downloading + done since t0)", n, err)
 	}
-	if n, _ := fs.InboundBytes(ctx, "nobody"); n != 0 {
+	if n, _ := fs.InboundBytes(ctx, "A", t0.Add(-time.Minute)); n != 4200 {
+		t.Fatalf("InboundBytes(A, t0-1m) = %d, want 4200", n)
+	}
+	if n, _ := fs.InboundBytes(ctx, "nobody", t0); n != 0 {
 		t.Fatalf("InboundBytes(nobody) = %d", n)
+	}
+}
+
+func TestPurgeFilesBeforeKeepsActiveRecords(t *testing.T) {
+	ctx := context.Background()
+	fs := newTestDB(t)
+	old := t0.Add(-time.Hour)
+	for _, f := range []store.FileRecord{
+		testFile("done-old", store.TaskInbound, "A", store.FileDone, 1, old),
+		testFile("failed-old", store.TaskInbound, "A", store.FileFailed, 1, old),
+		testFile("declined-old", store.TaskInbound, "A", store.FileDeclined, 1, old),
+		testFile("sent-old", store.TaskOutbound, "A", store.FileSent, 1, old),
+		testFile("out-failed-old", store.TaskOutbound, "A", store.FileFailed, 1, old),
+		testFile("held-old", store.TaskInbound, "A", store.FileHeld, 1, old),
+		testFile("dl-old", store.TaskInbound, "A", store.FileDownloading, 1, old),
+		testFile("up-old", store.TaskOutbound, "A", store.FileUploading, 1, old),
+		testFile("done-new", store.TaskInbound, "A", store.FileDone, 1, t0),
+	} {
+		if err := fs.PutFile(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := fs.PurgeFilesBefore(ctx, t0)
+	if err != nil || n != 5 {
+		t.Fatalf("PurgeFilesBefore = %d, %v; want 5", n, err)
+	}
+	left, _ := fs.ListFiles(ctx)
+	var ids []string
+	for _, f := range left {
+		ids = append(ids, f.FileID)
+	}
+	slices.Sort(ids)
+	if want := []string{"dl-old", "done-new", "held-old", "up-old"}; !slices.Equal(ids, want) {
+		t.Fatalf("left = %v, want %v", ids, want)
 	}
 }

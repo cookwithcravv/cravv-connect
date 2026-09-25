@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/audit"
 	"github.com/cravv/cravv-connect/internal/core"
@@ -557,5 +558,25 @@ func TestKillStopsDownloadsAndResumeFinishes(t *testing.T) {
 	}
 	if items, _ := d.Inbox().Check(ctx, session, 10); len(items) != 1 || items[0].FileID != body.FileID {
 		t.Fatalf("inbox after resume = %+v", items)
+	}
+}
+
+// Downloaded files stop counting toward the quota after InboxRetention (the
+// records are purged then; the files on disk are the human's).
+func TestQuotaForgetsOldDownloads(t *testing.T) {
+	e := d2FileSvc(t, 2*core.FileChunkBytes)
+	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
+	first := e.blobs.put(t, "a.bin", randomBytes(t, core.FileChunkBytes+1))
+	e.offer(t, peer, first)
+	second := e.blobs.put(t, "b.bin", randomBytes(t, core.FileChunkBytes))
+	e.offer(t, peer, second)
+	if r := e.record(t, second.FileID); r.State != store.FileDeclined {
+		t.Fatalf("over quota: %s", r.State)
+	}
+	e.te.clock.Advance(core.InboxRetention + time.Minute)
+	third := e.blobs.put(t, "c.bin", randomBytes(t, core.FileChunkBytes))
+	e.offer(t, peer, third)
+	if r := e.record(t, third.FileID); r.State != store.FileDone {
+		t.Fatalf("after retention: %s (%s)", r.State, r.Reason)
 	}
 }

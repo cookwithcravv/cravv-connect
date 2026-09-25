@@ -365,6 +365,9 @@ func (d *Daemon) maintain(ctx context.Context, g *services) error {
 	if _, err := d.store.PurgeInboxBefore(ctx, now.Add(-core.InboxRetention)); err != nil {
 		errs = append(errs, fmt.Errorf("purge inbox: %w", err))
 	}
+	if _, err := d.store.PurgeFilesBefore(ctx, now.Add(-core.InboxRetention)); err != nil {
+		errs = append(errs, fmt.Errorf("purge file records: %w", err))
+	}
 	if _, err := d.store.PurgeDedupBefore(ctx, now.Add(-core.DedupWindow)); err != nil {
 		errs = append(errs, fmt.Errorf("purge dedup: %w", err))
 	}

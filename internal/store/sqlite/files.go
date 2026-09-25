@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/store"
@@ -85,12 +86,24 @@ func (d *DB) UpdateFile(ctx context.Context, id string, mutate func(*store.FileR
 	return out, nil
 }
 
-func (d *DB) InboundBytes(ctx context.Context, peer core.MachineID) (int64, error) {
+func (d *DB) InboundBytes(ctx context.Context, peer core.MachineID, since time.Time) (int64, error) {
 	var n int64
 	err := d.sql.QueryRowContext(ctx, `SELECT COALESCE(SUM(size), 0) FROM files
-WHERE peer = ? AND direction = ? AND state IN (?, ?)`,
-		string(peer), string(store.TaskInbound), string(store.FileDownloading), string(store.FileDone)).Scan(&n)
+WHERE peer = ? AND direction = ? AND (state = ? OR (state = ? AND created_at >= ?))`,
+		string(peer), string(store.TaskInbound), string(store.FileDownloading), string(store.FileDone),
+		toMS(since)).Scan(&n)
 	return n, err
+}
+
+// PurgeFilesBefore deletes finished file records created before t.
+func (d *DB) PurgeFilesBefore(ctx context.Context, t time.Time) (int, error) {
+	res, err := d.sql.ExecContext(ctx, `DELETE FROM files WHERE created_at < ? AND state IN (?, ?, ?, ?)`,
+		toMS(t), string(store.FileDone), string(store.FileFailed), string(store.FileDeclined), string(store.FileSent))
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
 }
 
 func scanFile(s rowScanner) (store.FileRecord, error) {

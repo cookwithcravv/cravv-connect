@@ -224,7 +224,12 @@ type FileStore interface {
 	// (any Store method, on this or another interface): doing so deadlocks.
 	// It should only edit the *FileRecord; do side effects after UpdateFile returns.
 	UpdateFile(ctx context.Context, id string, mutate func(*FileRecord) error) (FileRecord, error)
-	InboundBytes(ctx context.Context, peer core.MachineID) (int64, error) // sum Size where Direction=in AND State in (downloading, done)
+	// InboundBytes sums Size over the peer's inbound files that count toward its
+	// quota: State=downloading, or State=done with CreatedAt >= since.
+	InboundBytes(ctx context.Context, peer core.MachineID, since time.Time) (int64, error)
+	// PurgeFilesBefore deletes finished records (done, failed, declined, sent)
+	// with CreatedAt < t. Files on disk are not touched.
+	PurgeFilesBefore(ctx context.Context, t time.Time) (int, error)
 }
 
 type DedupStore interface {
