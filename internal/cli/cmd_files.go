@@ -28,7 +28,7 @@ func newFilesCmd(env *Env) *cobra.Command {
 				tw := tabwriter.NewWriter(env.Stdout, 0, 4, 2, ' ', 0)
 				fmt.Fprintln(tw, "FILE ID\tDIR\tPEER\tSTATE\tSIZE\tNAME")
 				for _, f := range r.Files {
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", f.FileID, f.Direction, f.Peer, f.State, f.Size, terminalSafe(f.Name))
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", terminalSafe(f.FileID), terminalSafe(string(f.Direction)), terminalSafe(f.Peer), terminalSafe(string(f.State)), f.Size, terminalSafe(f.Name))
 				}
 				return tw.Flush()
 			})
@@ -46,7 +46,7 @@ func newFilesCmd(env *Env) *cobra.Command {
 				}); err != nil {
 					return err
 				}
-				fmt.Fprintf(env.Stdout, "Accepted %s; it downloads in the background.\n", args[0])
+				fmt.Fprintf(env.Stdout, "Accepted %s; it downloads in the background.\n", terminalSafe(args[0]))
 				return nil
 			})
 		},

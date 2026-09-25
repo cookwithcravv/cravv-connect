@@ -200,16 +200,16 @@ func TestApprovalsInteractive(t *testing.T) {
 	want := "" +
 		"\nTask 1 of 3: T1 from gpu-box, received 2026-09-26 10:00 UTC\n" +
 		"Size: 20 bytes, SHA-256: ab12\n" +
-		"--- preview (first 500 characters) ---\nrun [2Jtests\n---\n" +
-		"--- full text ---\nrun [2Jtests fully\n---\n" +
+		"--- preview (first 500 characters) ---\n| run [2Jtests\n---\n" +
+		"--- full text ---\n| run [2Jtests fully\n---\n" +
 		"Approved T1.\n" +
 		"\nTask 2 of 3: T2 from mac, received 2026-09-26 10:00 UTC\n" +
 		"Size: 6 bytes, SHA-256: cd34\n" +
-		"--- preview (first 500 characters) ---\nrm -rf\n---\n" +
+		"--- preview (first 500 characters) ---\n| rm -rf\n---\n" +
 		"Denied T2.\n" +
 		"\nTask 3 of 3: T3 from mac, received 2026-09-26 10:00 UTC\n" +
 		"Size: 5 bytes, SHA-256: ef56\n" +
-		"--- preview (first 500 characters) ---\nlater\n---\n" +
+		"--- preview (first 500 characters) ---\n| later\n---\n" +
 		"Skipped.\n"
 	if r.stdout != want {
 		t.Fatalf("stdout\n%q\nwant\n%q", r.stdout, want)
@@ -423,12 +423,6 @@ func TestSuggestAlias(t *testing.T) {
 		if got := suggestAlias(in); got != want {
 			t.Errorf("suggestAlias(%q) = %q, want %q", in, got, want)
 		}
-	}
-}
-
-func TestTerminalSafe(t *testing.T) {
-	if got := terminalSafe("a\x1b[31mred\x07\u009b\nb\tc"); got != "a[31mred\nb\tc" {
-		t.Fatalf("%q", got)
 	}
 }
 

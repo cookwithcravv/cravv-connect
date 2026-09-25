@@ -59,6 +59,11 @@ func Wrap(it Item) string {
 	return b.String()
 }
 
+// IsInvisible reports whether r is one of the characters Wrap strips from
+// peer text (see isInvisible). Other packages that show peer text, such as
+// the CLI, use it to strip the same list.
+func IsInvisible(r rune) bool { return isInvisible(r) }
+
 // isInvisible reports characters that can hide or reorder text an agent
 // reads: Unicode tag characters U+E0000-E007F ("ASCII smuggling"), bidi
 // embeddings/overrides U+202A-202E and isolates U+2066-2069, zero-width

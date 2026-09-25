@@ -48,9 +48,9 @@ func newApprovalsCmd(env *Env) *cobra.Command {
 // reviewOne shows one pending task and applies the human's choice.
 func reviewOne(ctx context.Context, env *Env, c Caller, n, total int, t ipc.ApprovalView) error {
 	w := env.Stdout
-	fmt.Fprintf(w, "\nTask %d of %d: %s from %s, received %s\n", n, total, t.TaskID, t.Peer, fmtTime(t.Received))
-	fmt.Fprintf(w, "Size: %d bytes, SHA-256: %s\n", t.Size, t.SHA256)
-	fmt.Fprintf(w, "--- preview (first %d characters) ---\n%s\n---\n", api.PreviewRunes, terminalSafe(t.Preview))
+	fmt.Fprintf(w, "\nTask %d of %d: %s from %s, received %s\n", n, total, terminalSafe(t.TaskID), terminalSafe(t.Peer), fmtTime(t.Received))
+	fmt.Fprintf(w, "Size: %d bytes, SHA-256: %s\n", t.Size, terminalSafe(t.SHA256))
+	fmt.Fprintf(w, "--- preview (first %d characters) ---\n%s\n---\n", api.PreviewRunes, terminalBlock(t.Preview))
 	for {
 		ans, err := env.Prompt.Line("[a]pprove, [d]eny, [v]iew full text, [s]kip", "s")
 		if err != nil {
@@ -62,7 +62,7 @@ func reviewOne(ctx context.Context, env *Env, c Caller, n, total int, t ipc.Appr
 		case "d", "deny":
 			return decide(ctx, env, c, t.TaskID, false)
 		case "v", "view":
-			fmt.Fprintf(w, "--- full text ---\n%s\n---\n", terminalSafe(t.Full))
+			fmt.Fprintf(w, "--- full text ---\n%s\n---\n", terminalBlock(t.Full))
 		case "s", "skip":
 			fmt.Fprintln(w, "Skipped.")
 			return nil
@@ -79,9 +79,9 @@ func decide(ctx context.Context, env *Env, c Caller, id string, approve bool) er
 		return err
 	}
 	if approve {
-		fmt.Fprintf(env.Stdout, "Approved %s.\n", id)
+		fmt.Fprintf(env.Stdout, "Approved %s.\n", terminalSafe(id))
 	} else {
-		fmt.Fprintf(env.Stdout, "Denied %s.\n", id)
+		fmt.Fprintf(env.Stdout, "Denied %s.\n", terminalSafe(id))
 	}
 	return nil
 }

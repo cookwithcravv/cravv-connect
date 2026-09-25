@@ -47,12 +47,12 @@ func printStatus(env *Env, st ipc.StatusResult) {
 	if st.Killed {
 		kill = "ON (run `cravv-connect resume`)"
 	}
-	fmt.Fprintf(w, "Machine:     %s (%s)\n", st.DeviceName, shortID(st.MachineID))
-	fmt.Fprintf(w, "Relay:       %s (%s)\n", st.RelayURL, relay)
+	fmt.Fprintf(w, "Machine:     %s (%s)\n", terminalSafe(st.DeviceName), terminalSafe(shortID(st.MachineID)))
+	fmt.Fprintf(w, "Relay:       %s (%s)\n", terminalSafe(st.RelayURL), relay)
 	fmt.Fprintf(w, "Kill switch: %s\n", kill)
 	peers := make([]string, 0, len(st.Peers))
 	for _, p := range st.Peers {
-		peers = append(peers, fmt.Sprintf("%s (%s, %s)", p.Alias, p.TrustIn, peerState(p)))
+		peers = append(peers, fmt.Sprintf("%s (%s, %s)", terminalSafe(p.Alias), terminalSafe(string(p.TrustIn)), peerState(p)))
 	}
 	if len(peers) == 0 {
 		peers = append(peers, "none")
@@ -60,14 +60,18 @@ func printStatus(env *Env, st ipc.StatusResult) {
 	fmt.Fprintf(w, "Peers:       %s\n", strings.Join(peers, ", "))
 	sessions := "none"
 	if len(st.Sessions) > 0 {
-		sessions = strings.Join(st.Sessions, ", ")
+		safe := make([]string, len(st.Sessions))
+		for i, s := range st.Sessions {
+			safe[i] = terminalSafe(s)
+		}
+		sessions = strings.Join(safe, ", ")
 	}
 	fmt.Fprintf(w, "Sessions:    %s\n", sessions)
 	fmt.Fprintf(w, "Outbox:      %d pending, %d held\n", st.OutboxPending, st.OutboxHeld)
 	fmt.Fprintf(w, "Inbox:       %d unread\n", st.InboxUnread)
 	fmt.Fprintf(w, "Approvals:   %d pending\n", st.PendingApprovals)
 	for _, e := range st.Errors {
-		fmt.Fprintf(w, "Warning:     %s\n", e)
+		fmt.Fprintf(w, "Warning:     %s\n", terminalSafe(e))
 	}
 }
 
@@ -88,7 +92,7 @@ func newLogCmd(env *Env) *cobra.Command {
 					if who == "" && e.Peer != "" {
 						who = e.Peer.Short()
 					}
-					fmt.Fprintf(env.Stdout, "%s  %-16s %-12s %s\n", e.TS.UTC().Format("2006-01-02T15:04:05Z"), e.Type, orDash(who), orDash(e.ItemID))
+					fmt.Fprintf(env.Stdout, "%s  %-16s %-12s %s\n", e.TS.UTC().Format("2006-01-02T15:04:05Z"), terminalSafe(string(e.Type)), orDash(terminalSafe(who)), orDash(terminalSafe(e.ItemID)))
 				}
 				return nil
 			})

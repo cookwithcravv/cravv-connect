@@ -60,7 +60,7 @@ func newPeersCmd(env *Env) *cobra.Command {
 				tw := tabwriter.NewWriter(env.Stdout, 0, 4, 2, ' ', 0)
 				fmt.Fprintln(tw, "ALIAS\tTRUST\tSTATE\tMACHINE ID\tPAIRED")
 				for _, p := range r.Peers {
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", p.Alias, p.TrustIn, peerState(p), p.MachineID, fmtTime(p.PairedAt))
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", terminalSafe(p.Alias), terminalSafe(string(p.TrustIn)), peerState(p), terminalSafe(string(p.MachineID)), fmtTime(p.PairedAt))
 				}
 				return tw.Flush()
 			})

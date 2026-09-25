@@ -75,7 +75,7 @@ func newJoinCmd(env *Env) *cobra.Command {
 // finalizePeer asks the human for a local alias and a trust level.
 func finalizePeer(ctx context.Context, env *Env, c Caller, p ipc.PendingPeerResult) error {
 	w := env.Stdout
-	fmt.Fprintf(w, "Connected to machine %s.\n", shortID(p.MachineID))
+	fmt.Fprintf(w, "Connected to machine %s.\n", terminalSafe(shortID(string(p.MachineID))))
 	alias, err := env.Prompt.Line("Local name for this peer", suggestAlias(p.SuggestedName))
 	if err != nil {
 		return err
@@ -101,7 +101,7 @@ func finalizePeer(ctx context.Context, env *Env, c Caller, p ipc.PendingPeerResu
 	}); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "Paired with %s (trust: %s).\n", res.Alias, trust)
-	fmt.Fprintf(w, "Machine ID: %s\n", p.MachineID)
+	fmt.Fprintf(w, "Paired with %s (trust: %s).\n", terminalSafe(res.Alias), terminalSafe(trust))
+	fmt.Fprintf(w, "Machine ID: %s\n", terminalSafe(string(p.MachineID)))
 	return nil
 }

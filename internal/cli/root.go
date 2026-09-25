@@ -49,7 +49,7 @@ func Main(args []string, env *Env) int {
 	root.SetArgs(args)
 	if err := root.ExecuteContext(context.Background()); err != nil {
 		if !errors.Is(err, errSilent) {
-			fmt.Fprintln(env.Stderr, "error:", userMessage(err))
+			fmt.Fprintln(env.Stderr, "error:", terminalSafe(userMessage(err)))
 		}
 		return 1
 	}
