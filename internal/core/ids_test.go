@@ -101,12 +101,12 @@ func TestValidID(t *testing.T) {
 	}
 	bad := []string{
 		"", "T1", "01j8zr0a1b2c3d4e5f6g7h8j9k", // lower case
-		"01J8ZR0A1B2C3D4E5F6G7H8J9",            // 25 chars
-		"01J8ZR0A1B2C3D4E5F6G7H8J9KK",          // 27 chars
-		"01J8ZR0A1B2C3D4E5F6G7H8JIL",           // I and L are not Crockford
+		"01J8ZR0A1B2C3D4E5F6G7H8J9",   // 25 chars
+		"01J8ZR0A1B2C3D4E5F6G7H8J9KK", // 27 chars
+		"01J8ZR0A1B2C3D4E5F6G7H8JIL",  // I and L are not Crockford
 		"01J8ZR0A1B2C3D4E5F6G7H8J\n\x1b",
 		"01J8ZR0A1B2C3D4E5F6\x1b[8mXX",
-		"01J8ZR0A1B2C3D4E5F6G7H8J9‮",
+		"01J8ZR0A1B2C3D4E5F6G7H8J9\u202e",
 	}
 	for _, s := range bad {
 		if ValidID(s) {
