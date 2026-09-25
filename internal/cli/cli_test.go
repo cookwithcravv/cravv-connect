@@ -1,0 +1,525 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/cravv/cravv-connect/internal/audit"
+	"github.com/cravv/cravv-connect/internal/auth"
+	"github.com/cravv/cravv-connect/internal/config"
+	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cravv/cravv-connect/internal/store"
+)
+
+var paired = time.Date(2026, 9, 26, 10, 0, 0, 0, time.UTC)
+
+func TestDaemonNotRunning(t *testing.T) {
+	fd := newFakeDaemon(t) // never started
+	r := fd.run(nil, "peers")
+	if r.code != 1 || r.stderr != "error: daemon not running: run `cravv-connect daemon start`\n" {
+		t.Fatalf("code %d stderr %q", r.code, r.stderr)
+	}
+}
+
+func TestPeersTable(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodPeerList, ipc.GateAllowWhenKilled, ipc.PeerListResult{Peers: []ipc.PeerView{
+		{Alias: "gpu-box", MachineID: "abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrst", TrustIn: "autonomous", Online: true, PairedAt: paired},
+		{Alias: "mac", MachineID: "m2", TrustIn: "ask-first", PausedByPeer: true, PairedAt: paired},
+	}})
+	fd.start()
+	r := fd.run(nil, "peers")
+	want := "" +
+		"ALIAS    TRUST       STATE           MACHINE ID                                            PAIRED\n" +
+		"gpu-box  autonomous  online          abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrst  2026-09-26 10:00 UTC\n" +
+		"mac      ask-first   paused by peer  m2                                                    2026-09-26 10:00 UTC\n"
+	if r.code != 0 || r.stdout != want {
+		t.Fatalf("code %d\n%s\nwant\n%s", r.code, r.stdout, want)
+	}
+}
+
+func TestPeersEmpty(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodPeerList, ipc.GateNone, ipc.PeerListResult{})
+	fd.start()
+	if r := fd.run(nil, "peers"); r.stdout != "No peers yet. Run `cravv-connect pair` to add one.\n" {
+		t.Fatalf("%q", r.stdout)
+	}
+}
+
+func TestPairFlow(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodPairStart, ipc.GateUnlock, ipc.PairStartResult{PendingID: "P1", Code: "CRAVV-7K3F-9QXM-TR2A"})
+	fd.reply(ipc.MethodPairAwait, ipc.GateUnlock, ipc.PendingPeerResult{PendingID: "P1", SuggestedName: "GPU Box!!", MachineID: "abcdefghijklmnopqrstuvwxyz"})
+	fd.reply(ipc.MethodPairFinalize, ipc.GateUnlock, ipc.PairFinalizeResult{Alias: "gpu-box"})
+	fd.start()
+	p := &fakePrompter{passwords: []string{"wrong", "pw"}, lines: []string{"", "banana", ""}}
+	r := fd.run(p, "pair")
+	if r.code != 0 {
+		t.Fatalf("code %d stderr %s", r.code, r.stderr)
+	}
+	want := "" +
+		"Bind code: CRAVV-7K3F-9QXM-TR2A\n\n" +
+		"On the other machine run:\n" +
+		"  cravv-connect join CRAVV-7K3F-9QXM-TR2A\n" +
+		"The code works once and expires in 10 minutes.\n" +
+		"Waiting for the other machine...\n" +
+		"Connected to machine abcdefghijklmnop.\n" +
+		"Trust levels: chat-only (messages only), ask-first (you approve each task), autonomous (tasks run without asking).\n" +
+		"Paired with gpu-box (trust: ask-first).\n" +
+		"Machine ID: abcdefghijklmnopqrstuvwxyz\n"
+	if r.stdout != want {
+		t.Fatalf("stdout\n%s\nwant\n%s", r.stdout, want)
+	}
+	if !strings.Contains(r.stderr, "Incorrect password, try again.") || !strings.Contains(r.stderr, "Please type chat-only") {
+		t.Fatalf("stderr %q", r.stderr)
+	}
+	if got := fd.params(ipc.MethodPairFinalize); got != `{"pending_id":"P1","alias":"gpu-box","trust":"ask-first"}` {
+		t.Fatalf("finalize params %s", got)
+	}
+	// The password was asked once for the whole flow (one unlocked connection).
+	if n := strings.Count(strings.Join(r.prompt.asked, "\n"), "password:"); n != 2 {
+		t.Fatalf("password prompts %d: %v", n, r.prompt.asked)
+	}
+}
+
+func TestJoinPassesCode(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodJoinStart, ipc.GateUnlock, ipc.PendingPeerResult{PendingID: "P2", SuggestedName: "mac", MachineID: "m"})
+	fd.reply(ipc.MethodPairFinalize, ipc.GateUnlock, ipc.PairFinalizeResult{Alias: "laptop"})
+	fd.start()
+	p := &fakePrompter{passwords: []string{"pw"}, lines: []string{"laptop", "autonomous"}}
+	r := fd.run(p, "join", "cravv-7k3f-9qxm-tr2a")
+	if r.code != 0 || !strings.Contains(r.stdout, "Paired with laptop (trust: autonomous).") {
+		t.Fatalf("%d %s %s", r.code, r.stdout, r.stderr)
+	}
+	if fd.params(ipc.MethodJoinStart) != `{"code":"cravv-7k3f-9qxm-tr2a"}` {
+		t.Fatalf("join params %s", fd.params(ipc.MethodJoinStart))
+	}
+}
+
+func TestLockedStopsRetrying(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodResume, ipc.GateUnlock|ipc.GateAllowWhenKilled, nil)
+	fd.start()
+	p := &fakePrompter{passwords: []string{"a", "b", "c", "d"}}
+	r := fd.run(p, "resume")
+	if r.code != 1 || !strings.Contains(r.stderr, "incorrect password") {
+		t.Fatalf("%d %q", r.code, r.stderr)
+	}
+	if len(p.passwords) != 1 {
+		t.Fatalf("asked %d times, want 3", 4-len(p.passwords))
+	}
+}
+
+func trustHandler(fd *fakeDaemon) {
+	fd.handle(ipc.MethodPeerTrust, ipc.GateNone, func(cs *ipc.ConnState, p json.RawMessage) (any, error) {
+		var tp ipc.PeerTrustParams
+		json.Unmarshal(p, &tp)
+		if tp.Level == "autonomous" && !cs.Unlocked() {
+			return nil, core.ErrAuthRequired
+		}
+		return nil, nil
+	})
+}
+
+func TestTrustAsksPasswordOnlyWhenNeeded(t *testing.T) {
+	fd := newFakeDaemon(t)
+	trustHandler(fd)
+	fd.start()
+	r := fd.run(&fakePrompter{}, "trust", "gpu-box", "chat-only")
+	if r.code != 0 || r.stdout != "Trust for gpu-box is now chat-only.\n" || len(r.prompt.asked) != 0 {
+		t.Fatalf("lower: %d %q %v", r.code, r.stdout, r.prompt.asked)
+	}
+	r = fd.run(&fakePrompter{passwords: []string{"pw"}}, "trust", "gpu-box", "autonomous")
+	if r.code != 0 || len(r.prompt.asked) != 1 {
+		t.Fatalf("raise: %d %v %s", r.code, r.prompt.asked, r.stderr)
+	}
+}
+
+func TestUnpairConfirms(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodPeerUnpair, ipc.GateNone, nil)
+	fd.start()
+	r := fd.run(&fakePrompter{lines: []string{"no"}}, "unpair", "gpu-box")
+	if r.stdout != "Nothing changed.\n" || slices.Contains(fd.methods(), ipc.MethodPeerUnpair) {
+		t.Fatalf("declined: %q %v", r.stdout, fd.methods())
+	}
+	r = fd.run(&fakePrompter{lines: []string{"yes"}}, "unpair", "gpu-box")
+	if r.stdout != "Unpaired gpu-box.\n" {
+		t.Fatalf("confirmed: %q", r.stdout)
+	}
+	r = fd.run(nil, "unpair", "--yes", "gpu-box")
+	if r.stdout != "Unpaired gpu-box.\n" {
+		t.Fatalf("--yes: %q", r.stdout)
+	}
+}
+
+func TestPauseKillResume(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodPeerPause, ipc.GateNone, nil)
+	fd.reply(ipc.MethodKill, ipc.GateNone, nil)
+	fd.reply(ipc.MethodResume, ipc.GateUnlock|ipc.GateAllowWhenKilled, nil)
+	fd.start()
+	if r := fd.run(nil, "pause", "gpu-box"); r.stdout != "Paused gpu-box.\n" {
+		t.Fatalf("%q", r.stdout)
+	}
+	if r := fd.run(nil, "kill"); r.stdout != "Kill switch is on. All traffic stopped.\nRun `cravv-connect resume` to turn it off (asks for your password).\n" {
+		t.Fatalf("%q", r.stdout)
+	}
+	if r := fd.run(&fakePrompter{passwords: []string{"pw"}}, "resume"); r.stdout != "Kill switch is off. Traffic resumed.\n" {
+		t.Fatalf("%q %q", r.stdout, r.stderr)
+	}
+}
+
+func TestApprovalsInteractive(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodApprovalsList, ipc.GateUnlock, ipc.ApprovalsListResult{Tasks: []ipc.ApprovalView{
+		{TaskID: "T1", Peer: "gpu-box", Preview: "run \x1b[2Jtests", Full: "run \x1b[2Jtests fully", SHA256: "ab12", Size: 20, Received: paired},
+		{TaskID: "T2", Peer: "mac", Preview: "rm -rf", Full: "rm -rf", SHA256: "cd34", Size: 6, Received: paired},
+		{TaskID: "T3", Peer: "mac", Preview: "later", Full: "later", SHA256: "ef56", Size: 5, Received: paired},
+	}})
+	var decided []string
+	fd.handle(ipc.MethodApprovalsDecide, ipc.GateUnlock, func(_ *ipc.ConnState, p json.RawMessage) (any, error) {
+		decided = append(decided, string(p))
+		return nil, nil
+	})
+	fd.start()
+	p := &fakePrompter{passwords: []string{"pw"}, lines: []string{"v", "x", "a", "d", "s"}}
+	r := fd.run(p, "approvals")
+	if r.code != 0 {
+		t.Fatalf("%d %s", r.code, r.stderr)
+	}
+	want := "" +
+		"\nTask 1 of 3: T1 from gpu-box, received 2026-09-26 10:00 UTC\n" +
+		"Size: 20 bytes, SHA-256: ab12\n" +
+		"--- preview (first 500 characters) ---\nrun [2Jtests\n---\n" +
+		"--- full text ---\nrun [2Jtests fully\n---\n" +
+		"Approved T1.\n" +
+		"\nTask 2 of 3: T2 from mac, received 2026-09-26 10:00 UTC\n" +
+		"Size: 6 bytes, SHA-256: cd34\n" +
+		"--- preview (first 500 characters) ---\nrm -rf\n---\n" +
+		"Denied T2.\n" +
+		"\nTask 3 of 3: T3 from mac, received 2026-09-26 10:00 UTC\n" +
+		"Size: 5 bytes, SHA-256: ef56\n" +
+		"--- preview (first 500 characters) ---\nlater\n---\n" +
+		"Skipped.\n"
+	if r.stdout != want {
+		t.Fatalf("stdout\n%q\nwant\n%q", r.stdout, want)
+	}
+	if strings.Contains(r.stdout, "\x1b") {
+		t.Fatal("escape sequence reached the terminal")
+	}
+	if !slices.Equal(decided, []string{`{"task_id":"T1","approve":true}`, `{"task_id":"T2","approve":false}`}) {
+		t.Fatalf("decided %v", decided)
+	}
+}
+
+func TestApproveSingle(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodApprovalsDecide, ipc.GateUnlock, nil)
+	fd.start()
+	if r := fd.run(&fakePrompter{passwords: []string{"pw"}}, "deny", "T5"); r.stdout != "Denied T5.\n" {
+		t.Fatalf("%q %q", r.stdout, r.stderr)
+	}
+	if fd.params(ipc.MethodApprovalsDecide) != `{"task_id":"T5","approve":false}` {
+		t.Fatal(fd.params(ipc.MethodApprovalsDecide))
+	}
+}
+
+func TestResetIdentityRequiresConfirmation(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, ipc.StatusResult{MachineID: "abcdefghijklmnopqrstuvwxyz"})
+	fd.reply(ipc.MethodResetIdentity, ipc.GateUnlock, nil)
+	fd.start()
+	r := fd.run(&fakePrompter{lines: []string{"abcdefghijklmnoX"}}, "reset-identity")
+	if r.code != 1 || !strings.Contains(r.stderr, "confirmation did not match") || slices.Contains(fd.methods(), ipc.MethodResetIdentity) {
+		t.Fatalf("mismatch: %d %q %v", r.code, r.stderr, fd.methods())
+	}
+	r = fd.run(&fakePrompter{lines: []string{"abcdefghijklmnop"}, passwords: []string{"pw"}}, "reset-identity")
+	if r.code != 0 || !strings.Contains(r.stdout, "Identity reset.") {
+		t.Fatalf("confirmed: %d %q %q", r.code, r.stdout, r.stderr)
+	}
+}
+
+func TestAllowPathMakesAbsolute(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodAllowPathAdd, ipc.GateUnlock, nil)
+	fd.start()
+	r := fd.run(&fakePrompter{passwords: []string{"pw"}}, "allow-path", "/data/shared/../models")
+	if r.code != 0 || fd.params(ipc.MethodAllowPathAdd) != `{"path":"/data/models"}` {
+		t.Fatalf("%d %s %s", r.code, fd.params(ipc.MethodAllowPathAdd), r.stderr)
+	}
+}
+
+func TestStatusHumanAndJSON(t *testing.T) {
+	fd := newFakeDaemon(t)
+	st := ipc.StatusResult{MachineID: "abcdefghijklmnopqrstuvwxyz", DeviceName: "mac", RelayURL: "https://relay.example.com",
+		RelayConnected: true, Peers: []ipc.PeerView{{Alias: "gpu-box", TrustIn: "autonomous", Online: true}},
+		Sessions: []string{"claude@glow-v2"}, OutboxPending: 1, InboxUnread: 2, PendingApprovals: 3, Errors: []string{"clock skew"}}
+	fd.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, st)
+	fd.start()
+	want := "" +
+		"Machine:     mac (abcdefghijklmnop)\n" +
+		"Relay:       https://relay.example.com (connected)\n" +
+		"Kill switch: off\n" +
+		"Peers:       gpu-box (autonomous, online)\n" +
+		"Sessions:    claude@glow-v2\n" +
+		"Outbox:      1 pending, 0 held\n" +
+		"Inbox:       2 unread\n" +
+		"Approvals:   3 pending\n" +
+		"Warning:     clock skew\n"
+	if r := fd.run(nil, "status"); r.stdout != want {
+		t.Fatalf("\n%s\nwant\n%s", r.stdout, want)
+	}
+	r := fd.run(nil, "status", "--json")
+	var back ipc.StatusResult
+	if err := json.Unmarshal([]byte(r.stdout), &back); err != nil || back.MachineID != st.MachineID || back.PendingApprovals != 3 {
+		t.Fatalf("json: %v %s", err, r.stdout)
+	}
+}
+
+func TestLog(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodAuditRead, ipc.GateAllowWhenKilled, ipc.AuditReadResult{Events: []audit.Event{
+		{TS: paired, Type: "pair", Alias: "gpu-box", ItemID: "P1"},
+		{TS: paired, Type: "kill"},
+	}})
+	fd.start()
+	r := fd.run(nil, "log", "-n", "5")
+	want := "2026-09-26T10:00:00Z  pair             gpu-box      P1\n2026-09-26T10:00:00Z  kill             -            -\n"
+	if r.stdout != want || fd.params(ipc.MethodAuditRead) != `{"limit":5}` {
+		t.Fatalf("%q %s", r.stdout, fd.params(ipc.MethodAuditRead))
+	}
+}
+
+func TestFilesListAndAccept(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodFilesList, ipc.GateNone, ipc.FilesListResult{Files: []ipc.FileView{
+		{FileID: "F1", Direction: "in", Peer: "gpu-box", Name: "report.pdf", State: "held", Size: 2048},
+	}})
+	fd.reply(ipc.MethodFilesAccept, ipc.GateUnlock, nil)
+	fd.start()
+	want := "FILE ID  DIR  PEER     STATE  SIZE  NAME\nF1       in   gpu-box  held   2048  report.pdf\n"
+	if r := fd.run(nil, "files"); r.stdout != want {
+		t.Fatalf("%q", r.stdout)
+	}
+	if r := fd.run(&fakePrompter{passwords: []string{"pw"}}, "files", "accept", "F1"); r.stdout != "Accepted F1; it downloads in the background.\n" {
+		t.Fatalf("%q %q", r.stdout, r.stderr)
+	}
+}
+
+func TestAgentSendRegistersCLISession(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.handle(ipc.MethodChatSend, ipc.GateSession, func(cs *ipc.ConnState, _ json.RawMessage) (any, error) {
+		if cs.Session() != "cli@glow-v2" {
+			t.Errorf("session %q", cs.Session())
+		}
+		return ipc.IDResult{ID: "M1"}, nil
+	})
+	fd.start()
+	r := fd.runStdin(nil, "hello from stdin\n", "send", "gpu-box/codex@train", "-")
+	if r.code != 0 || r.stdout != "{\n  \"id\": \"M1\"\n}\n" {
+		t.Fatalf("%d %q %q", r.code, r.stdout, r.stderr)
+	}
+	var reg ipc.SessionRegisterParams
+	json.Unmarshal([]byte(fd.params(ipc.MethodSessionRegister)), &reg)
+	if reg.Agent != "cli" || reg.ProjectDir != "/work/glow-v2" || reg.PID == 0 {
+		t.Fatalf("register %+v", reg)
+	}
+	if fd.params(ipc.MethodChatSend) != `{"to":"gpu-box/codex@train","text":"hello from stdin"}` {
+		t.Fatal(fd.params(ipc.MethodChatSend))
+	}
+}
+
+func TestAgentErrorsAreJSON(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.handle(ipc.MethodTaskClaim, ipc.GateSession, func(*ipc.ConnState, json.RawMessage) (any, error) {
+		return nil, core.ErrAlreadyClaimed
+	})
+	fd.start()
+	r := fd.run(nil, "task", "claim", "T1")
+	if r.code != 1 || r.stderr != "" || r.stdout != "{\n  \"error\": \"task already claimed\",\n  \"kind\": \"already_claimed\"\n}\n" {
+		t.Fatalf("%d %q %q", r.code, r.stdout, r.stderr)
+	}
+	fd2 := newFakeDaemon(t)
+	r = fd2.run(nil, "inbox")
+	if r.code != 1 || !strings.Contains(r.stdout, `"kind": "internal"`) || !strings.Contains(r.stdout, "daemon not running") {
+		t.Fatalf("down: %q", r.stdout)
+	}
+}
+
+func TestAgentTaskCommands(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodTaskCreate, ipc.GateSession, ipc.TaskCreateResult{TaskID: "T1"})
+	fd.reply(ipc.MethodTaskComplete, ipc.GateSession, ipc.TaskView{TaskID: "T1", State: "done"})
+	fd.reply(ipc.MethodInboxWait, ipc.GateSession, ipc.InboxResult{Items: []ipc.InboxView{}})
+	fd.start()
+	if r := fd.run(nil, "task", "create", "gpu-box", "train it", "--file", "a.txt", "--file", "b.txt"); r.code != 0 {
+		t.Fatalf("%s", r.stdout)
+	}
+	if fd.params(ipc.MethodTaskCreate) != `{"to":"gpu-box","instructions":"train it","file_paths":["a.txt","b.txt"]}` {
+		t.Fatal(fd.params(ipc.MethodTaskCreate))
+	}
+	if r := fd.run(nil, "task", "complete", "T1", "all good"); r.code != 0 || !strings.Contains(r.stdout, `"state": "done"`) {
+		t.Fatalf("%s", r.stdout)
+	}
+	if r := fd.run(nil, "wait", "--timeout", "7"); r.code != 0 || fd.params(ipc.MethodInboxWait) != `{"timeout_s":7}` {
+		t.Fatalf("%s %s", r.stdout, fd.params(ipc.MethodInboxWait))
+	}
+}
+
+type mapSettings map[string]string
+
+func (m mapSettings) GetSetting(_ context.Context, k string) (string, bool, error) {
+	v, ok := m[k]
+	return v, ok, nil
+}
+func (m mapSettings) SetSetting(_ context.Context, k, v string) error { m[k] = v; return nil }
+
+func TestInitWritesConfigAndToken(t *testing.T) {
+	fd := newFakeDaemon(t)
+	settings := mapSettings{}
+	env, out, _ := fd.env(&fakePrompter{}, "s3cret-token\n")
+	env.OpenSettings = func(string) (store.SettingsStore, func() error, error) {
+		return settings, func() error { return nil }, nil
+	}
+	if code := Main([]string{"init", "--relay", "https://relay.example.com", "--relay-token", "-"}, env); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	paths, _ := env.Paths()
+	cfg, err := config.Load(paths)
+	if err != nil || cfg.RelayURL != "https://relay.example.com" || cfg.DeviceName != "prith-s-macbook" {
+		t.Fatalf("%v %+v", err, cfg)
+	}
+	if settings[SettingRelayAdminToken] != "s3cret-token" {
+		t.Fatalf("token %q", settings[SettingRelayAdminToken])
+	}
+	if !strings.Contains(out.String(), "Next: run `cravv-connect daemon install`") {
+		t.Fatal(out.String())
+	}
+	env2, _, errb := fd.env(&fakePrompter{}, "")
+	if code := Main([]string{"init", "--relay", "https://relay.example.com"}, env2); code != 1 || !strings.Contains(errb.String(), "already initialized") {
+		t.Fatalf("second init: %d %q", code, errb.String())
+	}
+	env3, _, errb3 := fd.env(&fakePrompter{}, "")
+	if code := Main([]string{"init", "--relay", "ftp://x", "--force"}, env3); code != 1 || !strings.Contains(errb3.String(), "http or https") {
+		t.Fatalf("bad url: %q", errb3.String())
+	}
+}
+
+func TestSuggestAlias(t *testing.T) {
+	for in, want := range map[string]string{
+		"GPU Box!!": "gpu-box", "": "peer", "---": "peer", "a very long machine name indeed yes": "a-very-long-machine-name",
+		"</remote_message>": "remote-message", "Prith's MacBook": "prith-s-macbook",
+	} {
+		if got := suggestAlias(in); got != want {
+			t.Errorf("suggestAlias(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestTerminalSafe(t *testing.T) {
+	if got := terminalSafe("a\x1b[31mred\x07\u009b\nb\tc"); got != "a[31mred\nb\tc" {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestDaemonStatusAndStopWithoutDaemon(t *testing.T) {
+	fd := newFakeDaemon(t)
+	if r := fd.run(nil, "daemon", "status"); r.stdout != "Daemon is not running.\n" {
+		t.Fatalf("%q", r.stdout)
+	}
+	if r := fd.run(nil, "daemon", "stop"); r.stdout != "Daemon is not running.\n" {
+		t.Fatalf("%q", r.stdout)
+	}
+	os.WriteFile(filepath.Join(fd.home, "daemon.pid"), []byte("999999"), 0o600)
+	if r := fd.run(nil, "daemon", "stop"); r.stdout != "Daemon is not running.\n" {
+		t.Fatalf("stale pid: %q %q", r.stdout, r.stderr)
+	}
+}
+
+type fakeService struct{ started, stopped bool }
+
+func (s *fakeService) Installed() bool             { return true }
+func (s *fakeService) Start(context.Context) error { s.started = true; return nil }
+func (s *fakeService) Stop(context.Context) error  { s.stopped = true; return nil }
+
+func TestDaemonStartUsesServiceOrSpawn(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, ipc.StatusResult{})
+	// Not running yet: the service start is followed by a status probe. Start
+	// serving only when Start is called.
+	svc := &fakeService{}
+	env, out, _ := fd.env(&fakePrompter{}, "")
+	env.Service = serviceFunc{svc, func() { fd.start() }}
+	if code := Main([]string{"daemon", "start"}, env); code != 0 || out.String() != "Daemon started.\n" || !svc.started {
+		t.Fatalf("service: %q %v", out.String(), svc.started)
+	}
+	env2, out2, _ := fd.env(&fakePrompter{}, "")
+	if code := Main([]string{"daemon", "start"}, env2); code != 0 || out2.String() != "Daemon is already running.\n" {
+		t.Fatalf("already: %q", out2.String())
+	}
+
+	fd2 := newFakeDaemon(t)
+	fd2.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, ipc.StatusResult{})
+	env3, out3, _ := fd2.env(&fakePrompter{}, "")
+	var spawned []string
+	env3.Executable = func() (string, error) { return "/usr/local/bin/cravv-connect", nil }
+	env3.Spawn = func(exe string, args []string, logPath string) (int, error) {
+		spawned = append([]string{exe}, args...)
+		spawned = append(spawned, filepath.Base(logPath))
+		fd2.start()
+		return 4242, nil
+	}
+	if code := Main([]string{"daemon", "start"}, env3); code != 0 || out3.String() != "Daemon started.\n" {
+		t.Fatalf("spawn: %q", out3.String())
+	}
+	if !slices.Equal(spawned, []string{"/usr/local/bin/cravv-connect", "daemon", "run", "daemon.log"}) {
+		t.Fatalf("spawned %v", spawned)
+	}
+}
+
+// serviceFunc runs onStart when Start is called.
+type serviceFunc struct {
+	*fakeService
+	onStart func()
+}
+
+func (s serviceFunc) Start(ctx context.Context) error {
+	s.onStart()
+	return s.fakeService.Start(ctx)
+}
+
+func TestAuthUnavailableMessage(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.handle(ipc.MethodPairStart, ipc.GateNone, func(*ipc.ConnState, json.RawMessage) (any, error) {
+		return nil, auth.ErrUnavailable
+	})
+	fd.start()
+	r := fd.run(nil, "pair")
+	if r.code != 1 || !strings.Contains(r.stderr, "built without PAM support") {
+		t.Fatalf("%q", r.stderr)
+	}
+}
+
+// auth_unavailable is shared by several auth errors; only the no-PAM build
+// gets the rebuild advice, the others keep the daemon's own text.
+func TestAuthUnavailableOtherCausesKeepMessage(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.handle(ipc.MethodPairStart, ipc.GateNone, func(*ipc.ConnState, json.RawMessage) (any, error) {
+		return nil, auth.ErrServiceNotAllowed
+	})
+	fd.start()
+	r := fd.run(nil, "pair")
+	if r.code != 1 || strings.Contains(r.stderr, "built without PAM support") || !strings.Contains(r.stderr, auth.ErrServiceNotAllowed.Error()) {
+		t.Fatalf("%q", r.stderr)
+	}
+}
