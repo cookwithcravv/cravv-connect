@@ -215,7 +215,7 @@ func TestRelayMovedHandler(t *testing.T) {
 	if got := mustGetPeer(t, f.peers, f.gpu.rec.MachineID).RelayURL; got != "https://new.relay.test" {
 		t.Fatalf("relay url = %q", got)
 	}
-	for _, bad := range []string{"", "ftp://x", "javascript:alert(1)", "https://"} {
+	for _, bad := range []string{"", "ftp://x", "javascript:alert(1)", "https://", "http://relay.example"} {
 		if err := f.handle(t, core.KindControlRelayMoved, core.RelayMovedBody{RelayURL: bad}); err == nil {
 			t.Errorf("accepted relay url %q", bad)
 		}

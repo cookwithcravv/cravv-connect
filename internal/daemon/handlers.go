@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"sync"
 
 	"github.com/cravv/cravv-connect/internal/core"
@@ -169,9 +168,8 @@ func NewRelayMovedHandler(peers store.PeerStore) Handler {
 		if err := decodeBody(env, &b); err != nil {
 			return err
 		}
-		u, err := url.Parse(b.RelayURL)
-		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-			return fmt.Errorf("relay_moved from %s: invalid relay URL", peer.Alias)
+		if err := validRelayURL(b.RelayURL); err != nil {
+			return fmt.Errorf("relay_moved from %s: %w", peer.Alias, err)
 		}
 		p, err := peers.GetPeer(ctx, peer.MachineID)
 		if err != nil {
