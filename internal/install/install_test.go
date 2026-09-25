@@ -12,13 +12,20 @@ import (
 )
 
 type fakeRunner struct {
-	cmds []string
-	fail map[string]bool // command prefix -> fail
+	cmds     []string
+	fail     map[string]bool // command prefix -> fail
+	failNext map[string]int  // command prefix -> fail this many more times
 }
 
 func (r *fakeRunner) Run(_ context.Context, name string, args ...string) (string, error) {
 	cmd := strings.Join(append([]string{name}, args...), " ")
 	r.cmds = append(r.cmds, cmd)
+	for p, n := range r.failNext {
+		if n > 0 && strings.HasPrefix(cmd, p) {
+			r.failNext[p] = n - 1
+			return "", errors.New("failed: " + cmd)
+		}
+	}
 	for p := range r.fail {
 		if strings.HasPrefix(cmd, p) {
 			return "", errors.New("failed: " + cmd)
@@ -76,11 +83,11 @@ func TestClaudeInstallMergesAndIsIdempotent(t *testing.T) {
 	if string(first) != string(second) {
 		t.Fatalf("not idempotent:\n%s\n---\n%s", first, second)
 	}
+	// add succeeds (the fake has no existing entry): nothing is removed.
 	wantCmds := []string{
-		"claude mcp remove --scope user cravv-connect",
 		"claude mcp add --scope user cravv-connect -- " + bin + " mcp",
 	}
-	if !slices.Equal(r.cmds[:2], wantCmds) || len(r.cmds) != 4 {
+	if !slices.Equal(r.cmds[:1], wantCmds) || len(r.cmds) != 2 {
 		t.Fatalf("commands %v", r.cmds)
 	}
 
@@ -122,8 +129,8 @@ func TestClaudeUninstallKeepsOtherHooks(t *testing.T) {
 	if err := c.Install(bg, "/Applications/My Tools/cravv-connect"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(r.cmds[1], "-- /Applications/My Tools/cravv-connect mcp") {
-		t.Fatalf("add %q", r.cmds[1])
+	if !strings.Contains(r.cmds[0], "-- /Applications/My Tools/cravv-connect mcp") {
+		t.Fatalf("add %q", r.cmds[0])
 	}
 	if b, _ := os.ReadFile(path); !strings.Contains(string(b), `"'/Applications/My Tools/cravv-connect' hook"`) {
 		t.Fatalf("path with space not quoted: %s", b)
@@ -387,5 +394,48 @@ func TestSystemdEscapesSpecifiersAndDollars(t *testing.T) {
 		if !strings.Contains(unit, want) {
 			t.Fatalf("unit lacks %q:\n%s", want, unit)
 		}
+	}
+}
+
+func TestClaudeInstallReplacesExistingEntry(t *testing.T) {
+	home := t.TempDir()
+	add := "claude mcp add --scope user cravv-connect -- " + bin + " mcp"
+	r := &fakeRunner{failNext: map[string]int{"claude mcp add": 1}} // already exists
+	c := &Claude{Home: home, Run: r, LookPath: found}
+	if err := c.Install(bg, bin); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{add, "claude mcp remove --scope user cravv-connect", add}
+	if !slices.Equal(r.cmds, want) {
+		t.Fatalf("commands %v", r.cmds)
+	}
+}
+
+func TestClaudeInstallReportsFailedReAdd(t *testing.T) {
+	home := t.TempDir()
+	r := &fakeRunner{fail: map[string]bool{"claude mcp add": true}}
+	c := &Claude{Home: home, Run: r, LookPath: found}
+	err := c.Install(bg, bin)
+	if err == nil || !strings.Contains(err.Error(), "claude mcp add --scope user cravv-connect -- "+bin+" mcp") ||
+		!strings.Contains(err.Error(), "removed") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, ".claude", "settings.json")); !os.IsNotExist(statErr) {
+		t.Fatal("hooks installed although the MCP server is not registered")
+	}
+}
+
+func TestClaudeSettingsNotHTMLEscaped(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".claude", "settings.json")
+	os.MkdirAll(filepath.Dir(path), 0o700)
+	os.WriteFile(path, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"test -f a && echo <done>"}]}]}}`), 0o600)
+	c := &Claude{Home: home, Run: &fakeRunner{}, LookPath: found}
+	if err := c.Install(bg, bin); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	if !strings.Contains(string(b), `"test -f a && echo <done>"`) {
+		t.Fatalf("settings rewritten with HTML escapes:\n%s", b)
 	}
 }

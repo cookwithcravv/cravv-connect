@@ -1,6 +1,7 @@
 package install
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,15 +37,23 @@ func (c *Claude) Detect() bool {
 	return dirExists(filepath.Join(c.Home, ".claude"))
 }
 
-// Install registers the MCP server (remove then add, so a changed binary path
-// is picked up) and merges the hooks.
+// Install registers the MCP server and merges the hooks. It adds the server
+// first; only if that fails (usually because an entry already exists, for
+// example with an old binary path) does it remove the entry and add it again,
+// so a working registration is never removed when adding is impossible.
 func (c *Claude) Install(ctx context.Context, bin string) error {
 	if _, err := c.LookPath("claude"); err != nil {
 		return errors.New("claude CLI not found on PATH; install Claude Code first, or see docs/agents.md for manual setup")
 	}
-	_, _ = c.Run.Run(ctx, "claude", "mcp", "remove", "--scope", "user", ServerName)
-	if _, err := c.Run.Run(ctx, "claude", "mcp", "add", "--scope", "user", ServerName, "--", bin, "mcp"); err != nil {
-		return err
+	add := []string{"mcp", "add", "--scope", "user", ServerName, "--", bin, "mcp"}
+	if _, err := c.Run.Run(ctx, "claude", add...); err != nil {
+		if _, rmErr := c.Run.Run(ctx, "claude", "mcp", "remove", "--scope", "user", ServerName); rmErr != nil {
+			return fmt.Errorf("claude mcp add failed and there was no entry to replace: %w", err)
+		}
+		if _, err := c.Run.Run(ctx, "claude", add...); err != nil {
+			return fmt.Errorf("the old %s MCP entry was removed but adding the new one failed: %w; "+
+				"run `claude %s` yourself, then run this install again", ServerName, err, strings.Join(add, " "))
+		}
 	}
 	return c.editSettings(func(s map[string]any) { setClaudeHooks(s, shellQuote(bin)+" hook") })
 }
@@ -77,11 +86,16 @@ func (c *Claude) editSettings(fn func(map[string]any)) error {
 		return err
 	}
 	fn(settings)
-	out, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
+	// No HTML escaping: hook commands like `a && b` must stay readable.
+	// Keys come out sorted (encoding/json sorts map keys).
+	var out bytes.Buffer
+	enc := json.NewEncoder(&out)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(settings); err != nil {
 		return err
 	}
-	return writeFileAtomic(path, append(out, '\n'), 0o600)
+	return writeFileAtomic(path, out.Bytes(), 0o600)
 }
 
 // isOurHook reports whether a hook command runs `<...>/cravv-connect hook`.
