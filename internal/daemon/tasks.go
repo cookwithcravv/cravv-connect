@@ -162,8 +162,8 @@ func (s *TaskService) handleCreate(ctx context.Context, peer store.Peer, env cor
 	if len(body.Instructions) > core.MaxTextBytes {
 		return fmt.Errorf("task %s: %w", body.TaskID, core.ErrTooLarge)
 	}
-	if _, err := s.d.Tasks.GetTask(ctx, body.TaskID); err == nil {
-		return nil // duplicate, or an ID that already names another task
+	if cur, err := s.d.Tasks.GetTask(ctx, body.TaskID); err == nil {
+		return Retryable(s.redeliverCreate(ctx, cur, peer, env.ID))
 	} else if !errors.Is(err, core.ErrNotFound) {
 		return Retryable(err)
 	}
@@ -202,6 +202,21 @@ func (s *TaskService) handleCreate(ctx context.Context, peer store.Peer, env cor
 		s.sendUpdate(ctx, t, core.TaskUpdateBody{TaskID: t.ID, State: core.TaskRejected, Note: "not permitted"})
 	}
 	return nil
+}
+
+// redeliverCreate handles a task.create whose task already exists. When it is
+// a redelivery of the message that created a queued task and the earlier
+// attempt failed after storing the task, the inbox item is written now.
+// Anything else (a duplicate, or an ID naming another task) is ignored.
+func (s *TaskService) redeliverCreate(ctx context.Context, cur store.Task, peer store.Peer, msgID string) error {
+	if cur.Direction != store.TaskInbound || cur.Peer != peer.MachineID || cur.State != core.TaskQueued {
+		return nil
+	}
+	done, err := s.d.Inbox.Delivered(ctx, msgID)
+	if err != nil || done {
+		return err
+	}
+	return s.deliverTask(ctx, cur, msgID)
 }
 
 func (s *TaskService) deliverTask(ctx context.Context, t store.Task, msgID string) error {
@@ -387,14 +402,24 @@ func (s *TaskService) HandleCancel(ctx context.Context, peer store.Peer, env cor
 	now := s.d.Clock.Now()
 	t, err := s.d.Tasks.Transition(ctx, body.TaskID, activeInbound, func(t *store.Task) error {
 		t.State = core.TaskCancelled
-		t.Notes = append(t.Notes, store.TaskNote{At: now, Text: "cancelled by sender"})
+		t.Notes = append(t.Notes, store.TaskNote{At: now, Text: "cancelled by sender", MsgID: env.ID})
 		t.UpdatedAt = now
 		return nil
 	})
 	if errors.Is(err, core.ErrBadTransition) {
-		return nil // already finished
-	}
-	if err != nil {
+		// Already finished, or cancelled by this message on an earlier attempt
+		// that failed before the claimer was told: tell it now.
+		t, err = s.d.Tasks.GetTask(ctx, body.TaskID)
+		if err != nil {
+			return Retryable(err)
+		}
+		if t.State != core.TaskCancelled || !hasNoteFrom(t, env.ID) {
+			return nil
+		}
+		if done, err := s.d.Inbox.Delivered(ctx, env.ID); err != nil || done {
+			return Retryable(err)
+		}
+	} else if err != nil {
 		return Retryable(err)
 	}
 	notice, err := json.Marshal(core.TaskUpdateBody{TaskID: t.ID, State: core.TaskCancelled, Note: "cancelled by sender"})
@@ -430,13 +455,20 @@ func (s *TaskService) HandleUpdate(ctx context.Context, peer store.Peer, env cor
 	if cur.Direction != store.TaskOutbound || cur.Peer != peer.MachineID {
 		return nil // only the task's receiver may update it
 	}
+	// A redelivery after an attempt that stored the update but failed to tell
+	// the session: the inbox item is the last step, so its presence means done.
+	if done, err := s.d.Inbox.Delivered(ctx, env.ID); err != nil {
+		return Retryable(err)
+	} else if done {
+		return nil
+	}
 	now := s.d.Clock.Now()
 	t, err := s.d.Tasks.Transition(ctx, body.TaskID, activeOutbound, func(t *store.Task) error {
 		if mirrorRank[body.State] >= mirrorRank[t.State] {
 			t.State = body.State
 		}
-		if body.Note != "" {
-			t.Notes = append(t.Notes, store.TaskNote{At: now, Text: body.Note})
+		if body.Note != "" && !hasNoteFrom(*t, env.ID) {
+			t.Notes = append(t.Notes, store.TaskNote{At: now, Text: body.Note, MsgID: env.ID})
 		}
 		if body.Result != "" {
 			t.Result = body.Result
@@ -451,9 +483,17 @@ func (s *TaskService) HandleUpdate(ctx context.Context, peer store.Peer, env cor
 		return nil
 	})
 	if errors.Is(err, core.ErrBadTransition) {
-		return nil // already terminal here (for example cancelled locally)
-	}
-	if err != nil {
+		// Already terminal here. Either another update or a local cancel ended
+		// it (ignore this one), or this very update did on an earlier attempt
+		// that failed before the session was told (tell it now).
+		t, err = s.d.Tasks.GetTask(ctx, body.TaskID)
+		if err != nil {
+			return Retryable(err)
+		}
+		if t.State != body.State {
+			return nil
+		}
+	} else if err != nil {
 		return Retryable(err)
 	}
 	_, err = s.d.Inbox.Deliver(ctx, store.InboxItem{
@@ -636,6 +676,16 @@ func (s *TaskService) RecheckPeer(ctx context.Context, peer core.MachineID, leve
 // a peer's trust, with the peer record already carrying the new level.
 func (s *TaskService) TrustLowered(ctx context.Context, peer store.Peer) error {
 	return s.RecheckPeer(ctx, peer.MachineID, peer.TrustIn)
+}
+
+// hasNoteFrom reports whether t already has a note from message msgID.
+func hasNoteFrom(t store.Task, msgID string) bool {
+	for _, n := range t.Notes {
+		if n.MsgID == msgID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *TaskService) alias(ctx context.Context, id core.MachineID) string {

@@ -92,6 +92,11 @@ func (s *InboxService) Deliver(ctx context.Context, it store.InboxItem) (int64, 
 	return seq, nil
 }
 
+// Delivered reports whether an item with this message ID is in the inbox.
+func (s *InboxService) Delivered(ctx context.Context, msgID string) (bool, error) {
+	return s.inbox.HasInboxMsg(ctx, msgID)
+}
+
 // RedirectOrphans makes an expired session's unread items machine-wide.
 func (s *InboxService) RedirectOrphans(ctx context.Context, session string) error {
 	n, err := s.inbox.RedirectOrphans(ctx, session, OriginallyFor(session))

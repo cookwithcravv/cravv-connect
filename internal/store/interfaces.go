@@ -140,8 +140,9 @@ const (
 )
 
 type TaskNote struct {
-	At   time.Time `json:"at"`
-	Text string    `json:"text"`
+	At    time.Time `json:"at"`
+	Text  string    `json:"text"`
+	MsgID string    `json:"msg_id,omitempty"` // the task.update that carried it (sender side)
 }
 
 type Task struct {
