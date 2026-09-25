@@ -218,6 +218,13 @@ func (o *Outbound) attempt(ctx context.Context, mb transport.Mailbox, it store.O
 	}
 	switch st {
 	case transport.SendQueued:
+		if env.Kind.IsControl() {
+			// Receivers never confirm control kinds with control.delivered, so a
+			// queued control item would otherwise sit in the outbox (and in the
+			// status counts) until the purge, and RequeueStale would resend it
+			// after every RelayTTL. The relay now owns it.
+			return o.outbox.Delete(ctx, it.ID)
+		}
 		// The relay keeps the frame for RelayTTL; if no control.delivered arrives by
 		// then, SendDue moves the item back to pending and it is sent again.
 		return o.outbox.SetStatus(ctx, it.ID, store.OutboxQueued, it.Attempts+1, o.clock.Now().Add(core.RelayTTL))

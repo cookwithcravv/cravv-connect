@@ -450,8 +450,11 @@ func TestOutboundControlItemsAreNeverHeld(t *testing.T) {
 	}
 	f.clock.Advance(time.Second)
 	f.pass(t)
-	if st := f.status(t, id).Status; st != store.OutboxQueued {
-		t.Fatalf("control item not retried: %s", st)
+	if n := len(f.mb.sentFrames()); n != 2 {
+		t.Fatalf("control item not retried: %d sends", n)
+	}
+	if _, ok := f.outbox.item(id); ok {
+		t.Fatal("control item kept after the relay queued it")
 	}
 }
 
