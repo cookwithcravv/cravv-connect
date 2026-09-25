@@ -61,6 +61,7 @@ func (d *DB) ListFiles(ctx context.Context, states ...store.FileState) ([]store.
 }
 
 // UpdateFile reads, mutates and writes the record in one transaction.
+// mutate runs inside the transaction and MUST NOT call d (see store.FileStore).
 func (d *DB) UpdateFile(ctx context.Context, id string, mutate func(*store.FileRecord) error) (store.FileRecord, error) {
 	var out store.FileRecord
 	err := inTx(ctx, d.sql, func(tx *sql.Tx) error {

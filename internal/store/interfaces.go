@@ -160,6 +160,9 @@ type TaskStore interface {
 	PutTask(ctx context.Context, t Task) error
 	GetTask(ctx context.Context, id string) (Task, error)
 	// Atomic compare-and-set: fails with core.ErrBadTransition if current state not in from.
+	// mutate runs inside the store's transaction and MUST NOT call the store
+	// (any Store method, on this or another interface): doing so deadlocks.
+	// It should only edit the *Task; do side effects after Transition returns.
 	Transition(ctx context.Context, id string, from []core.TaskState, mutate func(*Task) error) (Task, error)
 	ListTasks(ctx context.Context, f TaskFilter) ([]Task, error)
 }
@@ -209,6 +212,10 @@ type FileStore interface {
 	PutFile(ctx context.Context, f FileRecord) error
 	GetFile(ctx context.Context, id string) (FileRecord, error)
 	ListFiles(ctx context.Context, states ...FileState) ([]FileRecord, error)
+	// UpdateFile reads, mutates and writes the record atomically.
+	// mutate runs inside the store's transaction and MUST NOT call the store
+	// (any Store method, on this or another interface): doing so deadlocks.
+	// It should only edit the *FileRecord; do side effects after UpdateFile returns.
 	UpdateFile(ctx context.Context, id string, mutate func(*FileRecord) error) (FileRecord, error)
 	InboundBytes(ctx context.Context, peer core.MachineID) (int64, error) // sum Size where Direction=in AND State in (downloading, done)
 }

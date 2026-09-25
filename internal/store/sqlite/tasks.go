@@ -54,6 +54,7 @@ func (d *DB) GetTask(ctx context.Context, id string) (store.Task, error) {
 // and writes it back, all inside one transaction. Because the pool holds a
 // single connection, concurrent Transitions are serialized: two sessions
 // claiming the same queued task cannot both succeed.
+// mutate runs inside the transaction and MUST NOT call d (see store.TaskStore).
 func (d *DB) Transition(ctx context.Context, id string, from []core.TaskState, mutate func(*store.Task) error) (store.Task, error) {
 	var out store.Task
 	err := inTx(ctx, d.sql, func(tx *sql.Tx) error {

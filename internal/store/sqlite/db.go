@@ -29,7 +29,13 @@ type DB struct {
 // enables WAL, a 5 s busy timeout and foreign keys, and applies migrations.
 // The pool is limited to one connection: every transaction is serialized
 // inside the process, which makes read-check-write transactions atomic and
-// avoids SQLITE_BUSY between our own connections.
+// avoids SQLITE_BUSY between our own connections. Transactions begin with
+// BEGIN IMMEDIATE (see _txlock below) so other processes are excluded too.
+//
+// Because the pool has one connection, a callback that runs inside a
+// transaction (the mutate funcs of Transition and UpdateFile) must not call
+// any DB method: it would wait for the connection the transaction holds and
+// deadlock until ctx is done.
 func Open(path string) (*DB, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -50,6 +56,11 @@ func Open(path string) (*DB, error) {
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "foreign_keys(1)")
 	q.Add("_pragma", "synchronous(NORMAL)")
+	// BEGIN IMMEDIATE: every read-write transaction takes the write lock up
+	// front, so another process (a second daemon or the CLI) cannot commit
+	// between our read and our write, and we never hit SQLITE_BUSY halfway
+	// through a transaction (busy_timeout covers the BEGIN instead).
+	q.Add("_txlock", "immediate")
 	dsn := (&url.URL{Scheme: "file", Path: abs, RawQuery: q.Encode()}).String()
 	sdb, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -99,7 +110,8 @@ func notFound(err error) error {
 	return err
 }
 
-// inTx runs fn inside a transaction, committing on success.
+// inTx runs fn inside a (BEGIN IMMEDIATE) transaction, committing on success.
+// fn must use only tx, never d.sql: the pool's single connection is held by tx.
 func inTx(ctx context.Context, db *sql.DB, fn func(tx *sql.Tx) error) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {

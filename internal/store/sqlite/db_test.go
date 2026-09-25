@@ -2,8 +2,10 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -113,5 +115,42 @@ func TestTimesRoundTripAsUnixMillis(t *testing.T) {
 		if !got.Equal(want) {
 			t.Fatalf("round trip %v -> %v, want %v", c, got, want)
 		}
+	}
+}
+
+// Transactions must take the write lock at BEGIN (BEGIN IMMEDIATE), so a
+// second process cannot slip a write in between the read and the write of a
+// read-check-write transaction such as Transition.
+func TestTransactionsBeginImmediate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	other, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(0)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	if err := other.Ping(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	// No statement has run in tx yet: a deferred BEGIN would hold no lock.
+	_, err = other.ExecContext(ctx, `INSERT INTO settings (key, value) VALUES ('k', 'v')`)
+	if err == nil {
+		t.Fatal("another connection wrote while a transaction was open; BEGIN is not IMMEDIATE")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "locked") && !strings.Contains(strings.ToLower(err.Error()), "busy") {
+		t.Fatalf("unexpected error from competing writer: %v", err)
 	}
 }
