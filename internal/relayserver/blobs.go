@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 
+	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/relayproto"
 )
 
@@ -28,14 +30,22 @@ func (s *Server) admit(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// readBody reads at most limit bytes; ok=false (and 413 sent) when larger.
-func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool) {
+// readBody reads at most limit bytes within the body read timeout; ok=false (and 413
+// or 408 sent) when larger or slower. The deadline is wall-clock time on the
+// connection, so it uses the system clock, not the relay's injectable one.
+func (s *Server) readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool) {
+	_ = http.NewResponseController(w).SetReadDeadline(core.SystemClock{}.Now().Add(s.cfg.BodyReadTimeout))
 	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		var mbe *http.MaxBytesError
-		if errors.As(err, &mbe) {
+		var ne net.Error
+		switch {
+		case errors.As(err, &mbe):
 			httpError(w, http.StatusRequestEntityTooLarge, relayproto.CodeTooLarge, "body too large")
-		} else {
+		case errors.As(err, &ne) && ne.Timeout():
+			w.Header().Set("Connection", "close")
+			httpError(w, http.StatusRequestTimeout, relayproto.CodeBadRequest, "request body too slow")
+		default:
 			httpError(w, http.StatusBadRequest, relayproto.CodeBadRequest, "unreadable body")
 		}
 		return nil, false
@@ -103,7 +113,7 @@ func (s *Server) handleBlobCreate(w http.ResponseWriter, r *http.Request) {
 	if !s.admit(w, r) {
 		return
 	}
-	body, ok := readBody(w, r, maxCreateBody)
+	body, ok := s.readBody(w, r, maxCreateBody)
 	if !ok {
 		return
 	}
@@ -158,7 +168,7 @@ func (s *Server) handleChunkPut(w http.ResponseWriter, r *http.Request) {
 	if !s.admit(w, r) {
 		return
 	}
-	body, ok := readBody(w, r, int64(s.cfg.Limits.MaxChunk))
+	body, ok := s.readBody(w, r, int64(s.cfg.Limits.MaxChunk))
 	if !ok {
 		return
 	}

@@ -446,6 +446,7 @@ chunk index (`400`), then the operation.
 | `403` | Not a member, or the wrong party for this operation |
 | `404` | Unknown blob or chunk; also any blob after `DELETE` |
 | `410` | Blob expired (a relay MAY answer `404` once it has purged it) |
+| `408` | Request body not received in time (a relay MAY bound body reads; the reference relay allows 60 seconds) |
 | `413` | Over the blob size, chunk size, declared size, or storage quota |
 | `429` | Rate limited |
 

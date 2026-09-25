@@ -28,9 +28,15 @@ type Config struct {
 	// SweepInterval is how often expired state is purged from the Backend and idle
 	// rate-limit buckets are dropped. Zero means one minute; negative disables it.
 	SweepInterval time.Duration
+	// BodyReadTimeout bounds how long a blob request may take to deliver its body.
+	// Zero means 60 seconds.
+	BodyReadTimeout time.Duration
 }
 
-const defaultSweepInterval = time.Minute
+const (
+	defaultSweepInterval   = time.Minute
+	defaultBodyReadTimeout = 60 * time.Second
+)
 
 // Server serves relay-v1 over HTTP and WebSocket.
 type Server struct {
@@ -58,6 +64,9 @@ func New(cfg Config, be Backend) (*Server, error) {
 	cfg.PublicOrigin = origin
 	if cfg.Clock == nil {
 		cfg.Clock = core.SystemClock{}
+	}
+	if cfg.BodyReadTimeout <= 0 {
+		cfg.BodyReadTimeout = defaultBodyReadTimeout
 	}
 	cfg.Limits = cfg.Limits.withDefaults()
 	if cfg.Logger == nil {
