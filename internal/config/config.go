@@ -12,10 +12,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 
+	"github.com/cravv/cravv-connect/internal/auth"
 	"github.com/cravv/cravv-connect/internal/core"
 )
 
@@ -77,19 +77,14 @@ func Defaults() Config {
 	return Config{
 		DeviceName: name,
 		PeerQuota:  core.DefaultPeerQuota,
-		PAMService: defaultPAMService(),
+		PAMService: auth.DefaultPAMService(),
 	}
-}
-
-func defaultPAMService() string {
-	if runtime.GOOS == "darwin" {
-		return "chkpasswd"
-	}
-	return "login"
 }
 
 // Load reads p.Config over Defaults. A missing file yields Defaults.
 // Unknown keys are ignored; malformed lines are errors naming the line.
+// A pam_service that is set but not allowlisted by auth is an error
+// matching auth.ErrServiceNotAllowed.
 func Load(p Paths) (Config, error) {
 	c := Defaults()
 	data, err := os.ReadFile(p.Config)
@@ -100,6 +95,7 @@ func Load(p Paths) (Config, error) {
 		return Config{}, fmt.Errorf("config: read: %w", err)
 	}
 	fields := fieldsByKey(&c)
+	set := map[string]bool{}
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	for n := 1; sc.Scan(); n++ {
 		line := strings.TrimSpace(sc.Text())
@@ -118,11 +114,25 @@ func Load(p Paths) (Config, error) {
 		if err := setField(f, strings.TrimSpace(raw)); err != nil {
 			return Config{}, fmt.Errorf("config: %s line %d (%s): %w", p.Config, n, key, err)
 		}
+		set[key] = true
 	}
 	if err := sc.Err(); err != nil {
 		return Config{}, fmt.Errorf("config: read: %w", err)
 	}
+	if err := validate(c, set, p.Config); err != nil {
+		return Config{}, err
+	}
 	return c, nil
+}
+
+// validate checks the values of the keys the file set.
+func validate(c Config, set map[string]bool, path string) error {
+	if set["pam_service"] {
+		if err := auth.CheckPAMService(c.PAMService); err != nil {
+			return fmt.Errorf("config: %s: pam_service: %w", path, err)
+		}
+	}
+	return nil
 }
 
 // Save writes c to p.Config atomically with mode 0600.

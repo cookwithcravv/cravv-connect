@@ -1,12 +1,14 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/cravv/cravv-connect/internal/auth"
 	"github.com/cravv/cravv-connect/internal/core"
 )
 
@@ -86,8 +88,9 @@ relay_url = "https://relay.example.com"   # trailing comment
 device_name="gpu \"box\" #1"
   peer_quota = 2_147_483_648
 unknown_key = "ignored"
-pam_service = "sudo"
+pam_service = "PAMSVC"
 `
+	content = strings.Replace(content, "PAMSVC", altPAMService(t), 1)
 	if err := os.WriteFile(p.Config, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +98,7 @@ pam_service = "sudo"
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Config{RelayURL: "https://relay.example.com", DeviceName: `gpu "box" #1`, PeerQuota: 2147483648, PAMService: "sudo"}
+	want := Config{RelayURL: "https://relay.example.com", DeviceName: `gpu "box" #1`, PeerQuota: 2147483648, PAMService: altPAMService(t)}
 	if c != want {
 		t.Fatalf("Load = %+v, want %+v", c, want)
 	}
@@ -129,7 +132,7 @@ func TestLoadRejectsMalformedLines(t *testing.T) {
 
 func TestSaveThenLoadRoundTripWith0600(t *testing.T) {
 	p := testPaths(t)
-	in := Config{RelayURL: "http://127.0.0.1:8787", DeviceName: "laptop \\ \"x\" # y", PeerQuota: 12345, PAMService: "login"}
+	in := Config{RelayURL: "http://127.0.0.1:8787", DeviceName: "laptop \\ \"x\" # y", PeerQuota: 12345, PAMService: altPAMService(t)}
 	if err := Save(p, in); err != nil {
 		t.Fatal(err)
 	}
@@ -152,5 +155,42 @@ func TestSaveThenLoadRoundTripWith0600(t *testing.T) {
 		if strings.HasPrefix(e.Name(), ".config-") {
 			t.Fatalf("temp file left behind: %s", e.Name())
 		}
+	}
+}
+
+// altPAMService returns an allowlisted PAM service other than the default,
+// skipping the test on an OS with no allowlist.
+func altPAMService(t *testing.T) string {
+	t.Helper()
+	for _, s := range auth.AllowedPAMServices() {
+		if s != auth.DefaultPAMService() {
+			return s
+		}
+	}
+	t.Skipf("no alternative PAM service allowlisted on %s", runtime.GOOS)
+	return ""
+}
+
+func TestLoadRejectsPAMServiceNotAllowed(t *testing.T) {
+	for _, svc := range []string{"sudo", "passwd", "su", "other", ""} {
+		t.Run(svc, func(t *testing.T) {
+			p := testPaths(t)
+			if err := os.WriteFile(p.Config, []byte("pam_service = \""+svc+"\"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(p)
+			if !errors.Is(err, auth.ErrServiceNotAllowed) {
+				t.Fatalf("Load with pam_service=%q: err = %v, want ErrServiceNotAllowed", svc, err)
+			}
+			if !strings.Contains(err.Error(), "pam_service") {
+				t.Fatalf("error does not name the key: %v", err)
+			}
+		})
+	}
+}
+
+func TestDefaultPAMServiceComesFromAuth(t *testing.T) {
+	if got := Defaults().PAMService; got != auth.DefaultPAMService() {
+		t.Fatalf("Defaults().PAMService = %q, want auth.DefaultPAMService() = %q", got, auth.DefaultPAMService())
 	}
 }
