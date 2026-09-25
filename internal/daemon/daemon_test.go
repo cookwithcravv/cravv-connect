@@ -13,6 +13,7 @@ import (
 	"github.com/cravv/cravv-connect/internal/auth"
 	"github.com/cravv/cravv-connect/internal/config"
 	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cravv/cravv-connect/internal/sealing"
 	"github.com/cravv/cravv-connect/internal/store"
 	"github.com/cravv/cravv-connect/internal/transport"
 )
@@ -552,4 +553,50 @@ func TestSendToPausedPeers(t *testing.T) {
 	if _, held, _ := d.store.CountOutbox(ctx); held != 0 {
 		t.Fatalf("held after resume = %d", held)
 	}
+}
+
+func TestRetryableInboundFailureReconnectsForRedelivery(t *testing.T) {
+	ctx := context.Background()
+	relay := &d2Relay{}
+	d := d2NewDaemon(t, t.TempDir(), relay)
+	peer := newTestPeer(t, "gpu-box", core.TrustAutonomous)
+	mustPut(t, d.store, peer.rec)
+	var mu sync.Mutex
+	calls := 0
+	d.svc.Load().registry.Register(core.KindChat, HandlerFunc(func(context.Context, store.Peer, core.Envelope) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls == 1 {
+			return Retryable(errors.New("disk busy"))
+		}
+		return nil
+	}))
+	d2Run(t, d)
+	d2Eventually(t, "connection", func() bool { _, ok := d.Mailbox(); return ok })
+	pk, err := d.svc.Load().prekeys.Current(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := core.NewEnvelope(core.SystemClock{}, peer.id.MachineID(), d.Identity().MachineID(), core.KindChat, core.ChatBody{Text: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fr, err := sealing.Seal(peer.id, pk, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := fr.Marshal()
+	delivery := transport.Delivery{Seq: 1, From: peer.id.Public(), ID: env.ID, Frame: raw}
+
+	relay.box(0).deliveries <- delivery
+	d2Eventually(t, "connection recycled after the retryable failure", func() bool {
+		return relay.box(0).closed() && relay.dials() >= 2
+	})
+	relay.box(1).deliveries <- delivery
+	d2Eventually(t, "redelivery handled", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return calls == 2
+	})
 }

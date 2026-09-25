@@ -198,9 +198,12 @@ func (d *Daemon) runServices(ctx context.Context, g *services) error {
 	return ctx.Err()
 }
 
-// connectLoop keeps one relay connection alive with exponential backoff.
+// connectLoop keeps one relay connection alive with exponential backoff. When inbound
+// stops with ErrRetryLater (a handler failed retryably and the delivery was not acked)
+// the connection is recycled so the relay redelivers it; repeated retries back off too.
 func (d *Daemon) connectLoop(ctx context.Context, g *services) {
 	backoff := d.opts.ReconnectMin
+	retryDelay := d.opts.ReconnectMin
 	for ctx.Err() == nil {
 		if d.kill.Killed() || d.relay == nil {
 			d.sleep(ctx, 0)
@@ -232,14 +235,21 @@ func (d *Daemon) connectLoop(ctx context.Context, g *services) {
 		}
 		d.setState(mb, nil)
 		g.outbound.Wake()
-		if err := g.inbound.Run(ctx, mb); err != nil {
-			d.log.Warn("inbound stopped", "err", err)
+		inErr := g.inbound.Run(ctx, mb)
+		if inErr != nil {
+			d.log.Warn("inbound stopped", "err", inErr)
 		}
 		d.setState(nil, mb.Err())
 		mb.Close()
 		if ctx.Err() != nil {
 			return
 		}
+		if errors.Is(inErr, ErrRetryLater) {
+			d.sleep(ctx, retryDelay)
+			retryDelay = min(retryDelay*2, core.BackoffMax)
+			continue
+		}
+		retryDelay = d.opts.ReconnectMin
 		d.log.Info("relay connection ended", "err", mb.Err())
 		d.sleep(ctx, backoff)
 	}
