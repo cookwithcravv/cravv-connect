@@ -617,3 +617,55 @@ func TestCloseAndResetStopPairing(t *testing.T) {
 		t.Fatalf("pairing after Close: %v", err)
 	}
 }
+
+// allowHookMailbox runs hook (once) when the daemon syncs the allow-list, the
+// step between a successful dial and the mailbox going live.
+type allowHookMailbox struct {
+	*d2Mailbox
+	once sync.Once
+	hook func()
+}
+
+func (m *allowHookMailbox) Allow(ctx context.Context, ik ed25519.PublicKey) error {
+	m.once.Do(m.hook)
+	return m.d2Mailbox.Allow(ctx, ik)
+}
+
+type killDuringSyncRelay struct {
+	d2Relay
+	hook func()
+}
+
+func (r *killDuringSyncRelay) Dialer() transport.Dialer { return r }
+
+func (r *killDuringSyncRelay) Dial(ctx context.Context, s transport.Signer, c transport.Credentials) (transport.Mailbox, error) {
+	mb, err := r.d2Relay.Dial(ctx, s, c)
+	if err != nil {
+		return nil, err
+	}
+	return &allowHookMailbox{d2Mailbox: mb.(*d2Mailbox), hook: r.hook}, nil
+}
+
+// A kill that lands after the dial but before the mailbox goes live must
+// still close it: the connection loop never serves a mailbox while killed.
+func TestKillWhileConnectingClosesTheMailbox(t *testing.T) {
+	ctx := context.Background()
+	relay := &killDuringSyncRelay{}
+	d := d2NewDaemon(t, t.TempDir(), relay)
+	relay.hook = func() {
+		if err := d.Kill().Kill(ctx); err != nil {
+			t.Error(err)
+		}
+	}
+	peer := newTestPeer(t, "gpu-box", core.TrustAutonomous)
+	mustPut(t, d.store, peer.rec)
+	d2Run(t, d)
+	d2Eventually(t, "first dial", func() bool { return relay.dials() >= 1 })
+	d2Eventually(t, "mailbox closed after the kill", relay.box(0).closed)
+	d.mu.Lock()
+	live := d.mb
+	d.mu.Unlock()
+	if live != nil {
+		t.Fatal("mailbox recorded as live while killed")
+	}
+}

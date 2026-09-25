@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ type inboundFixture struct {
 	mu      sync.Mutex
 	handled []string
 	failing map[string]error // envelope ID -> error returned once by the chat handler
+	killed  atomic.Bool
 }
 
 func newInboundFixture(t *testing.T) *inboundFixture {
@@ -56,7 +58,7 @@ func newInboundFixture(t *testing.T) *inboundFixture {
 		return nil
 	}))
 	f.dedup = newMemDedup()
-	f.in = NewInbound(me, f.peers, f.dedup, f.prekeys, f.registry, f.sender, f.clock, nil)
+	f.in = NewInbound(me, f.peers, f.dedup, f.prekeys, f.registry, f.sender, f.clock, f.killed.Load, nil)
 	f.gpu = newTestPeer(t, "gpu-box", core.TrustAskFirst)
 	mustPut(t, f.peers, f.gpu.rec)
 	return f
@@ -347,7 +349,7 @@ func TestInboundRetryableFailureSurvivesRestart(t *testing.T) {
 	}
 	// Daemon restart: a fresh Inbound over the same dedup store.
 	f.sender = &recordingSender{}
-	f.in = NewInbound(f.me, f.peers, f.dedup, f.prekeys, f.registry, f.sender, f.clock, nil)
+	f.in = NewInbound(f.me, f.peers, f.dedup, f.prekeys, f.registry, f.sender, f.clock, f.killed.Load, nil)
 	f.run(t, d)
 	if got := f.handledIDs(); !slices.Equal(got, []string{id}) {
 		t.Fatalf("handled after restart = %v: the retried message was lost", got)
@@ -432,5 +434,26 @@ func TestInboundStopsOnContextCancel(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run ignored cancellation")
+	}
+}
+
+// While the kill switch is on nothing is handled: the delivery is not acked
+// (the relay redelivers it after resume) and Run stops.
+func TestInboundStopsWhenKilled(t *testing.T) {
+	f := newInboundFixture(t)
+	f.killed.Store(true)
+	id, raw := f.frameFrom(t, f.gpu, testEpoch, f.myPK)
+	mb, err := f.runErr(transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw})
+	if !errors.Is(err, core.ErrKilled) {
+		t.Fatalf("Run err = %v, want ErrKilled", err)
+	}
+	if got := f.handledIDs(); len(got) != 0 {
+		t.Fatalf("handled while killed: %v", got)
+	}
+	if got := mb.ackedSeqs(); len(got) != 0 {
+		t.Fatalf("acked while killed: %v", got)
+	}
+	if seen, _ := f.dedup.Seen(context.Background(), id); seen {
+		t.Fatal("marked seen while killed")
 	}
 }

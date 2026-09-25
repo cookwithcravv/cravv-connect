@@ -241,7 +241,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 		Files: g.files, Desktop: d.opts.Desktop, Clock: clock, Audit: lg,
 	})
 	g.peers.AddTrustObserver(g.tasks)
-	g.inbound = NewInbound(id, db, db, g.prekeys, g.registry, g.outbound, clock, d.log)
+	g.inbound = NewInbound(id, db, db, g.prekeys, g.registry, g.outbound, clock, d.kill.Killed, d.log)
 	g.pairing = NewPairingService(id, d.rooms(), d, pake.SPAKE2{}, db, g.prekeys, d,
 		PairingConfig{DeviceName: d.opts.Config.DeviceName, RelayURL: d.opts.Config.RelayURL}, clock, lg)
 	registerHandlers(g, d.inbox, db)

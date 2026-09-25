@@ -50,6 +50,7 @@ type Inbound struct {
 	registry *HandlerRegistry
 	sender   EnvelopeSender
 	clock    core.Clock
+	killed   func() bool
 	logger   *slog.Logger
 
 	dropped atomic.Int64 // corrupt, unverifiable, stale, or unroutable frames
@@ -59,15 +60,18 @@ type Inbound struct {
 	receipt map[core.MachineID][]string // envelope IDs awaiting control.delivered
 }
 
-// NewInbound wires an Inbound. logger may be nil.
+// NewInbound wires an Inbound. killed may be nil (never killed); logger may be nil.
 func NewInbound(id *keys.Identity, peers store.PeerStore, dedup store.DedupStore, prekeys PrekeySource,
-	registry *HandlerRegistry, sender EnvelopeSender, clock core.Clock, logger *slog.Logger) *Inbound {
+	registry *HandlerRegistry, sender EnvelopeSender, clock core.Clock, killed func() bool, logger *slog.Logger) *Inbound {
+	if killed == nil {
+		killed = func() bool { return false }
+	}
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	return &Inbound{
 		identity: id, peers: peers, dedup: dedup, prekeys: prekeys, registry: registry,
-		sender: sender, clock: clock, logger: logger,
+		sender: sender, clock: clock, killed: killed, logger: logger,
 		receipt: make(map[core.MachineID][]string),
 	}
 }
@@ -82,7 +86,8 @@ func (in *Inbound) SkewRejected() int64 { return in.skewed.Load() }
 // when a burst of deliveries ends and at least every 200ms. When a delivery cannot be
 // handled now (a retryable handler failure or a dedup store error) it is not acked and
 // Run returns an error wrapping ErrRetryLater: acks are cumulative, so the caller must
-// reconnect and let the relay redeliver from that delivery on.
+// reconnect and let the relay redeliver from that delivery on. When the kill switch is
+// on, the delivery in hand is not handled or acked and Run returns core.ErrKilled.
 func (in *Inbound) Run(ctx context.Context, mb transport.Mailbox) error {
 	ticker := time.NewTicker(receiptFlushEvery)
 	defer ticker.Stop()
@@ -97,6 +102,9 @@ func (in *Inbound) Run(ctx context.Context, mb transport.Mailbox) error {
 		case d, ok := <-deliveries:
 			if !ok {
 				return nil
+			}
+			if in.killed() {
+				return fmt.Errorf("inbound: seq %d not handled: %w", d.Seq, core.ErrKilled)
 			}
 			if err := in.process(ctx, d); err != nil {
 				return fmt.Errorf("%w: seq %d: %v", ErrRetryLater, d.Seq, err)

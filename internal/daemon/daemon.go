@@ -155,6 +155,23 @@ func (d *Daemon) setState(mb transport.Mailbox, err error) {
 	d.changed = make(chan struct{})
 }
 
+// goLive records mb as the live mailbox unless the kill switch is on, in which
+// case it closes mb and returns false. The check and the store happen under
+// d.mu, which disconnect also takes after the switch flips: either the kill
+// sees the live mailbox and closes it, or goLive sees the kill.
+func (d *Daemon) goLive(mb transport.Mailbox) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.kill.Killed() {
+		mb.Close()
+		return false
+	}
+	d.mb, d.lastErr = mb, nil
+	close(d.changed)
+	d.changed = make(chan struct{})
+	return true
+}
+
 // disconnect closes the live mailbox (kill switch).
 func (d *Daemon) disconnect() {
 	d.mu.Lock()
@@ -241,15 +258,17 @@ func (d *Daemon) connectLoop(ctx context.Context, g *services) {
 			continue
 		}
 		d.markRegistered(ctx, creds)
+		backoff = d.opts.ReconnectMin
 		if d.kill.Killed() {
 			mb.Close()
 			continue
 		}
-		backoff = d.opts.ReconnectMin
 		if err := g.peers.SyncAllowList(ctx, mb); err != nil {
 			d.log.Warn("allow-list sync failed", "err", err)
 		}
-		d.setState(mb, nil)
+		if !d.goLive(mb) {
+			continue // killed meanwhile
+		}
 		g.outbound.Wake()
 		inErr := g.inbound.Run(ctx, mb)
 		if inErr != nil {

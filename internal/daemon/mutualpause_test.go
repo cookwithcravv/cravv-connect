@@ -112,7 +112,7 @@ func newSimNode(t *testing.T, relay *simRelay, clock core.Clock) *simNode {
 		n.chats = append(n.chats, env.ID)
 		return nil
 	}))
-	n.in = NewInbound(id, n.db, n.db, pm, reg, n.out, clock, nil)
+	n.in = NewInbound(id, n.db, n.db, pm, reg, n.out, clock, nil, nil)
 	return n
 }
 
