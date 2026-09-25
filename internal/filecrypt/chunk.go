@@ -1,4 +1,7 @@
 // Package filecrypt encrypts file chunks with XChaCha20-Poly1305.
+//
+// Nonces are derived from (fileID, index), so a key must never encrypt the
+// same fileID twice: doing so reuses nonces. Use a fresh NewKey per file.
 package filecrypt
 
 import (
@@ -26,10 +29,24 @@ func NewKey() ([]byte, error) {
 	return k, nil
 }
 
+// ValidSize reports whether size is a sendable file size:
+// 0 <= size <= core.MaxFileBytes. Otherwise it returns core.ErrTooLarge.
+func ValidSize(size int64) error {
+	if size < 0 || size > core.MaxFileBytes {
+		return fmt.Errorf("filecrypt: file size %d: %w", size, core.ErrTooLarge)
+	}
+	return nil
+}
+
 // ChunkCount is ceil(size / core.FileChunkBytes), and 1 for an empty file.
+// It never panics or overflows: a negative size counts as empty and a size
+// above core.MaxFileBytes is clamped to it. Callers check ValidSize first.
 func ChunkCount(size int64) uint32 {
 	if size <= 0 {
 		return 1
+	}
+	if size > core.MaxFileBytes {
+		size = core.MaxFileBytes
 	}
 	return uint32((size + core.FileChunkBytes - 1) / core.FileChunkBytes)
 }
@@ -55,6 +72,7 @@ func aad(fileID string, index uint32, last bool) []byte {
 }
 
 // EncryptChunk seals one plaintext chunk of at most core.FileChunkBytes.
+// key must be unique to fileID (see the package comment).
 func EncryptChunk(key []byte, fileID string, index uint32, last bool, pt []byte) ([]byte, error) {
 	if len(pt) > core.FileChunkBytes {
 		return nil, fmt.Errorf("filecrypt: chunk of %d bytes: %w", len(pt), core.ErrTooLarge)
@@ -70,6 +88,9 @@ func EncryptChunk(key []byte, fileID string, index uint32, last bool, pt []byte)
 // file, another index, or a different last flag (so truncation, reordering,
 // and swapping are detected).
 func DecryptChunk(key []byte, fileID string, index uint32, last bool, ct []byte) ([]byte, error) {
+	if len(ct) > core.FileChunkBytes+Overhead {
+		return nil, fmt.Errorf("filecrypt: ciphertext chunk of %d bytes: %w", len(ct), core.ErrTooLarge)
+	}
 	aead, err := chacha20poly1305.NewX(key)
 	if err != nil {
 		return nil, fmt.Errorf("filecrypt: %w", err)

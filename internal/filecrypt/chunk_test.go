@@ -21,11 +21,36 @@ func TestChunkCount(t *testing.T) {
 		{core.FileChunkBytes + 1, 2},
 		{3 * core.FileChunkBytes, 3},
 		{core.MaxFileBytes, 100},
+		{-1, 1},
+		{-1 << 62, 1},
+		{core.MaxFileBytes + 1, 100},
+		{1 << 62, 100}, // would overflow uint32 without the clamp
 	}
 	for _, tt := range tests {
 		if got := ChunkCount(tt.size); got != tt.want {
 			t.Errorf("ChunkCount(%d) = %d, want %d", tt.size, got, tt.want)
 		}
+	}
+}
+
+func TestValidSize(t *testing.T) {
+	for _, ok := range []int64{0, 1, core.MaxFileBytes} {
+		if err := ValidSize(ok); err != nil {
+			t.Errorf("ValidSize(%d) = %v", ok, err)
+		}
+	}
+	for _, bad := range []int64{-1, core.MaxFileBytes + 1, 1 << 62} {
+		if err := ValidSize(bad); !errors.Is(err, core.ErrTooLarge) {
+			t.Errorf("ValidSize(%d) = %v, want ErrTooLarge", bad, err)
+		}
+	}
+}
+
+func TestDecryptRejectsOversizedCiphertext(t *testing.T) {
+	key, _ := NewKey()
+	ct := make([]byte, core.FileChunkBytes+Overhead+1)
+	if _, err := DecryptChunk(key, "f", 0, true, ct); !errors.Is(err, core.ErrTooLarge) {
+		t.Fatalf("DecryptChunk(oversized) = %v, want ErrTooLarge", err)
 	}
 }
 
