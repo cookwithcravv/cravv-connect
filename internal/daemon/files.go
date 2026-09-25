@@ -267,7 +267,10 @@ func (s *FileService) handleOffer(ctx context.Context, peer store.Peer, env core
 	if err != nil {
 		return err
 	}
-	if !safeID(env.ID) || !safeID(b.FileID) || b.BlobID == "" || b.Size < 0 || b.Size > core.MaxFileBytes ||
+	if !core.ValidID(b.FileID) || !core.ValidBlobID(b.BlobID) || (b.TaskID != "" && !core.ValidID(b.TaskID)) {
+		return fmt.Errorf("file.offer %s: %w", env.ID, errBadPeerID)
+	}
+	if !safeID(env.ID) || b.Size < 0 || b.Size > core.MaxFileBytes ||
 		b.Chunks != filecrypt.ChunkCount(b.Size) || len(b.SHA256) != sha256.Size || len(b.Key) != 32 {
 		return fmt.Errorf("file.offer %s: malformed", env.ID)
 	}

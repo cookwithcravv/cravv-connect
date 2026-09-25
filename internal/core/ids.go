@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -51,4 +52,39 @@ func newIDAt(t time.Time, r io.Reader) (string, error) {
 		hi >>= 5
 	}
 	return string(out[:]), nil
+}
+
+// ValidID reports whether s has the form NewID produces: exactly IDLen
+// upper-case Crockford base32 characters. Every message, task and file ID a
+// peer sends must pass it; anything else is rejected on receipt, so a peer
+// cannot smuggle control characters or look-alike text into local displays.
+func ValidID(s string) bool {
+	if len(s) != IDLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if strings.IndexByte(crockford, s[i]) < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// MaxBlobIDLen is the longest blob ID a relay may issue (relay-v1 section 6.2).
+const MaxBlobIDLen = 64
+
+// ValidBlobID reports whether s is a blob ID a relay may issue under
+// relay-v1: 1 to 64 characters from [a-z0-9]. Reference relays issue 26
+// lower-case base32 characters, which always pass.
+func ValidBlobID(s string) bool {
+	if s == "" || len(s) > MaxBlobIDLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
 }

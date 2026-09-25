@@ -137,7 +137,7 @@ func TestInboundTaskDuplicateIgnored(t *testing.T) {
 	e := d2Tasks(t)
 	peer, _ := d2Peer(t, e.st, "gpu-box", core.TrustAutonomous)
 	session, _ := e.reg.Register(ctx, "claude", "/w/proj")
-	env := d2Env(t, peer, core.KindTaskCreate, "", "", core.TaskCreateBody{TaskID: "T1", Instructions: "x"})
+	env := d2Env(t, peer, core.KindTaskCreate, "", "", core.TaskCreateBody{TaskID: core.NewID(), Instructions: "x"})
 	for i := 0; i < 2; i++ {
 		if err := e.tasks.HandleCreate(ctx, peer, env); err != nil {
 			t.Fatal(err)

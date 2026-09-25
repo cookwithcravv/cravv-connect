@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"regexp"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -89,5 +90,42 @@ func TestNewIDAtUsesClock(t *testing.T) {
 	// The first 9 characters (45 bits) are pure timestamp.
 	if id[:9] != want[:9] {
 		t.Fatalf("NewIDAt prefix = %q, want %q", id[:9], want[:9])
+	}
+}
+
+func TestValidID(t *testing.T) {
+	for range 100 {
+		if id := NewID(); !ValidID(id) {
+			t.Fatalf("ValidID(%q) = false for a NewID", id)
+		}
+	}
+	bad := []string{
+		"", "T1", "01j8zr0a1b2c3d4e5f6g7h8j9k", // lower case
+		"01J8ZR0A1B2C3D4E5F6G7H8J9",            // 25 chars
+		"01J8ZR0A1B2C3D4E5F6G7H8J9KK",          // 27 chars
+		"01J8ZR0A1B2C3D4E5F6G7H8JIL",           // I and L are not Crockford
+		"01J8ZR0A1B2C3D4E5F6G7H8J\n\x1b",
+		"01J8ZR0A1B2C3D4E5F6\x1b[8mXX",
+		"01J8ZR0A1B2C3D4E5F6G7H8J9‮",
+	}
+	for _, s := range bad {
+		if ValidID(s) {
+			t.Errorf("ValidID(%q) = true", s)
+		}
+	}
+}
+
+func TestValidBlobID(t *testing.T) {
+	good := []string{"q2w3e4r5t6y7u8i9o0p1a2s3d4", "abc", strings.Repeat("a", 64)}
+	for _, s := range good {
+		if !ValidBlobID(s) {
+			t.Errorf("ValidBlobID(%q) = false", s)
+		}
+	}
+	bad := []string{"", "ABC", "a/b", "a\nb", "a\x1b[8m", strings.Repeat("a", 65), "ab.c"}
+	for _, s := range bad {
+		if ValidBlobID(s) {
+			t.Errorf("ValidBlobID(%q) = true", s)
+		}
 	}
 }

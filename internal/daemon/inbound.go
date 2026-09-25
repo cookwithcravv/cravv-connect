@@ -149,6 +149,10 @@ func (in *Inbound) process(ctx context.Context, d transport.Delivery) error {
 		in.drop("unverifiable frame", d, err)
 		return nil
 	}
+	if !core.ValidID(env.ID) {
+		in.drop("message id is not a core ID", d, nil)
+		return nil
+	}
 	if err := in.checkTimestamp(env); err != nil {
 		in.drop("bad timestamp", d, err)
 		return nil

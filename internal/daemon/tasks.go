@@ -159,8 +159,8 @@ func (s *TaskService) handleCreate(ctx context.Context, peer store.Peer, env cor
 	if err != nil {
 		return err
 	}
-	if body.TaskID == "" {
-		return errors.New("task.create without task_id")
+	if err := checkPeerIDs("task.create", body.TaskID, body.Files); err != nil {
+		return err
 	}
 	if err := checkGateDecision(ctx, decision, core.KindTaskCreate, body.TaskID); err != nil {
 		return err
@@ -401,6 +401,9 @@ func (s *TaskService) HandleCancel(ctx context.Context, peer store.Peer, env cor
 	if err != nil {
 		return err
 	}
+	if err := checkPeerIDs("task.cancel", body.TaskID, nil); err != nil {
+		return err
+	}
 	cur, err := s.d.Tasks.GetTask(ctx, body.TaskID)
 	if errors.Is(err, core.ErrNotFound) {
 		return nil
@@ -449,6 +452,9 @@ func (s *TaskService) HandleCancel(ctx context.Context, peer store.Peer, env cor
 func (s *TaskService) HandleUpdate(ctx context.Context, peer store.Peer, env core.Envelope) error {
 	body, err := decodeEnvBody[core.TaskUpdateBody](env.Body)
 	if err != nil {
+		return err
+	}
+	if err := checkPeerIDs("task.update", body.TaskID, body.Files); err != nil {
 		return err
 	}
 	if _, known := mirrorRank[body.State]; !known || body.State == core.TaskSent {
@@ -797,4 +803,23 @@ func previewText(s string, n int) string {
 func contentHash(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// errBadPeerID rejects a message carrying an ID that core.NewID could not have
+// produced. It is not retryable: the message is dropped and acknowledged.
+var errBadPeerID = errors.New("peer-supplied id is not a valid ID")
+
+// checkPeerIDs validates the task ID and file IDs a peer sent. Peer IDs are
+// shown in terminals and agent prompts, so only the exact core ID format is
+// accepted.
+func checkPeerIDs(kind, taskID string, files []core.FileRef) error {
+	if !core.ValidID(taskID) {
+		return fmt.Errorf("%s: task_id %q: %w", kind, taskID, errBadPeerID)
+	}
+	for _, f := range files {
+		if !core.ValidID(f.FileID) {
+			return fmt.Errorf("%s %s: file_id %q: %w", kind, taskID, f.FileID, errBadPeerID)
+		}
+	}
+	return nil
 }

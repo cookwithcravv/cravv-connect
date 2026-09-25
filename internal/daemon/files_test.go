@@ -40,7 +40,7 @@ func newD2Blobs() *d2Blobs {
 func (b *d2Blobs) Create(ctx context.Context, recipient ed25519.PublicKey, size int64, chunks uint32) (string, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	id := core.NewID()
+	id := strings.ToLower(core.NewID()) // relays issue [a-z0-9] blob IDs
 	b.blobs[id] = map[uint32][]byte{}
 	return id, nil
 }
