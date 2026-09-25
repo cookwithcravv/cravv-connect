@@ -44,6 +44,11 @@ func New(opts Options) (*Daemon, error) {
 	if err := normalize(&opts); err != nil {
 		return nil, err
 	}
+	// A verifier that accepts any password (for example a PAM stack ending
+	// in pam_permit) would turn every password gate into a no-op: refuse.
+	if err := auth.SelfTest(opts.Verifier, opts.Username); err != nil {
+		return nil, fmt.Errorf("refusing to start: %w", err)
+	}
 	if err := os.MkdirAll(opts.Paths.Files, 0o700); err != nil {
 		return nil, err
 	}
