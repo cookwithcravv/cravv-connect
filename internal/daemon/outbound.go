@@ -58,7 +58,9 @@ func NewOutbound(id *keys.Identity, peers store.PeerStore, outbox store.OutboxSt
 	}
 }
 
-// SendEnvelope builds an envelope and stores it in the outbox. It fails with core.ErrPaused
+// SendEnvelope builds an envelope and stores it in the outbox. It fails with an error
+// wrapping core.ErrTooLarge, before enqueueing, when the sealed frame could not fit the
+// relay frame limit. It fails with core.ErrPaused
 // when we paused the peer (control kinds excepted). When the peer paused us the item is
 // stored as held and goes out after control.resumed.
 func (o *Outbound) SendEnvelope(ctx context.Context, to core.MachineID, kind core.Kind, fromSession, toSession string, body any) (string, error) {
@@ -77,6 +79,9 @@ func (o *Outbound) SendEnvelope(ctx context.Context, to core.MachineID, kind cor
 		return "", err
 	}
 	env.FromSession, env.ToSession = fromSession, toSession
+	if err := sealing.FitsFrame(env); err != nil {
+		return "", fmt.Errorf("message to %s: %w", peer.Alias, err)
+	}
 	raw, err := json.Marshal(env)
 	if err != nil {
 		return "", err
@@ -191,6 +196,10 @@ func (o *Outbound) attempt(ctx context.Context, mb transport.Mailbox, it store.O
 		return o.outbox.SetStatus(ctx, it.ID, store.OutboxHeld, it.Attempts, it.NextAttempt)
 	}
 	frame, err := o.seal(peer, env)
+	if errors.Is(err, core.ErrTooLarge) {
+		o.recordError(fmt.Sprintf("dropped message %s to %s: too large to seal", it.ID, peer.Alias))
+		return o.outbox.Delete(ctx, it.ID)
+	}
 	if err != nil {
 		o.recordError(fmt.Sprintf("cannot seal to %s: %v", peer.Alias, err))
 		return o.backoff(ctx, it)

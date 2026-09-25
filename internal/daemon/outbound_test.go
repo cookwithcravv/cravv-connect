@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -384,5 +385,46 @@ func TestOutboundRunWakesOnSend(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOutboundRejectsOversizedEnvelope(t *testing.T) {
+	f := newOutboundFixture(t)
+	big := strings.Repeat("a", core.MaxFrameBytes+1)
+	_, err := f.o.SendEnvelope(context.Background(), f.gpu.rec.MachineID, core.KindChat, "", "", core.ChatBody{Text: big})
+	if !errors.Is(err, core.ErrTooLarge) {
+		t.Fatalf("SendEnvelope = %v, want ErrTooLarge", err)
+	}
+	if n := f.outbox.len(); n != 0 {
+		t.Fatalf("outbox has %d items after a refused send", n)
+	}
+}
+
+func TestOutboundDropsItemThatSealsTooLarge(t *testing.T) {
+	f := newOutboundFixture(t)
+	ctx := context.Background()
+	env, err := core.NewEnvelope(f.clock, f.me.MachineID(), f.gpu.rec.MachineID, core.KindChat,
+		core.ChatBody{Text: strings.Repeat("a", core.MaxFrameBytes+1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := f.clock.Now()
+	if err := f.outbox.Enqueue(ctx, store.OutboxItem{ID: env.ID, To: env.ToMachine, Envelope: raw,
+		Status: store.OutboxPending, NextAttempt: now, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	f.pass(t)
+	if len(f.mb.sentFrames()) != 0 {
+		t.Fatal("sent an oversized frame")
+	}
+	if _, ok := f.outbox.item(env.ID); ok {
+		t.Fatal("oversized item kept (would back off forever)")
+	}
+	if len(f.o.Errors()) != 1 {
+		t.Fatalf("errors = %v", f.o.Errors())
 	}
 }
