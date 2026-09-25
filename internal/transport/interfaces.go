@@ -38,7 +38,11 @@ type Credentials struct{ AdminToken, Invite string }
 // that only moves peer frames needs.
 type FrameConn interface {
 	Send(ctx context.Context, to core.MachineID, id string, frame []byte) (SendStatus, error)
-	Deliveries() <-chan Delivery // closed when the connection ends
+	// Deliveries yields frames pushed by the relay, in the order received. Reading it
+	// slowly never stalls request replies: the connection buffers undrained frames in
+	// memory. It is closed when the connection ends; frames not yet received are then
+	// dropped (they were not acked, so the relay pushes them again next connection).
+	Deliveries() <-chan Delivery
 	Ack(ctx context.Context, seq uint64) error
 	Done() <-chan struct{}
 	Err() error // why Done closed

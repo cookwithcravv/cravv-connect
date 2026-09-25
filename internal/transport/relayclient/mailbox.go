@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -15,48 +16,133 @@ import (
 	"github.com/cravv/cravv-connect/internal/transport"
 )
 
-const deliveryBuffer = 256
-
 // mailbox is a live relay-v1 mailbox connection. One reader goroutine owns all reads;
 // requests are matched to replies by rid.
+//
+// The reader never blocks on the Deliveries consumer: deliver frames go into an
+// unbounded in-memory queue that a forwarding goroutine feeds into the channel, so res
+// frames keep flowing however slowly deliveries are drained. The relay's queue caps
+// (10000 frames, 50 MB) bound the backlog one connection can push. When the
+// connection ends, frames still in the queue are dropped; they were not acked, so the
+// relay pushes them again on the next connection.
 type mailbox struct {
 	ws         *websocket.Conn
 	ctx        context.Context
 	cancel     context.CancelFunc
 	deliveries chan transport.Delivery
 	done       chan struct{}
+	fwdDone    chan struct{}
 
 	mu      sync.Mutex
 	nextRID uint64
 	pending map[string]chan relayproto.Res
 	err     error
+
+	qmu     sync.Mutex
+	qcond   *sync.Cond
+	queue   []transport.Delivery
+	qclosed bool
 }
 
-func newMailbox(ws *websocket.Conn) *mailbox {
+func newMailbox(ws *websocket.Conn, pingInterval, pingTimeout time.Duration) *mailbox {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &mailbox{
 		ws:         ws,
 		ctx:        ctx,
 		cancel:     cancel,
-		deliveries: make(chan transport.Delivery, deliveryBuffer),
+		deliveries: make(chan transport.Delivery),
 		done:       make(chan struct{}),
+		fwdDone:    make(chan struct{}),
 		pending:    map[string]chan relayproto.Res{},
 	}
+	m.qcond = sync.NewCond(&m.qmu)
+	go m.forward()
 	go m.readLoop()
+	if pingInterval > 0 {
+		go m.pingLoop(pingInterval, pingTimeout)
+	}
 	return m
 }
 
-func (m *mailbox) readLoop() {
-	err := m.readFrames()
+// fail records err as the reason the connection ended, unless one is already set.
+func (m *mailbox) fail(err error) {
 	m.mu.Lock()
 	if m.err == nil {
 		m.err = err
 	}
 	m.mu.Unlock()
+}
+
+func (m *mailbox) readLoop() {
+	m.fail(m.readFrames())
 	m.cancel()
 	m.ws.CloseNow()
-	close(m.deliveries)
+	m.qmu.Lock()
+	m.qclosed = true
+	m.queue = nil
+	m.qcond.Broadcast()
+	m.qmu.Unlock()
+	<-m.fwdDone
 	close(m.done)
+}
+
+// enqueue hands a delivery to the forwarder without blocking.
+func (m *mailbox) enqueue(d transport.Delivery) {
+	m.qmu.Lock()
+	m.queue = append(m.queue, d)
+	m.qcond.Signal()
+	m.qmu.Unlock()
+}
+
+// forward moves queued deliveries into the Deliveries channel, in order, and closes
+// the channel when the connection ends.
+func (m *mailbox) forward() {
+	defer close(m.fwdDone)
+	defer close(m.deliveries)
+	for {
+		m.qmu.Lock()
+		for len(m.queue) == 0 && !m.qclosed {
+			m.qcond.Wait()
+		}
+		if m.qclosed {
+			m.qmu.Unlock()
+			return
+		}
+		d := m.queue[0]
+		m.queue[0] = transport.Delivery{}
+		m.queue = m.queue[1:]
+		m.qmu.Unlock()
+		select {
+		case m.deliveries <- d:
+		case <-m.ctx.Done():
+			return
+		}
+	}
+}
+
+// pingLoop sends a WebSocket ping every interval. A ping that gets no pong within
+// timeout means the connection is dead: it is closed and Err reports why.
+func (m *mailbox) pingLoop(interval, timeout time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-t.C:
+		}
+		pctx, cancel := context.WithTimeout(m.ctx, timeout)
+		err := m.ws.Ping(pctx)
+		cancel()
+		if err != nil {
+			if m.ctx.Err() == nil {
+				m.fail(fmt.Errorf("relay: keepalive ping failed: %w", err))
+			}
+			m.cancel()
+			m.ws.CloseNow()
+			return
+		}
+	}
 }
 
 func (m *mailbox) readFrames() error {
@@ -77,11 +163,7 @@ func (m *mailbox) readFrames() error {
 			if err != nil {
 				return err
 			}
-			select {
-			case m.deliveries <- d:
-			case <-m.ctx.Done():
-				return ErrClosed
-			}
+			m.enqueue(d)
 		case relayproto.TypeError:
 			return serverError(raw)
 		}
@@ -158,6 +240,9 @@ func (m *mailbox) Send(ctx context.Context, to core.MachineID, id string, frame 
 	return transport.SendStatus(r.Status), nil
 }
 
+// Deliveries yields pushed frames in the order received. It never makes the reader
+// wait: undrained frames are buffered in memory. It is closed, dropping any frames not
+// yet received (they are redelivered on the next connection), before Done closes.
 func (m *mailbox) Deliveries() <-chan transport.Delivery { return m.deliveries }
 
 // Ack writes on the connection's own context so a cancelled caller ctx cannot

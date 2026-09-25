@@ -186,6 +186,12 @@ frames as they are queued:
   pushed but not acked MUST be pushed again on the next connection. Delivery is therefore
   at least once, and clients deduplicate by `id`.
 
+**Keepalive.** Clients SHOULD send a WebSocket ping every 30 seconds on a live
+connection and SHOULD treat a ping that gets no pong (the reference client waits 15
+seconds) as a dead connection: close it and reconnect. Relays MUST answer pings with
+pongs (RFC 6455) and SHOULD NOT close an authenticated connection for being idle
+before 120 seconds without any message or ping from the client.
+
 ### 3.6 Client requests
 
 Each request below is answered by one `res`:
@@ -204,6 +210,8 @@ list can queue frames here. The list is keyed by the sender's mailbox ID.
 {"t":"deny","rid":"2","ik":"<b64 ik>"}
 ```
 Reply `ok`, or `error` with `bad_request` if `ik` is not a valid key. Both are idempotent.
+`deny` only stops future `send`s: frames the sender queued before the `deny` stay in
+the queue and are still delivered.
 
 **invite_request.** Mint a single-use registration invite valid for 10 minutes.
 ```json
@@ -240,6 +248,11 @@ secret of at least 128 random bits (reference relays use 32 lowercase hex charac
 
 A client keeps a frame in its own outbox until it sees `queued`, and resends with the
 same `id` after a reconnect.
+
+The `unknown_mailbox` check deliberately comes before `not_allowed`: any member can
+learn whether a mailbox ID is registered on the relay. This is accepted because only
+members can send, mailbox IDs are hashes of public keys, and a precise status lets a
+sender tell "peer not set up yet" from "peer paused me".
 
 **ack.** Acknowledge delivery. No `rid`, no reply.
 ```json

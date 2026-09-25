@@ -25,7 +25,7 @@ type env struct {
 	clock  *core.FakeClock
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, opts ...relayclient.Option) *env {
 	t.Helper()
 	clock := core.NewFakeClock(time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC))
 	var h http.Handler
@@ -37,7 +37,7 @@ func newEnv(t *testing.T) *env {
 	}
 	t.Cleanup(func() { srv.Close() })
 	h = srv
-	c, err := relayclient.New(ts.URL, relayclient.WithClock(clock))
+	c, err := relayclient.New(ts.URL, append([]relayclient.Option{relayclient.WithClock(clock)}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/relayproto"
@@ -13,17 +14,32 @@ import (
 
 // Client holds what every relay-v1 connection needs: base URLs, HTTP client, clock.
 type Client struct {
-	origin string // scheme://host[:port]
-	wsBase string // ws(s)://host[:port]
-	http   *http.Client
-	clock  core.Clock
+	origin       string // scheme://host[:port]
+	wsBase       string // ws(s)://host[:port]
+	http         *http.Client
+	clock        core.Clock
+	pingInterval time.Duration
+	pingTimeout  time.Duration
 }
+
+// Keepalive defaults: relay-v1 clients SHOULD ping every 30 seconds.
+const (
+	DefaultPingInterval = 30 * time.Second
+	DefaultPingTimeout  = 15 * time.Second
+)
 
 // Option customizes a Client.
 type Option func(*Client)
 
 // WithHTTPClient sets the HTTP client used for blobs and WebSocket upgrades.
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h } }
+
+// WithKeepalive sets how often a mailbox connection sends a WebSocket ping and how
+// long it waits for the pong. An unanswered ping ends the connection. interval <= 0
+// disables pings.
+func WithKeepalive(interval, timeout time.Duration) Option {
+	return func(c *Client) { c.pingInterval, c.pingTimeout = interval, timeout }
+}
 
 // WithClock sets the clock used for request-signature timestamps.
 func WithClock(clk core.Clock) Option { return func(c *Client) { c.clock = clk } }
@@ -37,10 +53,12 @@ func New(relayURL string, opts ...Option) (*Client, error) {
 	}
 	scheme, host, _ := strings.Cut(origin, "://")
 	c := &Client{
-		origin: origin,
-		wsBase: map[string]string{"http": "ws", "https": "wss"}[scheme] + "://" + host,
-		http:   http.DefaultClient,
-		clock:  core.SystemClock{},
+		origin:       origin,
+		wsBase:       map[string]string{"http": "ws", "https": "wss"}[scheme] + "://" + host,
+		http:         http.DefaultClient,
+		clock:        core.SystemClock{},
+		pingInterval: DefaultPingInterval,
+		pingTimeout:  DefaultPingTimeout,
 	}
 	for _, o := range opts {
 		o(c)

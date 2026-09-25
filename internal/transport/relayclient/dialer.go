@@ -28,7 +28,7 @@ func (d dialer) Dial(ctx context.Context, id transport.Signer, creds transport.C
 		ws.CloseNow()
 		return nil, err
 	}
-	return newMailbox(ws), nil
+	return newMailbox(ws, d.c.pingInterval, d.c.pingTimeout), nil
 }
 
 func (d dialer) handshake(ctx context.Context, ws *websocket.Conn, id transport.Signer, creds transport.Credentials) error {
