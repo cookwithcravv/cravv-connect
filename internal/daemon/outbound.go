@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -84,7 +85,7 @@ func (o *Outbound) SendEnvelope(ctx context.Context, to core.MachineID, kind cor
 	if err := sealing.FitsFrame(env); err != nil {
 		return "", fmt.Errorf("message to %s: %w", peer.Alias, err)
 	}
-	raw, err := json.Marshal(env)
+	raw, err := encodeNoHTML(env)
 	if err != nil {
 		return "", err
 	}
@@ -376,4 +377,18 @@ func (o *Outbound) recordError(msg string) {
 	if len(o.recent) > maxRecentErrors {
 		o.recent = o.recent[len(o.recent)-maxRecentErrors:]
 	}
+}
+
+// encodeNoHTML marshals v as JSON without escaping '<', '>' and '&'. The
+// outbox copy of an envelope must use it: json.Marshal would store each of
+// those characters in the body as six bytes, and a full-size message of them
+// would then be too large to seal.
+func encodeNoHTML(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }

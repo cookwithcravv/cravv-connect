@@ -501,3 +501,27 @@ func TestOutboundResendsQueuedItemAfterRelayTTL(t *testing.T) {
 		t.Fatalf("status after resend = %s", st)
 	}
 }
+
+// A full-size chat of '<' must still seal: the outbox copy of the envelope is
+// stored without HTML escaping, which would make each '<' six bytes.
+func TestOutboundLargeAngleBracketChatSeals(t *testing.T) {
+	f := newOutboundFixture(t)
+	text := strings.Repeat("<", core.MaxTextBytes)
+	id := f.send(t, text)
+	if raw := f.status(t, id).Envelope; strings.Contains(string(raw), `\u003c`) {
+		t.Fatalf("outbox envelope is HTML-escaped (%d bytes)", len(raw))
+	}
+	f.pass(t)
+	sent := f.mb.sentFrames()
+	if len(sent) != 1 {
+		t.Fatalf("sent %d frames; errors %v", len(sent), f.o.Errors())
+	}
+	_, env, err := openAs(t, f.me, f.gpu, sent[0].Frame, f.gpu.prekey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body core.ChatBody
+	if err := json.Unmarshal(env.Body, &body); err != nil || body.Text != text {
+		t.Fatalf("body mismatch (%v)", err)
+	}
+}
