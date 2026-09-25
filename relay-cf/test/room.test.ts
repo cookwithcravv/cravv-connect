@@ -51,6 +51,21 @@ describe("pairing rooms", () => {
     expect(await late.next()).toMatchObject({ t: "error", code: "not_found" });
   });
 
+  it("accepts a mixed-case nameplate on the creator side", async () => {
+    let room = await createRoom();
+    while (!/[A-Z]/.test(room.nameplate)) room = await createRoom();
+    const { nameplate, token } = room;
+    const mixed = nameplate
+      .split("")
+      .map((ch, i) => (i % 2 === 0 ? ch.toLowerCase() : ch))
+      .join("");
+    const creator = await openCreator(mixed, token);
+    const joiner = await openJoiner(nameplate.toLowerCase());
+    expect(await creator.next()).toEqual({ t: "peer_joined" });
+    joiner.close();
+    creator.close();
+  });
+
   it("buffers up to 16 creator messages and delivers them right after peer_joined", async () => {
     const { nameplate, token } = await createRoom();
     const creator = await openCreator(nameplate, token);
