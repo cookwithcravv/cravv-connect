@@ -110,6 +110,9 @@ type InboxStore interface {
 	RedirectOrphans(ctx context.Context, session string, note string) (int, error)
 	UnreadCount(ctx context.Context, session string, after int64) (int, map[core.MachineID]int, error)
 	PurgeInboxBefore(ctx context.Context, t time.Time) (int, error) // ReceivedAt < t
+	// HasInboxMsg reports whether any item carries msgID (handlers use it to
+	// finish a delivery that failed after their own store write).
+	HasInboxMsg(ctx context.Context, msgID string) (bool, error)
 }
 
 type SessionRecord struct {

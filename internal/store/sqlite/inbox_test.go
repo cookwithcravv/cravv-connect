@@ -233,3 +233,23 @@ func TestInboxRedirectOrphansReinsertsWithNewSeq(t *testing.T) {
 		t.Fatalf("new session (cursor %d) sees %v, want [for-gone]", cur, got)
 	}
 }
+
+func TestHasInboxMsg(t *testing.T) {
+	ctx := context.Background()
+	ib := newTestDB(t)
+	addInbox(t, ib, "m1", "A", "", t0)
+	if ok, err := ib.HasInboxMsg(ctx, "m1"); err != nil || !ok {
+		t.Fatalf("HasInboxMsg(m1) = %v, %v", ok, err)
+	}
+	if ok, err := ib.HasInboxMsg(ctx, "m2"); err != nil || ok {
+		t.Fatalf("HasInboxMsg(m2) = %v, %v", ok, err)
+	}
+	// Redirecting an orphan keeps the message ID.
+	addInbox(t, ib, "m3", "A", "claude@gone", t0)
+	if _, err := ib.RedirectOrphans(ctx, "claude@gone", "(originally for claude@gone)"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := ib.HasInboxMsg(ctx, "m3"); !ok {
+		t.Fatal("redirected item lost its message ID")
+	}
+}

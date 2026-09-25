@@ -139,6 +139,13 @@ func (d *DB) PurgeInboxBefore(ctx context.Context, t time.Time) (int, error) {
 	return affected(res)
 }
 
+// HasInboxMsg reports whether any inbox item carries msgID.
+func (d *DB) HasInboxMsg(ctx context.Context, msgID string) (bool, error) {
+	var n int
+	err := d.sql.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM inbox WHERE msg_id = ?)`, msgID).Scan(&n)
+	return n == 1, err
+}
+
 func scanInbox(s rowScanner) (store.InboxItem, error) {
 	var (
 		it         store.InboxItem

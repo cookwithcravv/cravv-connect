@@ -107,6 +107,10 @@ CREATE TABLE settings (
 	value TEXT NOT NULL
 );
 `,
+	`
+CREATE INDEX inbox_msg ON inbox(msg_id);
+CREATE INDEX files_created ON files(created_at);
+`,
 }
 
 // migrate creates schema_migrations and applies every migration whose
