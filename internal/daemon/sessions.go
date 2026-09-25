@@ -26,7 +26,8 @@ type SessionRegistry struct {
 // CLIAgent is the agent name the `--json` CLI registers with. Each CLI
 // invocation is a short-lived session, so a disconnected cli session stays
 // reclaimable (same name, cursor and claimed tasks) for core.InboxRetention
-// instead of core.ReclaimGrace, and its claimed tasks are never abandoned.
+// instead of core.ReclaimGrace. Its claimed tasks are not abandoned when the
+// session expires; they fail as abandoned CLIClaimMaxAge after the claim.
 const CLIAgent = "cli"
 
 // graceFor is how long a disconnected session of this agent stays reclaimable.

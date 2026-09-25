@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cravv/cravv-connect/internal/audit"
@@ -24,6 +25,11 @@ type PeerResolver interface {
 type FileSender interface {
 	SendFile(ctx context.Context, to core.MachineID, projectDir, path, taskID string) (core.FileRef, error)
 }
+
+// CLIClaimMaxAge is how long a task claimed by a CLIAgent session may stay
+// claimed or running before it fails as abandoned. CLI sessions are
+// reclaimable for core.InboxRetention, so nothing else would end such a claim.
+const CLIClaimMaxAge = 7 * 24 * time.Hour
 
 // ApprovalPreviewChars is how much of a held task the approval list shows.
 const ApprovalPreviewChars = 500
@@ -128,7 +134,7 @@ func (s *TaskService) sendFiles(ctx context.Context, to core.MachineID, projectD
 	for _, p := range paths {
 		ref, err := s.d.Files.SendFile(ctx, to, projectDir, p, taskID)
 		if err != nil {
-			return nil, fmt.Errorf("attach %s: %w", p, err)
+			return refs, fmt.Errorf("attach %s: %w", p, err)
 		}
 		refs = append(refs, ref)
 	}
@@ -258,6 +264,9 @@ func (s *TaskService) Claim(ctx context.Context, session, id string) (store.Task
 		t.State = core.TaskClaimed
 		t.ClaimedBy = session
 		t.ExpiresAt = time.Time{}
+		if isCLISession(session) {
+			t.ExpiresAt = now.Add(CLIClaimMaxAge)
+		}
 		t.UpdatedAt = now
 		return nil
 	})
@@ -313,35 +322,38 @@ func (s *TaskService) Update(ctx context.Context, session, id, note string) (sto
 	return t, nil
 }
 
-// Complete finishes a claimed task with a result and optional files.
+// Complete finishes a claimed task with a result and optional files. The task
+// moves to done first, so files are only uploaded for a task this session
+// really finished (a cancel racing the upload finds it done). A file that
+// cannot be sent is reported in the update's note and returned as an error;
+// the task stays done with the files that were sent.
 func (s *TaskService) Complete(ctx context.Context, session, projectDir, id, result string, filePaths []string) (store.Task, error) {
 	if len(result) > core.MaxTextBytes {
 		return store.Task{}, fmt.Errorf("result: %w", core.ErrTooLarge)
 	}
-	cur, err := s.inboundTask(ctx, id)
-	if err != nil {
-		return cur, err
-	}
-	if cur.State != core.TaskClaimed && cur.State != core.TaskRunning {
-		return cur, core.ErrBadTransition
-	}
-	if cur.ClaimedBy != session {
-		return cur, core.ErrNotPermitted
-	}
-	files, err := s.sendFiles(ctx, cur.Peer, projectDir, id, filePaths)
-	if err != nil {
-		return cur, err
-	}
 	t, err := s.claimerTransition(ctx, session, id, func(t *store.Task) {
 		t.State = core.TaskDone
 		t.Result = result
-		t.ResultFiles = files
 	})
 	if err != nil {
 		return t, err
 	}
-	s.sendUpdate(ctx, t, core.TaskUpdateBody{TaskID: t.ID, State: core.TaskDone, Result: result, Files: files})
-	return t, nil
+	files, ferr := s.sendFiles(ctx, t.Peer, projectDir, id, filePaths)
+	if len(files) > 0 {
+		t, err = s.d.Tasks.Transition(ctx, id, []core.TaskState{core.TaskDone}, func(t *store.Task) error {
+			t.ResultFiles = files
+			return nil
+		})
+		if err != nil {
+			return t, err
+		}
+	}
+	upd := core.TaskUpdateBody{TaskID: t.ID, State: core.TaskDone, Result: result, Files: files}
+	if ferr != nil {
+		upd.Note = "some result files were not sent: " + ferr.Error()
+	}
+	s.sendUpdate(ctx, t, upd)
+	return t, ferr
 }
 
 // Fail ends a claimed task with a reason.
@@ -665,6 +677,26 @@ func (s *TaskService) AbandonSession(ctx context.Context, name string) error {
 	return s.failClaimed(ctx, store.TaskFilter{Direction: store.TaskInbound, States: claimedStates, ClaimedBy: name}, "abandoned")
 }
 
+// AbandonStaleCLIClaims fails tasks a CLIAgent session claimed more than
+// CLIClaimMaxAge ago ("abandoned") and tells their senders.
+func (s *TaskService) AbandonStaleCLIClaims(ctx context.Context) (int, error) {
+	ts, err := s.d.Tasks.ListTasks(ctx, store.TaskFilter{Direction: store.TaskInbound, States: claimedStates, ExpiredBefore: s.d.Clock.Now()})
+	if err != nil {
+		return 0, err
+	}
+	stale := ts[:0]
+	for _, t := range ts {
+		if isCLISession(t.ClaimedBy) {
+			stale = append(stale, t)
+		}
+	}
+	return s.failTasks(ctx, stale, "abandoned")
+}
+
+// isCLISession reports whether a session name belongs to the --json CLI
+// (sessions are named <agent>@<dir>).
+func isCLISession(name string) bool { return strings.HasPrefix(name, CLIAgent+"@") }
+
 // FailActive fails every claimed or running inbound task (kill switch).
 func (s *TaskService) FailActive(ctx context.Context, reason string) error {
 	return s.failClaimed(ctx, store.TaskFilter{Direction: store.TaskInbound, States: claimedStates}, reason)
@@ -675,10 +707,18 @@ func (s *TaskService) failClaimed(ctx context.Context, f store.TaskFilter, reaso
 	if err != nil {
 		return err
 	}
+	_, err = s.failTasks(ctx, ts, reason)
+	return err
+}
+
+// failTasks fails the listed tasks that are still claimed or running and tells their senders.
+func (s *TaskService) failTasks(ctx context.Context, ts []store.Task, reason string) (int, error) {
 	now := s.d.Clock.Now()
+	n := 0
 	for _, cand := range ts {
 		t, err := s.d.Tasks.Transition(ctx, cand.ID, claimedStates, func(t *store.Task) error {
 			t.State = core.TaskFailed
+			t.ExpiresAt = time.Time{}
 			t.Notes = append(t.Notes, store.TaskNote{At: now, Text: reason})
 			t.UpdatedAt = now
 			return nil
@@ -687,11 +727,12 @@ func (s *TaskService) failClaimed(ctx context.Context, f store.TaskFilter, reaso
 			continue
 		}
 		if err != nil {
-			return err
+			return n, err
 		}
 		s.sendUpdate(ctx, t, core.TaskUpdateBody{TaskID: t.ID, State: core.TaskFailed, Note: reason})
+		n++
 	}
-	return nil
+	return n, nil
 }
 
 // RecheckPeer re-applies the trust policy to a peer's pending tasks after its

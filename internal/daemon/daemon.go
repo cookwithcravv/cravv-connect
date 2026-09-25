@@ -384,6 +384,9 @@ func (d *Daemon) maintain(ctx context.Context, g *services) error {
 	if _, err := g.tasks.ExpireDue(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("expire tasks: %w", err))
 	}
+	if _, err := g.tasks.AbandonStaleCLIClaims(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("abandon stale cli claims: %w", err))
+	}
 	if err := d.sessions.Sweep(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("sweep sessions: %w", err))
 	}

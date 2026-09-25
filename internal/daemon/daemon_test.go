@@ -493,24 +493,23 @@ func TestCLITaskSurvivesSessionExpiry(t *testing.T) {
 	}
 	d.Sessions().Disconnect(ctx, next)
 
-	// Even after the cli session itself expires, its task is not abandoned
-	// and a new cli@proj session can finish it.
-	clock.Advance(core.InboxRetention + time.Minute)
+	// Days later a new cli@proj invocation can still finish it...
+	clock.Advance(CLIClaimMaxAge - 2*time.Hour)
 	if err := d.Maintain(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if d.Sessions().Exists(ctx, claimer) {
-		t.Fatal("cli session not swept after InboxRetention")
-	}
 	if tk, _ := d.store.GetTask(ctx, taskID); tk.State != core.TaskRunning {
-		t.Fatalf("cli task abandoned: %s", tk.State)
+		t.Fatalf("cli task abandoned early: %s", tk.State)
 	}
-	last, _ := d.Sessions().Register(ctx, CLIAgent, "/w/proj")
-	if last != claimer {
-		t.Fatalf("cli name after expiry = %q", last)
+	// ...but a cli claim does not last forever: after CLIClaimMaxAge it is
+	// failed as abandoned and the sender is told.
+	clock.Advance(2 * time.Hour)
+	if err := d.Maintain(ctx); err != nil {
+		t.Fatal(err)
 	}
-	if tk, err := d.Tasks().Complete(ctx, last, "/w/proj", taskID, "done", nil); err != nil || tk.State != core.TaskDone {
-		t.Fatalf("complete: %+v %v", tk, err)
+	tk, _ := d.store.GetTask(ctx, taskID)
+	if tk.State != core.TaskFailed || tk.Notes[len(tk.Notes)-1].Text != "abandoned" {
+		t.Fatalf("cli task after CLIClaimMaxAge = %s %+v", tk.State, tk.Notes)
 	}
 }
 
