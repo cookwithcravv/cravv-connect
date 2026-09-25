@@ -241,7 +241,17 @@ func (d *Daemon) connectLoop(ctx context.Context, g *services) {
 		}
 		creds, err := d.credentials(ctx)
 		if err != nil {
-			d.log.Error("read relay credentials", "err", err)
+			creds = transport.Credentials{}
+			if !d.registered.Load() {
+				// An unregistered identity needs its admin token or invite: a dial
+				// without them would only be refused. Retry the store later.
+				d.log.Error("read relay credentials", "err", err, "retry_in", backoff)
+				d.setState(nil, fmt.Errorf("read relay credentials: %w", err))
+				d.sleep(ctx, backoff)
+				backoff = min(backoff*2, core.BackoffMax)
+				continue
+			}
+			d.log.Warn("read relay credentials; dialing with the existing registration", "err", err)
 		}
 		mb, err := d.relay.Dialer().Dial(ctx, g.identity, creds)
 		if err != nil {
