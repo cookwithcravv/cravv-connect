@@ -56,7 +56,23 @@ func TestBadRequestUsesInvalidParamsCode(t *testing.T) {
 	}
 }
 
+// restoreErrorKinds snapshots the package-level kind table and restores it
+// when the test ends, so registrations do not leak into later runs
+// (go test -count=N reuses the process).
+func restoreErrorKinds(t *testing.T) {
+	t.Helper()
+	kindsMu.RLock()
+	saved := append([]errorKind(nil), errorKinds...)
+	kindsMu.RUnlock()
+	t.Cleanup(func() {
+		kindsMu.Lock()
+		errorKinds = saved
+		kindsMu.Unlock()
+	})
+}
+
 func TestRegisterErrorKindBothDirections(t *testing.T) {
+	restoreErrorKinds(t)
 	errOffline := errors.New("relay offline")
 	RegisterErrorKind(errOffline, "offline")
 	RegisterErrorKind(errOffline, "offline") // idempotent
