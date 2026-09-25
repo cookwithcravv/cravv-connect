@@ -1,10 +1,13 @@
+import { handleBlobs } from "./blobs";
 import { b64encode, decodeIK, mailboxIdOf } from "./crypto";
 import type { Env } from "./env";
 import { rateLimitsEnabled } from "./limits";
-import { Code, failSocket, ROUTE_IK_HEADER, ROUTE_MAILBOX_HEADER, type ErrorCode } from "./protocol";
+import { Code, failSocket, NAMEPLATE_RE, ROUTE_IK_HEADER, ROUTE_MAILBOX_HEADER, type ErrorCode } from "./protocol";
 
+export { BlobMeta } from "./blobmeta";
 export { Mailbox } from "./mailbox";
 export { Registry } from "./registry";
+export { Room } from "./room";
 
 function notUpgrade(): Response {
   return Response.json({ code: Code.BAD_REQUEST, message: "expected websocket upgrade" }, { status: 426 });
@@ -43,6 +46,14 @@ async function connect(request: Request, env: Env, url: URL): Promise<Response> 
   return env.MAILBOX.getByName(mailboxId).fetch(new Request(request.url, { method: "GET", headers }));
 }
 
+// GET /v1/pair/{nameplate}[?token=]: routed to the Room DO for that nameplate.
+async function pair(request: Request, env: Env, nameplate: string): Promise<Response> {
+  if (!isUpgrade(request)) return notUpgrade();
+  const np = nameplate.toUpperCase();
+  if (!NAMEPLATE_RE.test(np)) return rejectSocket(Code.NOT_FOUND, "unknown pairing room");
+  return env.ROOM.getByName(np).fetch(request);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -54,6 +65,9 @@ export default {
         : Response.json({ code: Code.RATE_LIMITED, message: "too many requests" }, { status: 429 });
     }
     if (path === "/v1/connect") return connect(request, env, url);
+    const pairMatch = path.match(/^\/v1\/pair\/([^/]+)$/);
+    if (pairMatch) return pair(request, env, pairMatch[1]);
+    if (path === "/v1/blobs" || path.startsWith("/v1/blobs/")) return handleBlobs(request, env);
     return Response.json({ code: Code.NOT_FOUND, message: "not found" }, { status: 404 });
   },
 } satisfies ExportedHandler<Env>;

@@ -6,6 +6,9 @@ import {
   decodeIK,
   mailboxIdOf,
   randomBytes,
+  randomNameplate,
+  randomToken,
+  sha256Hex,
   verifyEd25519,
 } from "./crypto";
 import type { Env } from "./env";
@@ -40,6 +43,7 @@ interface Attachment {
 
 type Op = (ws: WebSocket, a: Attachment, f: Frame, rid: string) => Promise<void>;
 
+const ROOM_CREATE_ATTEMPTS = 16;
 const MAX_ID_CHARS = 128;
 
 // Mailbox is one SQLite-backed Durable Object per mailbox id. It owns the queue, the allow-list
@@ -73,6 +77,7 @@ export class Mailbox extends DurableObject<Env> {
       allow: (ws, _a, f, rid) => this.opAllow(ws, f, rid, true),
       deny: (ws, _a, f, rid) => this.opAllow(ws, f, rid, false),
       invite_request: (ws, a, _f, rid) => this.opInvite(ws, a, rid),
+      room_create: (ws, _a, _f, rid) => this.opRoomCreate(ws, rid),
       send: (ws, a, f, rid) => this.opSend(ws, a, f, rid),
       register: async (ws, _a, _f, rid) => ws.send(resFrame(rid, { status: Status.OK })),
     };
@@ -290,6 +295,19 @@ export class Mailbox extends DurableObject<Env> {
       return;
     }
     ws.send(resFrame(rid, { status: Status.OK, invite }));
+  }
+
+  private async opRoomCreate(ws: WebSocket, rid: string): Promise<void> {
+    for (let i = 0; i < ROOM_CREATE_ATTEMPTS; i++) {
+      const nameplate = randomNameplate();
+      const token = randomToken();
+      const created = await this.env.ROOM.getByName(nameplate).init(await sha256Hex(token));
+      if (created) {
+        ws.send(resFrame(rid, { status: Status.OK, nameplate, creator_token: token }));
+        return;
+      }
+    }
+    ws.send(resFrame(rid, { status: Status.ERROR, code: Code.INTERNAL }));
   }
 
   // Check order follows relay-v1 3.6 (rate limit was already applied in onReady).
