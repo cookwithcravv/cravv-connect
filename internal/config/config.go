@@ -83,7 +83,7 @@ func Defaults() Config {
 
 // Load reads p.Config over Defaults. A missing file yields Defaults.
 // Unknown keys are ignored; malformed lines are errors naming the line.
-// A pam_service that is set but not allowlisted by auth is an error
+// A peer_quota <= 0 is an error. A pam_service that is set but not allowlisted by auth is an error
 // matching auth.ErrServiceNotAllowed.
 func Load(p Paths) (Config, error) {
 	c := Defaults()
@@ -127,6 +127,9 @@ func Load(p Paths) (Config, error) {
 
 // validate checks the values of the keys the file set.
 func validate(c Config, set map[string]bool, path string) error {
+	if set["peer_quota"] && c.PeerQuota <= 0 {
+		return fmt.Errorf("config: %s: peer_quota must be a positive number of bytes, got %d", path, c.PeerQuota)
+	}
 	if set["pam_service"] {
 		if err := auth.CheckPAMService(c.PAMService); err != nil {
 			return fmt.Errorf("config: %s: pam_service: %w", path, err)

@@ -194,3 +194,31 @@ func TestDefaultPAMServiceComesFromAuth(t *testing.T) {
 		t.Fatalf("Defaults().PAMService = %q, want auth.DefaultPAMService() = %q", got, auth.DefaultPAMService())
 	}
 }
+
+func TestLoadRejectsNonPositivePeerQuota(t *testing.T) {
+	for _, v := range []string{"0", "-1", "-9_000"} {
+		t.Run(v, func(t *testing.T) {
+			p := testPaths(t)
+			if err := os.WriteFile(p.Config, []byte("peer_quota = "+v+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "peer_quota") {
+				t.Fatalf("Load with peer_quota = %s: err = %v, want an error naming peer_quota", v, err)
+			}
+		})
+	}
+}
+
+func TestLoadKeepsDefaultPeerQuotaWhenAbsent(t *testing.T) {
+	p := testPaths(t)
+	if err := os.WriteFile(p.Config, []byte("relay_url = \"https://r\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.PeerQuota != core.DefaultPeerQuota {
+		t.Fatalf("PeerQuota = %d, want default %d", c.PeerQuota, core.DefaultPeerQuota)
+	}
+}
