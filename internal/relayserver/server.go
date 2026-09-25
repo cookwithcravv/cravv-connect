@@ -34,6 +34,7 @@ type Server struct {
 	ipLimiter *rateLimiter // per client IP
 	log       *slog.Logger
 	ops       map[string]opHandler
+	rooms     *roomHub
 }
 
 // New builds a Server. Zero Limits fields take DefaultLimits values.
@@ -53,6 +54,7 @@ func New(cfg Config, be Backend) *Server {
 		limiter:   newRateLimiter(cfg.Clock, cfg.Limits.OpRate, cfg.Limits.OpBurst),
 		ipLimiter: newRateLimiter(cfg.Clock, cfg.Limits.IPRate, cfg.Limits.IPBurst),
 		log:       cfg.Logger,
+		rooms:     newRoomHub(),
 	}
 	s.ops = s.mailboxOps()
 	s.routes()
@@ -62,6 +64,11 @@ func New(cfg Config, be Backend) *Server {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET "+relayproto.PathHealth, s.handleHealth)
 	s.mux.HandleFunc("GET "+relayproto.PathConnect, s.handleConnect)
+	s.mux.HandleFunc("GET "+relayproto.PathPair+"{nameplate}", s.handlePair)
+	s.mux.HandleFunc("POST "+relayproto.PathBlobs, s.handleBlobCreate)
+	s.mux.HandleFunc("PUT "+relayproto.PathBlobs+"/{id}/chunks/{n}", s.handleChunkPut)
+	s.mux.HandleFunc("GET "+relayproto.PathBlobs+"/{id}/chunks/{n}", s.handleChunkGet)
+	s.mux.HandleFunc("DELETE "+relayproto.PathBlobs+"/{id}", s.handleBlobDelete)
 }
 
 // ServeHTTP implements http.Handler.
