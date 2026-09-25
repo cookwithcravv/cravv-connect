@@ -40,7 +40,7 @@ type aliasIn struct {
 type pausePeerTool struct{}
 
 func (pausePeerTool) Register(s *mcp.Server, c Caller) {
-	addTool(s, "pause_peer", "Stop all traffic with a peer right away. Only the human can resume it.",
+	addTool(s, "pause_peer", "Stop all traffic with a peer right away. There is no tool to resume it: the human resumes it with `cravv-connect resume-peer <alias>`.",
 		func(ctx context.Context, in aliasIn) (string, error) {
 			if err := c.Call(ctx, ipc.MethodPeerPause, ipc.AliasParams{Alias: in.Alias}, nil); err != nil {
 				return "", err

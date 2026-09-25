@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/cravv/cravv-connect/internal/config"
+	"github.com/cravv/cravv-connect/internal/relayproto"
 	"github.com/spf13/cobra"
 )
 
@@ -55,16 +56,24 @@ func suggestAlias(s string) string {
 	return s
 }
 
-func validRelayURL(raw string) error {
+// relayOrigin checks the relay URL and returns its normalized origin
+// (relay-v1 section 1): http or https, a host and an optional port, nothing
+// else. Relays sign and verify requests against this exact origin.
+func relayOrigin(raw string) (string, error) {
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-		return fmt.Errorf("relay must be an http or https URL, got %q", raw)
+	if err != nil || (!strings.EqualFold(u.Scheme, "https") && !strings.EqualFold(u.Scheme, "http")) || u.Host == "" {
+		return "", fmt.Errorf("relay must be an http or https URL, got %q", raw)
 	}
-	return nil
+	origin, err := relayproto.NormalizeOrigin(raw)
+	if err != nil {
+		return "", fmt.Errorf("relay must be scheme://host[:port] with no path, query or user: %w", err)
+	}
+	return origin, nil
 }
 
 func runInit(ctx context.Context, env *Env, relay, token, name string, force bool) error {
-	if err := validRelayURL(relay); err != nil {
+	relay, err := relayOrigin(relay)
+	if err != nil {
 		return err
 	}
 	paths, err := env.Paths()

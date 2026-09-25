@@ -15,7 +15,7 @@ type sendFileIn struct {
 }
 
 func (sendFileTool) Register(s *mcp.Server, c Caller) {
-	addTool(s, "send_file", "Send a file to a paired machine. Only regular files inside this project or folders the human allowed; dotfiles, dot-directories and secret files (.env, *.pem, *.key, id_*) are refused.",
+	addTool(s, "send_file", "Send a file to a paired machine. Only regular files inside this project or folders the human allowed; dotfiles, dot-directories and secret files such as keys, certificates and .env files are refused (.env*, id_*, credentials*.json, service-account*.json, *.pem, *.key, *.env, *.p12, *.pfx, *.jks, *.keystore, *.kdbx, *.ppk, *.ovpn).",
 		func(ctx context.Context, in sendFileIn) (string, error) {
 			return callJSON[ipc.FileSendResult](ctx, c, ipc.MethodFileSend, ipc.FileSendParams{To: in.To, Path: in.Path})
 		})

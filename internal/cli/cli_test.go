@@ -413,6 +413,19 @@ func TestInitWritesConfigAndToken(t *testing.T) {
 	if code := Main([]string{"init", "--relay", "ftp://x", "--force"}, env3); code != 1 || !strings.Contains(errb3.String(), "http or https") {
 		t.Fatalf("bad url: %q", errb3.String())
 	}
+	for _, bad := range []string{"https://relay.example.com/v1", "https://relay.example.com?x=1", "https://user@relay.example.com"} {
+		env4, _, errb4 := fd.env(&fakePrompter{}, "")
+		if code := Main([]string{"init", "--relay", bad, "--force"}, env4); code != 1 || !strings.Contains(errb4.String(), "scheme://host[:port]") {
+			t.Fatalf("%s accepted: %q", bad, errb4.String())
+		}
+	}
+	env5, _, _ := fd.env(&fakePrompter{}, "")
+	if code := Main([]string{"init", "--relay", "HTTPS://Relay.Example.com:443/", "--force"}, env5); code != 0 {
+		t.Fatal("normalizable origin refused")
+	}
+	if cfg, _ := config.Load(paths); cfg.RelayURL != "https://relay.example.com" {
+		t.Fatalf("relay stored as %q, want the normalized origin", cfg.RelayURL)
+	}
 }
 
 func TestSuggestAlias(t *testing.T) {
