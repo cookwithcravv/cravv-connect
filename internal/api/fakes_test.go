@@ -125,7 +125,7 @@ func (f fTasks) Get(_ context.Context, _, id string) (store.Task, error) {
 		return t, nil
 	case "OUT":
 		return store.Task{ID: id, Direction: store.TaskOutbound, Peer: "gpumachineid00000000", State: core.TaskDone,
-			Instructions: "count lines", Result: "42 <b>lines</b>",
+			Instructions: "count lines", Result: "42 <b>lines</b>", ClaimedBy: "codex@x\n\x1b[8m\u202e",
 			Notes:       []store.TaskNote{{Text: "not sent: offline"}, {Text: "peer says hi", MsgID: "M1"}},
 			ResultFiles: []core.FileRef{{FileID: "F2", Name: "out.txt", Size: 9}}}, nil
 	}

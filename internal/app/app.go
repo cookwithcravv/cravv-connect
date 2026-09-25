@@ -14,6 +14,7 @@ import (
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/daemon"
 	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cravv/cravv-connect/internal/present"
 	"github.com/cravv/cravv-connect/internal/store"
 )
 
@@ -57,7 +58,7 @@ type inbox struct{ d *daemon.Daemon }
 // inboxView maps a rendered daemon entry to its wire view.
 func inboxView(e daemon.InboxEntry) ipc.InboxView {
 	return ipc.InboxView{
-		Seq: e.Item.Seq, ID: e.Item.MsgID, From: e.Alias, Session: e.Item.FromSession, Kind: e.Kind,
+		Seq: e.Item.Seq, ID: e.Item.MsgID, From: e.Alias, Session: present.CleanAttr(e.Item.FromSession), Kind: e.Kind,
 		TaskID: e.Item.TaskID, FileID: e.FileID, Path: e.Path, Wrapped: e.Wrapped, At: e.Item.ReceivedAt,
 	}
 }

@@ -40,6 +40,9 @@ func TestOutboundTaskViewWrapsPeerResultAndNotes(t *testing.T) {
 	if err := c.Call(bg, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: "OUT"}, &tv); err != nil {
 		t.Fatal(err)
 	}
+	if tv.ClaimedBy != "codex@x[8m" {
+		t.Fatalf("peer session name not cleaned: %q", tv.ClaimedBy)
+	}
 	if tv.Result != "" || tv.Instructions != "count lines" {
 		t.Fatalf("result %q, instructions %q", tv.Result, tv.Instructions)
 	}

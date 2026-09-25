@@ -90,6 +90,11 @@ func stripInvisible(s string) string {
 	}, s)
 }
 
+// CleanAttr is the cleaning Wrap applies to attribute values. Views use it
+// for peer-chosen names they return outside the wrapper, such as a peer's
+// session name.
+func CleanAttr(s string) string { return cleanAttr(s) }
+
 // cleanAttr drops control (Cc), format (Cf, e.g. bidi overrides and
 // zero-width), line/paragraph separator (Zl, Zp) and invisible (see
 // isInvisible) characters and invalid UTF-8, then caps the length in runes.

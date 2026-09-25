@@ -75,6 +75,8 @@ func (h *handlers) taskView(ctx context.Context, t store.Task) ipc.TaskView {
 		v.ResultFiles = t.ResultFiles
 	} else {
 		kind, peerSession = "task_update", t.ClaimedBy
+		// The claimer is the peer's session name, chosen by the peer.
+		v.ClaimedBy = present.CleanAttr(t.ClaimedBy)
 		v.Instructions, v.Files = t.Instructions, t.Files
 		var peerNotes []string
 		for _, n := range t.Notes {
