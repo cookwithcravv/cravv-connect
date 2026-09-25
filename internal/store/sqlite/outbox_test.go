@@ -191,3 +191,42 @@ func TestOutboxCount(t *testing.T) {
 		t.Fatalf("CountOutbox = pending %d, held %d, %v; want 3, 1", p, h, err)
 	}
 }
+
+func TestOutboxRequeueStale(t *testing.T) {
+	ctx := context.Background()
+	ob := newTestDB(t)
+	for _, it := range []store.OutboxItem{
+		outItem("stale", "peer", t0, t0),
+		outItem("fresh", "peer", t0, t0),
+		outItem("held", "peer", t0, t0),
+		outItem("pend", "peer", t0, t0.Add(time.Hour)),
+	} {
+		if err := ob.Enqueue(ctx, it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ob.SetStatus(ctx, "stale", store.OutboxQueued, 1, t0.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := ob.SetStatus(ctx, "fresh", store.OutboxQueued, 1, t0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := ob.SetStatus(ctx, "held", store.OutboxHeld, 1, t0); err != nil {
+		t.Fatal(err)
+	}
+	n, err := ob.RequeueStale(ctx, t0.Add(time.Minute))
+	if err != nil || n != 1 {
+		t.Fatalf("RequeueStale = %d, %v; want 1", n, err)
+	}
+	want := map[string]store.OutboxStatus{"stale": store.OutboxPending, "fresh": store.OutboxQueued,
+		"held": store.OutboxHeld, "pend": store.OutboxPending}
+	for id, st := range want {
+		it, err := ob.Get(ctx, id)
+		if err != nil || it.Status != st {
+			t.Fatalf("%s: status %s, %v; want %s", id, it.Status, err, st)
+		}
+	}
+	if got := dueIDs(t, ob, t0.Add(time.Minute), 10); !equalStrings(got, []string{"stale"}) {
+		t.Fatalf("due after requeue = %v", got)
+	}
+}

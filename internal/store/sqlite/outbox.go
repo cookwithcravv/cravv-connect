@@ -125,3 +125,13 @@ func scanOutbox(s rowScanner) (store.OutboxItem, error) {
 	it.CreatedAt = fromMS(createdAt)
 	return it, nil
 }
+
+// RequeueStale moves queued items whose next_attempt has passed back to pending.
+func (d *DB) RequeueStale(ctx context.Context, now time.Time) (int, error) {
+	res, err := d.sql.ExecContext(ctx, `UPDATE outbox SET status = ? WHERE status = ? AND next_attempt <= ?`,
+		string(store.OutboxPending), string(store.OutboxQueued), toMS(now))
+	if err != nil {
+		return 0, err
+	}
+	return affected(res)
+}

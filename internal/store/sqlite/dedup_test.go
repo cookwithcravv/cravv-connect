@@ -67,3 +67,21 @@ func TestDedupDeleteOlderThan(t *testing.T) {
 		t.Fatal("kept id no longer seen")
 	}
 }
+
+func TestDedupSeenDoesNotMark(t *testing.T) {
+	ctx := context.Background()
+	ds := newTestDB(t)
+	seen, err := ds.Seen(ctx, "m1")
+	if err != nil || seen {
+		t.Fatalf("Seen on empty store = %v, %v", seen, err)
+	}
+	if seen, _ := ds.Seen(ctx, "m1"); seen {
+		t.Fatal("Seen marked the id")
+	}
+	if seen, _ := ds.SeenOrMark(ctx, "m1", t0); seen {
+		t.Fatal("SeenOrMark after Seen reported seen")
+	}
+	if seen, err := ds.Seen(ctx, "m1"); err != nil || !seen {
+		t.Fatalf("Seen after mark = %v, %v", seen, err)
+	}
+}

@@ -308,3 +308,24 @@ func (s *memDedup) PurgeDedupBefore(_ context.Context, t time.Time) (int, error)
 	}
 	return n, nil
 }
+
+func (s *memDedup) Seen(_ context.Context, id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.m[id]
+	return ok, nil
+}
+
+func (s *memOutbox) RequeueStale(_ context.Context, now time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for id, it := range s.m {
+		if it.Status == store.OutboxQueued && !it.NextAttempt.After(now) {
+			it.Status = store.OutboxPending
+			s.m[id] = it
+			n++
+		}
+	}
+	return n, nil
+}

@@ -27,3 +27,12 @@ func (d *DB) PurgeDedupBefore(ctx context.Context, t time.Time) (int, error) {
 	}
 	return affected(res)
 }
+
+// Seen reports whether id is recorded, without recording it.
+func (d *DB) Seen(ctx context.Context, id string) (bool, error) {
+	var n int
+	if err := d.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM dedup WHERE id = ?`, id).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}

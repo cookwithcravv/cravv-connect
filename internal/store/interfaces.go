@@ -79,6 +79,9 @@ type OutboxStore interface {
 	DeleteOutboxForPeer(ctx context.Context, to core.MachineID) error        // all items to a peer (unpair)
 	PurgeOutboxBefore(ctx context.Context, t time.Time) (int, error)         // CreatedAt < t
 	CountOutbox(ctx context.Context) (pending int, held int, err error)      // pending = status pending or queued
+	// RequeueStale moves queued items whose NextAttempt <= now back to pending
+	// (the relay dropped them after its TTL without a control.delivered).
+	RequeueStale(ctx context.Context, now time.Time) (int, error)
 }
 
 type InboxItem struct {
@@ -222,6 +225,7 @@ type FileStore interface {
 
 type DedupStore interface {
 	SeenOrMark(ctx context.Context, id string, at time.Time) (seen bool, err error) // atomic
+	Seen(ctx context.Context, id string) (bool, error)                              // read only: never marks
 	PurgeDedupBefore(ctx context.Context, t time.Time) (int, error)                 // seen at < t
 }
 
