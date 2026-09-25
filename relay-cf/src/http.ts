@@ -1,3 +1,5 @@
+import { normalizeOrigin } from "./crypto";
+import type { Env } from "./env";
 import { Code, failSocket, type ErrorCode } from "./protocol";
 
 // Small HTTP and WebSocket helpers shared by the Worker router and the Durable Objects.
@@ -22,4 +24,11 @@ export function rejectSocket(code: ErrorCode, message: string): Response {
   server.accept();
   failSocket(server, code, message);
   return new Response(null, { status: 101, webSocket: client });
+}
+
+// The origin clients sign for this relay, for both WebSocket auth and HTTP requests:
+// PUBLIC_ORIGIN when set, otherwise the request URL's origin (which Cloudflare routes by
+// hostname, so the client cannot choose it). Always normalized.
+export function relayOrigin(env: Env, request: Request): string {
+  return normalizeOrigin(env.PUBLIC_ORIGIN || new URL(request.url).origin);
 }

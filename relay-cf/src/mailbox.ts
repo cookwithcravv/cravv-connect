@@ -12,7 +12,7 @@ import {
   verifyEd25519,
 } from "./crypto";
 import type { Env } from "./env";
-import { isUpgrade, notUpgrade } from "./http";
+import { isUpgrade, notUpgrade, relayOrigin } from "./http";
 import { rateLimitsEnabled, readLimits, type Limits } from "./limits";
 import {
   CLOSE_POLICY,
@@ -104,7 +104,7 @@ export class Mailbox extends DurableObject<Env> {
     const [client, server] = Object.values(pair);
     const connId = randomToken();
     this.ctx.acceptWebSocket(server, [connTag(connId)]);
-    const origin = this.env.PUBLIC_ORIGIN || new URL(request.url).origin;
+    const origin = relayOrigin(this.env, request);
     const a: Attachment = { stage: "hello", connId, acceptedAt: now, ik, origin, nonce: "", mailboxId };
     server.serializeAttachment(a);
     return new Response(null, { status: 101, webSocket: client });

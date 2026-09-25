@@ -1,7 +1,7 @@
 import { chunkKey, type BlobAction } from "./blobmeta";
 import { b64encode, decodeIK, randomBlobId, verifySignedRequest, type SignedCaller } from "./crypto";
 import type { Env } from "./env";
-import { jsonError } from "./http";
+import { jsonError, relayOrigin } from "./http";
 import { readLimits, type Limits } from "./limits";
 import { BLOB_ID_RE, Code } from "./protocol";
 import { REGISTRY_NAME } from "./registry";
@@ -53,7 +53,7 @@ export async function handleBlobs(request: Request, env: Env): Promise<Response>
   const body = await readBody(request, maxBody);
   if (!body) return jsonError(413, Code.TOO_LARGE, "body too large");
 
-  const caller = await verifySignedRequest(request, body, Date.now(), limits.httpSkewSeconds);
+  const caller = await verifySignedRequest(request, body, relayOrigin(env, request), Date.now(), limits.httpSkewSeconds);
   if (!caller) return jsonError(401, Code.AUTH_FAILED, "bad or missing request signature");
   // Membership lives in the caller's own Mailbox DO, so this never touches the global Registry.
   if (!(await env.MAILBOX.getByName(caller.mailboxId).isRegistered())) {

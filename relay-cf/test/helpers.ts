@@ -32,7 +32,7 @@ export class Identity {
 
   async signedHeaders(method: string, path: string, body: Uint8Array, tsOverride?: number): Promise<Record<string, string>> {
     const ts = tsOverride ?? Math.floor(Date.now() / 1000);
-    const sig = await this.sign(await httpMessage(method, path, ts, body));
+    const sig = await this.sign(await httpMessage(ORIGIN, method, path, ts, body));
     return { "X-Cravv-IK": this.ikB64, "X-Cravv-TS": String(ts), "X-Cravv-Sig": b64encode(sig) };
   }
 }

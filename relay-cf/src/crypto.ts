@@ -120,8 +120,34 @@ export function authMessage(origin: string, nonce: string): Uint8Array {
   return enc.encode(`${AUTH_CONTEXT}\n${origin}\n${nonce}`);
 }
 
-export async function httpMessage(method: string, path: string, ts: number, body: Uint8Array): Promise<Uint8Array> {
-  return enc.encode(`${HTTP_CONTEXT}\n${method}\n${path}\n${ts}\n${await sha256Hex(body)}`);
+// origin is the relay's normalized auth origin; path is the raw request path (URL.pathname,
+// still percent-encoded), without the query string.
+export async function httpMessage(
+  origin: string,
+  method: string,
+  path: string,
+  ts: number,
+  body: Uint8Array,
+): Promise<Uint8Array> {
+  return enc.encode(`${HTTP_CONTEXT}\n${origin}\n${method}\n${path}\n${ts}\n${await sha256Hex(body)}`);
+}
+
+const DEFAULT_PORTS: Record<string, string> = { "http:": "80", "https:": "443" };
+
+// Normalizes an origin the way clients do (relay-v1 section 1): scheme://host[:port] with a
+// lowercase host, no trailing dot, the default port omitted, IPv6 bracketed, no path.
+// Input that is not a URL is returned unchanged.
+export function normalizeOrigin(raw: string): string {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return raw;
+  }
+  const scheme = u.protocol.toLowerCase();
+  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  const port = u.port !== "" && u.port !== DEFAULT_PORTS[scheme] ? `:${u.port}` : "";
+  return `${scheme}//${host}${port}`;
 }
 
 export interface SignedCaller {
@@ -130,12 +156,14 @@ export interface SignedCaller {
   mailboxId: string;
 }
 
-// Verifies X-Cravv-IK / X-Cravv-TS / X-Cravv-Sig over method, path, ts (unix seconds) and body.
+// Verifies X-Cravv-IK / X-Cravv-TS / X-Cravv-Sig over origin, method, path, ts (unix seconds)
+// and body. origin is the relay's own normalized origin, never taken from the request headers.
 // Returns null when any header is missing or malformed, the clock skew exceeds skewSeconds,
 // or the signature does not verify.
 export async function verifySignedRequest(
   request: Request,
   body: Uint8Array,
+  origin: string,
   nowMs: number,
   skewSeconds: number,
 ): Promise<SignedCaller | null> {
@@ -152,7 +180,7 @@ export async function verifySignedRequest(
     return null;
   }
   const path = new URL(request.url).pathname;
-  const msg = await httpMessage(request.method, path, ts, body);
+  const msg = await httpMessage(origin, request.method, path, ts, body);
   if (!(await verifyEd25519(ik, msg, sig))) return null;
   return { ik, ikB64: b64encode(ik), mailboxId: await mailboxIdOf(ik) };
 }

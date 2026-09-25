@@ -106,6 +106,9 @@ connection refilled at 200 per second, and 600 connects or blob requests per IP 
 - `GET /v1/connect` must carry `?ik=<base64 identity key>`. It only picks the mailbox Durable
   Object; the relay still requires the signed challenge from that same key, and a mismatch fails
   with `auth_failed`.
-- The auth origin is `PUBLIC_ORIGIN` when set, otherwise `new URL(request.url).origin`. Either
-  way it must equal what the Go client computes from the relay URL it was given
-  (`https://host` in production, `http://127.0.0.1:8787` locally).
+- The relay origin is `PUBLIC_ORIGIN` when set, otherwise `new URL(request.url).origin`, normalized
+  to `scheme://host[:port]` with a lowercase host, no trailing dot, the default port dropped, and
+  IPv6 bracketed. It must equal what the Go client computes from the relay URL it was given
+  (`https://host` in production, `http://127.0.0.1:8787` locally). Both the WebSocket auth
+  signature and the blob request signature
+  (`cravv-http-v1\n<origin>\n<METHOD>\n<raw path>\n<ts>\n<hex sha256(body)>`) cover it.

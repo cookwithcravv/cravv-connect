@@ -7,6 +7,7 @@ import {
   constantTimeEqual,
   decodeIK,
   mailboxIdOf,
+  normalizeOrigin,
   randomBlobId,
   randomNameplate,
   verifyEd25519,
@@ -19,7 +20,9 @@ import { BLOB_ID_RE, NAMEPLATE_RE } from "../src/protocol";
 const GO_PUB = "ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ";
 const GO_AUTH_SIG = "XcU6JZWP4i00gF6cDeHtgiX6ETNlHT4DQJ4335Zvpgb3ZNDX8n4YqquNL12nobh7Sj56yBeOE4Pr/1fgwUOCAQ";
 const GO_MAILBOX_ID = "mw3am46w5weex4a4fqrc3avnub2a6knmgnk5nkjfzaprp5d2e64a";
-const GO_HTTP_SIG = "WtVWNzwN7ZlOpV3QM6diXUjghEs3F03YT2I8u+cZ1x0X42uv8RuO+GKFdJGrfanpNOHu6fF7Hh7ikF989HOBDg";
+// Signs "cravv-http-v1\nhttps://relay.test\nPOST\n/v1/blobs\n1790000000\n<sha256 hex of body>".
+const GO_HTTP_SIG = "kqRo45u/cauOqMpTIyrb8bUNuhQIPLWM/RSQietZ1kUQrryEpgXUrQibqxIgHNo5jSSuF1g/hsnHFfQaaqnsDg";
+const HTTP_ORIGIN = "https://relay.test";
 
 describe("base64", () => {
   it.each([
@@ -87,18 +90,35 @@ describe("signed HTTP requests", () => {
     });
 
   it("accepts a Go-signed request within the skew window", async () => {
-    const caller = await verifySignedRequest(req(GO_HTTP_SIG), body, (ts + 299) * 1000, 300);
+    const caller = await verifySignedRequest(req(GO_HTTP_SIG), body, HTTP_ORIGIN, (ts + 299) * 1000, 300);
     expect(caller?.mailboxId).toBe(GO_MAILBOX_ID);
     expect(caller?.ikB64).toBe(GO_PUB);
   });
 
   it.each([
-    ["outside skew", GO_HTTP_SIG, String(ts), (ts + 301) * 1000, body],
-    ["tampered body", GO_HTTP_SIG, String(ts), ts * 1000, new TextEncoder().encode('{"size":6,"chunks":1}')],
-    ["bad ts header", GO_HTTP_SIG, "abc", ts * 1000, body],
-    ["bad signature", GO_AUTH_SIG, String(ts), ts * 1000, body],
-  ])("rejects %s", async (_name, sig, tsHeader, now, b) => {
-    expect(await verifySignedRequest(req(sig, tsHeader), b, now, 300)).toBeNull();
+    ["outside skew", GO_HTTP_SIG, String(ts), (ts + 301) * 1000, body, HTTP_ORIGIN],
+    ["outside skew in the future", GO_HTTP_SIG, String(ts), (ts - 301) * 1000, body, HTTP_ORIGIN],
+    ["tampered body", GO_HTTP_SIG, String(ts), ts * 1000, new TextEncoder().encode('{"size":6,"chunks":1}'), HTTP_ORIGIN],
+    ["bad ts header", GO_HTTP_SIG, "abc", ts * 1000, body, HTTP_ORIGIN],
+    ["bad signature", GO_AUTH_SIG, String(ts), ts * 1000, body, HTTP_ORIGIN],
+    ["another relay origin", GO_HTTP_SIG, String(ts), ts * 1000, body, "https://other.test"],
+  ])("rejects %s", async (_name, sig, tsHeader, now, b, origin) => {
+    expect(await verifySignedRequest(req(sig, tsHeader), b, origin, now, 300)).toBeNull();
+  });
+});
+
+describe("origin normalization", () => {
+  it.each([
+    ["https://relay.test", "https://relay.test"],
+    ["HTTPS://Relay.Example.COM/", "https://relay.example.com"],
+    ["https://relay.example.com.:443", "https://relay.example.com"],
+    ["http://relay.example.com:80/path?q=1", "http://relay.example.com"],
+    ["http://127.0.0.1:8787", "http://127.0.0.1:8787"],
+    ["https://relay.example.com:8443", "https://relay.example.com:8443"],
+    ["http://[::1]:80", "http://[::1]"],
+    ["http://[0:0:0:0:0:0:0:1]:8787", "http://[::1]:8787"],
+  ])("%s -> %s", (raw, want) => {
+    expect(normalizeOrigin(raw)).toBe(want);
   });
 });
 

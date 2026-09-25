@@ -2,6 +2,7 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { chunkKey } from "../src/blobmeta";
 import { handleBlobs } from "../src/blobs";
+import { b64encode, httpMessage } from "../src/crypto";
 import type { Env } from "../src/env";
 import { REGISTRY_NAME } from "../src/registry";
 import { Identity, member, ORIGIN, relayFetch, testEnv } from "./helpers";
@@ -92,6 +93,27 @@ describe("blobs", () => {
     const tampered = enc.encode(JSON.stringify({ size: 2, chunks: 1, recipient: down.ikB64 }));
     expect((await relayFetch("/v1/blobs", { method: "POST", headers, body: tampered })).status).toBe(401);
     expect((await relayFetch("/v1/blobs", { method: "POST", body })).status).toBe(401);
+  });
+
+  it("rejects clock-skewed and other-origin signatures with 401 before the membership check", async () => {
+    const up = await registered();
+    const down = await registered();
+    const outsider = await Identity.create();
+    const id = await createBlob(up, down);
+    const now = Math.floor(Date.now() / 1000);
+    const chunk = `/v1/blobs/${id}/chunks/0`;
+    for (const ts of [now - 301, now + 301]) {
+      const put = await signed(up, "PUT", chunk, enc.encode("x"), ts);
+      expect(put.status).toBe(401);
+      expect(await put.json()).toMatchObject({ code: "auth_failed" });
+      expect((await signed(down, "GET", chunk, undefined, ts)).status).toBe(401);
+      expect((await signed(down, "DELETE", `/v1/blobs/${id}`, undefined, ts)).status).toBe(401);
+      expect((await signed(outsider, "DELETE", `/v1/blobs/${id}`, undefined, ts)).status).toBe(401);
+    }
+    expect((await signed(up, "PUT", chunk, enc.encode("x"), now - 299)).status).toBe(204);
+    const sig = await up.sign(await httpMessage("https://other.test", "PUT", chunk, now, enc.encode("x")));
+    const headers = { "X-Cravv-IK": up.ikB64, "X-Cravv-TS": String(now), "X-Cravv-Sig": b64encode(sig) };
+    expect((await relayFetch(chunk, { method: "PUT", headers, body: enc.encode("x") })).status).toBe(401);
   });
 
   it("returns 413 for blobs over 100 MiB and oversize chunks", async () => {
