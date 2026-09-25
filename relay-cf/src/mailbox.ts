@@ -289,12 +289,12 @@ export class Mailbox extends DurableObject<Env> {
   }
 
   private async opInvite(ws: WebSocket, a: Attachment, rid: string): Promise<void> {
-    const invite = await this.registry().createInvite(a.mailboxId);
-    if (invite === null) {
-      ws.send(resFrame(rid, { status: Status.ERROR, code: Code.FORBIDDEN }));
+    const r = await this.registry().createInvite(a.mailboxId);
+    if (!r.ok) {
+      ws.send(resFrame(rid, { status: Status.ERROR, code: r.code }));
       return;
     }
-    ws.send(resFrame(rid, { status: Status.OK, invite }));
+    ws.send(resFrame(rid, { status: Status.OK, invite: r.invite }));
   }
 
   private async opRoomCreate(ws: WebSocket, rid: string): Promise<void> {

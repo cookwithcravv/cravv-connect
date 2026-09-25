@@ -129,6 +129,20 @@ describe("registration", () => {
   });
 });
 
+describe("invite cap", () => {
+  it("allows 20 outstanding invites per member, then rate_limited", async () => {
+    const owner = await Identity.create();
+    const oc = await member(owner);
+    for (let i = 0; i < 20; i++) expect((await oc.request({ t: "invite_request" })).status).toBe("ok");
+    expect(await oc.request({ t: "invite_request" })).toMatchObject({ status: "error", code: "rate_limited" });
+    await runInDurableObject(testEnv.REGISTRY.getByName("registry"), (_inst, state) => {
+      state.storage.sql.exec("UPDATE invites SET expires_at = ? WHERE token IN (SELECT token FROM invites LIMIT 1)", Date.now() - 1);
+    });
+    expect((await oc.request({ t: "invite_request" })).status).toBe("ok");
+    oc.close();
+  });
+});
+
 describe("send, deliver, ack", () => {
   it("delivers live to an allowed recipient and replies queued", async () => {
     const { a, b, ca, cb } = await pair();
