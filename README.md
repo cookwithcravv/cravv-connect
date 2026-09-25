@@ -148,23 +148,29 @@ result". The MCP tools are:
 |---|---|
 | `status` | This machine, this session, peers, pending counts |
 | `send_message(to, text)` | Chat, up to 64 KB |
-| `check_inbox(limit?)` | Unread items for this session, wrapped as untrusted content |
+| `check_inbox(limit?)` | Unread items for this session, wrapped as untrusted content (pages of at most 4 MiB; call again for the rest) |
 | `wait_for_message(timeout_s?)` | Wait up to 50 seconds (the default) for a new item or task update |
 | `create_task(to, instructions, file_paths?)` | Send a task; returns `task_id` |
-| `get_task`, `claim_task`, `update_task`, `complete_task`, `fail_task`, `cancel_task` | Work on tasks |
+| `get_task`, `claim_task`, `update_task`, `complete_task`, `fail_task`, `cancel_task` | Work on tasks; text the other machine wrote (instructions, results, its notes, file names) comes only in the `wrapped` field |
 | `send_file(to, path)` | Send a file from the project folder (up to 100 MB) |
 | `pause_peer`, `unpair_peer`, `lower_trust`, `kill_switch` | Cut-off controls |
 
 `to` is a peer alias (`gpu-box`, every session there) or an alias and a
 session (`gpu-box/codex@training`); `send_file` takes a peer alias only. Sessions are named `<agent>@<folder>`.
-Everything that arrives is wrapped like this, and agents are told never to
-treat it as your instructions:
+Everything that arrives is wrapped like this (inbox items, and the peer's
+part of a task in `wrapped`), and agents are told never to treat it as your
+instructions:
 
 ```
 <remote_message from="gpu-box" session="codex@training" trust="autonomous" id="01J..." kind="task" task_id="01J...">
 ...escaped body...
 </remote_message>
 ```
+
+The daemon only accepts message, task and file IDs in its own format (26
+upper-case Crockford base32 characters), and the CLI strips control, bidi
+and invisible characters from anything a peer chose before printing it, so
+a peer cannot fake lines in your terminal.
 
 In Claude Code, the hook adds a one-line notice such as
 `cravv-connect: 2 new messages from gpu-box. Use check_inbox.` to your prompt.
@@ -194,22 +200,23 @@ refused.
 ## Cut-off controls
 
 Agents and humans can use all of these without a password. While the kill
-switch is on, only `resume` (and `status`, `peers`, `log`) works:
+switch is on, only `resume` (and `status`, `peers`, `log`, `kill` again, and
+`daemon stop`) works:
 
 | Control | Command | Effect |
 |---|---|---|
 | Pause | `cravv-connect pause <alias>` | Stops traffic with that peer in both directions. Your sends fail with "paused"; theirs are held on their machine. Its tasks waiting for approval are rejected and its held files declined. Undo with `resume-peer <alias>`. |
 | Unpair | `cravv-connect unpair <alias>` | Removes the peer and its keys on both sides (best effort for the notice). Pairing again needs a new code. |
 | Lower trust | `cravv-connect trust <alias> chat-only` | Takes effect immediately. |
-| Kill switch | `cravv-connect kill` | Fails claimed tasks (and tells their senders when it can), stops file downloads, disconnects from the relay, and stops handling incoming messages (they wait on the relay). Until you run `cravv-connect resume` (password), every command and agent operation is refused except `status`, `peers` and `log`. Messages already in the outbox go out after resume. Survives restarts. |
+| Kill switch | `cravv-connect kill` | Fails claimed tasks (and tells their senders when it can), stops file downloads, disconnects from the relay, and stops handling incoming messages (they wait on the relay). Until you run `cravv-connect resume` (password), every command and agent operation is refused except `status`, `peers`, `log`, `kill` (a no-op) and `daemon stop`. Messages already in the outbox go out after resume. Survives restarts. |
 
 ## CLI reference
 
 | Command | What it does |
 |---|---|
-| `init --relay <url> [--relay-token <t>] [--name <n>] [--force]` | Write `config.toml`; store the admin token for the first machine |
-| `daemon run` | Run the daemon in the foreground (logs JSON to stderr) |
-| `daemon start` / `daemon stop` / `daemon status` | Control the daemon |
+| `init --relay <url> [--relay-token <t>] [--name <n>] [--force]` | Write `config.toml`; store the admin token for the first machine. The relay URL must be an origin, `scheme://host[:port]`, with no path |
+| `daemon run [--log-file <path>]` | Run the daemon in the foreground. Logs JSON to stderr, or with `--log-file` to that file, rotated at 10 MiB with 3 old files kept |
+| `daemon start` / `daemon stop` / `daemon status` | Control the daemon. `stop` asks the daemon over its socket to shut down and waits up to 10 seconds for it to exit; it never signals a process that does not answer on the socket |
 | `daemon install` / `daemon uninstall` | Run the daemon at login (launchd or systemd user unit) |
 | `status [--json]` | Relay connection, peers, queues, pending approvals, sessions, errors |
 | `pair` | Create a bind code and pair (password) |
@@ -240,8 +247,9 @@ switch is on, only `resume` (and `status`, `peers`, `log`) works:
 | `task fail <task-id> <reason>` | Agent CLI: fail a task (JSON) |
 
 State lives in `~/.cravv-connect` (override with `CRAVV_HOME`): `config.toml`,
-`store.db`, `audit.log`, `daemon.log`, `daemon.sock`, `daemon.pid`, and
-received files in `files/<alias>/`. The identity key is in the macOS
+`store.db`, `audit.log`, `daemon.log` (rotated: `daemon.log.1` to `.3`),
+`daemon-stderr.log` (crash output only), `daemon.sock`, `daemon.pid` (written
+once the daemon owns the socket), and received files in `files/<alias>/`. The identity key is in the macOS
 Keychain, or in `store.db` on Linux.
 
 `config.toml` keys: `relay_url`, `device_name`, `peer_quota` (bytes, default
@@ -252,7 +260,7 @@ Linux `login`, the default, or `system-auth`; any other value is refused).
 
 | Symptom | Fix |
 |---|---|
-| ``daemon not running: run `cravv-connect daemon start` `` | Start it, or `cravv-connect daemon install` so it starts at login. Logs: `~/.cravv-connect/daemon.log` (launchd and `daemon start`), `journalctl --user -u cravv-connect` (systemd). |
+| ``daemon not running: run `cravv-connect daemon start` `` | Start it, or `cravv-connect daemon install` so it starts at login. Logs: `~/.cravv-connect/daemon.log` (launchd, systemd and `daemon start` all run `daemon run --log-file` there), plus `~/.cravv-connect/daemon-stderr.log` (launchd, `daemon start`) or `journalctl --user -u cravv-connect` (systemd) for crashes. |
 | `status` shows "relay offline" | Check the relay URL in `config.toml` and that the relay answers `GET /v1/health`. The daemon retries with backoff up to 5 minutes; messages wait in the outbox. |
 | A new machine never connects | It has no mailbox yet. Either `init --relay-token` (first machine only) or pair with `join`, which registers it with an invite. |
 | `password check unavailable: ... built without PAM support` | Rebuild with cgo and the PAM headers (`make build`) and restart the daemon. |

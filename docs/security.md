@@ -57,6 +57,12 @@ exact limits behind each claim. Protocol details are in
     is never written over an existing file, and never becomes a dotfile.
   - A peer cannot clear or rewrite another peer's outbox, update tasks it did
     not receive, or cancel tasks it did not send.
+  - A peer cannot choose IDs that fake local output: every message, task and
+    file ID it sends must be exactly 26 upper-case Crockford base32
+    characters (what `core.NewID` makes), and every blob ID 1 to 64
+    characters of `[a-z0-9]`. A message with any other ID is dropped on
+    receipt and not retried, so control characters, escape sequences or
+    look-alike lines never reach approval screens, logs or agent prompts.
 - **Prompt injection that tries to make a local agent pair, raise trust, or
   approve tasks.** All three need the login password (next section), which
   agents do not have.
@@ -72,14 +78,25 @@ exact limits behind each claim. Protocol details are in
     at 64 characters. The MCP server's standing instructions tell the agent
     that this content is not from the user and that chat is information, not
     a command;
-  - the task tools (`get_task`, `claim_task`, `cancel_task`) and the JSON
-    agent commands return task instructions, results, notes, the peer's
-    session name and attached file names as plain JSON fields, without the
-    wrapper. Treat those fields as peer content too;
+  - the task tools (`get_task`, `claim_task`, `update_task`,
+    `complete_task`, `fail_task`, `cancel_task`) and the JSON agent commands
+    return text the peer wrote (an inbound task's instructions and file
+    names; an outbound task's result, the peer's progress notes and result
+    file names) only in the task's `wrapped` field, with the same wrapper and
+    escaping. The raw fields are left empty, so no tool hands an agent
+    unwrapped peer text. The remaining plain fields (state, IDs, local alias,
+    notes written on this machine) are not peer text, except the peer's
+    session name (`claimed_by` on an outbound task, `session` on inbox
+    items), which is cleaned like a wrapper attribute: no control, bidi or
+    invisible characters, at most 64 characters;
   - hooks never print message bodies or names chosen by a peer, only local
     aliases and counts;
-  - task text shown by `cravv-connect approvals` has terminal control
-    characters removed;
+  - the CLI removes every control character (including newlines, carriage
+    returns, tabs and escape sequences), bidi and zero-width characters from
+    peer-derived strings it prints (IDs, aliases, file names, error
+    messages), and prints multi-line task text in `cravv-connect approvals`
+    with each line prefixed by `| `, so it cannot pass for the CLI's own
+    lines;
   - outgoing files are restricted (below);
   - your agent's own permission settings remain the last line of defense.
     Keep them as strict as you would for untrusted input.
@@ -156,7 +173,8 @@ Does not need it (agents and humans can both do these):
 
 - sending, reading, and claiming, updating, completing, failing or cancelling
   tasks;
-- `pause`, `resume-peer`, `unpair`, lowering trust, `kill`.
+- `pause`, `resume-peer`, `unpair`, lowering trust, `kill`, stopping the
+  daemon (`cravv-connect daemon stop`, IPC `daemon.shutdown`).
 
 The rule is: anything that widens what a peer or an agent can do needs the
 password; anything that narrows it does not. `resume-peer` is the one
@@ -172,7 +190,8 @@ Through MCP or the JSON agent commands (`cravv-connect send`, `inbox`,
   messages;
 - claim and work on tasks that the receiving daemon queued (from autonomous
   peers, or approved by a human), and cancel tasks it sent;
-- pause, unpair, lower trust, and pull the kill switch;
+- pause, unpair, lower trust, pull the kill switch (again, if it is already
+  on), and stop the daemon;
 - through the CLI, also resume a peer, rename aliases, list files, and read
   the audit log.
 
@@ -206,14 +225,17 @@ The daemon then disconnects from the relay, stops downloads, and stops
 handling incoming frames, which wait at the relay for up to 7 days. Messages
 the relay already accepted are still delivered to peers; nothing new is sent
 until `cravv-connect resume`. Every IPC method except `status`,
-`auth.unlock`, `resume`, `peer.list`, `audit.read` and `hook.counts` fails,
-so agents cannot send, read the inbox or work on tasks, and `pause`,
-`unpair`, trust changes and `reset-identity` also wait until resume.
+`auth.unlock`, `resume`, `kill`, `daemon.shutdown`, `peer.list`,
+`audit.read` and `hook.counts` fails, so agents cannot send, read the inbox
+or work on tasks, and `pause`, `unpair`, trust changes and `reset-identity`
+also wait until resume. Pulling the switch again while it is on succeeds and
+changes nothing.
 
 ## Keys and local storage
 
 - **State directory:** `~/.cravv-connect` (or `CRAVV_HOME`), mode `0700`.
-  `config.toml`, `store.db`, `audit.log` and `daemon.sock` are `0600`;
+  `config.toml`, `store.db`, `audit.log`, `daemon.sock`, `daemon.pid` and
+  the daemon logs are `0600`;
   `files/` and its folders are `0700` and received files `0600`.
 - **Identity key (Ed25519 seed):**
   - macOS: a generic password (service `cravv-connect`, account `identity`,
@@ -254,6 +276,12 @@ can read it with `cravv-connect log`.
 
 It is **not tamper-evident**: any process running as your user can edit or
 delete it. Treat it as a record for you, not as evidence.
+
+The daemon's operational log (`daemon.log`, written with `daemon run
+--log-file`, which the login services and `daemon start` use) is separate
+from the audit log. It rotates at 10 MiB and keeps 3 old files
+(`daemon.log.1` to `.3`), so it cannot fill the disk; `daemon-stderr.log`
+only catches crash output.
 
 ## What the relay sees
 

@@ -151,7 +151,9 @@ cravv-connect task cancel <task-id>
 
 Only regular files inside the current folder (or folders you allowed with
 `cravv-connect allow-path`) can be sent. Dot-directories and secret files
-(`.env*`, `*.pem`, `*.key`, `id_*`) are always refused.
+(`.env*`, `id_*`, `credentials*.json`, `service-account*.json`, and `*.pem`,
+`*.key`, `*.env`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, `*.kdbx`,
+`*.ppk`, `*.ovpn`, any case) are always refused.
 
 ## What agents can never do
 

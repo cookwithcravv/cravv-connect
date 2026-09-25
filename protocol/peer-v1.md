@@ -29,9 +29,14 @@ The key words MUST, MUST NOT, SHOULD, and MAY are used as in RFC 2119.
   padding (RFC 4648 section 4), which is how Go encodes `[]byte`. Receivers
   ignore unknown fields.
 - **IDs.** Message, task and file IDs are 26 characters of upper-case Crockford
-  base32: 48 bits of UNIX milliseconds followed by 80 random bits, so they sort
-  by creation time. Receivers accept any 1 to 64 ASCII letters or digits for
-  IDs that become part of file names, and reject anything else.
+  base32 (`0-9 A-Z` without `I L O U`): 48 bits of UNIX milliseconds followed
+  by 80 random bits, so they sort by creation time. Receivers reject any
+  message whose envelope ID, `task_id` or `file_id` (including those in
+  `files` lists) is not exactly that, and any `blob_id` that is not 1 to 64
+  characters of `[a-z0-9]` (relay-v1 section 6.2). A rejected message is
+  dropped and acknowledged, never retried, and gets no `control.delivered`
+  when its envelope ID is the bad one. IDs are shown in terminals and agent
+  prompts, so nothing else may get through.
 - **Timestamps** in envelopes and prekeys are UNIX milliseconds.
 - **Machine ID.** `lowercase(base32(SHA-256(ik)))`, RFC 4648 alphabet, no
   padding: 52 characters. It is also the relay mailbox ID. Displays shorten it
@@ -416,8 +421,9 @@ transfer.
 | chat-only | Held until a human runs `cravv-connect files accept <file_id>` (password). Accepting checks the peer again (still paired, not paused by this machine, trust still allows files). Pausing or unpairing the peer declines its held files |
 | ask-first, autonomous | Downloaded at once |
 
-The offer is checked first: `file_id` and the message ID are 1 to 64 ASCII
-letters or digits, the size is at most 104857600 bytes, `chunks` matches the
+The offer is checked first: `file_id`, `task_id` (when present) and the
+message ID are IDs as in section 1, `blob_id` is 1 to 64 characters of
+`[a-z0-9]`, the size is at most 104857600 bytes, `chunks` matches the
 size, and `sha256` and `key` are 32 bytes each; otherwise it is dropped.
 Before downloading, the receiver checks the per-peer quota (1 GiB by default,
 counting files downloading now plus files downloaded within the last 30

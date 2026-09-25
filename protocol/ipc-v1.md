@@ -17,11 +17,26 @@ and `internal/api` (one file per method group).
 - **Startup:** the daemon removes a stale socket left by a crash, refuses to
   replace anything that is not a socket, and refuses to start when another
   daemon answers on it.
+- **Startup and stop:** the daemon writes `$CRAVV_HOME/daemon.pid` only after
+  it owns the socket, and on exit removes it only if it still holds its own
+  pid. `daemon.shutdown` (section 5) stops it; `cravv-connect daemon stop`
+  uses that and waits up to 10 seconds for the socket to disappear.
 - **Framing:** newline-delimited JSON. Each line is one JSON-RPC 2.0 request or
-  response, at most 8 MiB. A longer line closes the connection.
+  response, at most 8 MiB. The daemon writes JSON without HTML escaping
+  (`<`, `>` and `&` stay one byte). A request line over the limit gets an
+  error of kind `too_large` (id `null`) and the connection closes. A
+  response that would be over the limit is never written: the daemon sends
+  an error of kind `too_large` for that `id` instead, so the stream stays
+  usable.
 - **Concurrency:** a client may send several requests without waiting; each
-  is handled concurrently and answered with its `id`. Requests without `id`
-  are notifications and get no response.
+  is handled concurrently and answered with its `id`. At most 32 requests
+  may be running on one connection; more fail at once with kind `busy`.
+  Requests without `id` are notifications and get no response.
+- **Cancellation:** a client that stops waiting for a request sends the
+  notification `{"jsonrpc":"2.0","method":"$/cancel","params":{"id":<id>}}`.
+  The daemon cancels that request; its (error) response may still arrive and
+  is ignored. A cancelled `inbox.check` or `inbox.wait` marks nothing read,
+  so its items are returned by the next call.
 - **Connection state:** a session (section 3) and a password unlock (section
   4) belong to one connection. Closing the connection disconnects the
   session; it can be reclaimed within its grace period (section 3).
@@ -87,8 +102,8 @@ Error:
 Each method has a gate, checked before the handler in this order:
 
 1. **Kill switch.** While the kill switch is on, only `status`, `auth.unlock`,
-   `resume`, `peer.list`, `audit.read`, and `hook.counts` run. Everything else
-   fails with `killed`.
+   `resume`, `kill`, `daemon.shutdown`, `peer.list`, `audit.read`, and
+   `hook.counts` run. Everything else fails with `killed`.
 2. **session:** `session.register` must have succeeded on this connection,
    otherwise `no_session`.
 3. **unlock:** `auth.unlock` must have succeeded on this connection within the
@@ -137,7 +152,7 @@ with `auth_unavailable`.
 | `peer.unpair` | `{alias}` | `{}` | none | no |
 | `peer.alias` | `{alias, new_alias}` | `{}` | none | no |
 | `peer.trust` | `{alias, level}` | `{}` | unlock only when raising | no |
-| `kill` | `{}` | `{}` | none | no |
+| `kill` | `{}` | `{}` | none | yes |
 | `resume` | `{}` | `{}` | unlock | yes |
 | `auth.unlock` | `{password}` | `{expires_at}` | none | yes |
 | `pair.start` | `{}` | `{pending_id, code}` | unlock | no |
@@ -152,6 +167,7 @@ with `auth_unavailable`.
 | `reset_identity` | `{}` | `{}` | unlock | no |
 | `audit.read` | `{limit}` | `{events: [Event]}` | none | yes |
 | `hook.counts` | `{cwd}` | `{notice, unread, approvals}` | none | yes |
+| `daemon.shutdown` | `{}` | `{}` | none | yes |
 
 ### 5.1 Method notes
 
@@ -167,12 +183,17 @@ with `auth_unavailable`.
   the peer paused this machine the message is accepted and held until the
   peer resumes.
 - **`inbox.check`:** returns unread items for this session (default 50, at
-  most 200) and advances its read position. Items addressed to another
-  session are never returned.
-- **`inbox.wait`:** like `inbox.check`, but blocks until at least one item
-  arrives or `timeout_s` passes (0 or less, or more than 50, means 50). It
-  returns `{"items": []}` on timeout. Updates on tasks this session sent
-  arrive here too.
+  most 200) and advances its read position past the items returned, and no
+  further. A page also holds at most 4 MiB of `wrapped` text (measured as
+  JSON), always at least one item; what does not fit stays unread for the
+  next call. Items addressed to another session are never returned. If the
+  request is cancelled (`$/cancel`) before the page is marked read, nothing
+  is marked.
+- **`inbox.wait`:** like `inbox.check` (default limit, same page budget),
+  but blocks until at least one item arrives or `timeout_s` passes (0 or
+  less, or more than 50, means 50). It returns `{"items": []}` on timeout.
+  Updates on tasks this session sent arrive here too. A wait cancelled with
+  `$/cancel` returns nothing and marks nothing read.
 - **`task.create`:** `file_paths` are sent as files first (outbound rules as
   for `file.send`); fails with `paused` for a peer this machine paused.
 - **`task.get`:** an inbound task that is not awaiting approval or rejected
@@ -216,8 +237,13 @@ with `auth_unavailable`.
   file downloads, disconnects from the relay, stops handling incoming
   messages, and persists across restarts. Updates not sent yet go out after
   `resume`. While the switch is on, every method outside the kill-safe list
-  fails with `killed`, including `chat.send`, `task.*` and `file.send`, and
-  calling `kill` again fails with `killed`.
+  fails with `killed`, including `chat.send`, `task.*` and `file.send`.
+  Calling `kill` again while it is on succeeds and changes nothing.
+- **`daemon.shutdown`:** needs no password and runs while killed (stopping
+  the daemon only cuts traffic off, like `kill`). It replies `{}` and the
+  daemon exits about 100 ms later, removing its socket and pid file. A
+  daemon run by launchd or systemd may be restarted by the service manager;
+  `cravv-connect daemon stop` stops the service instead in that case.
 - **`pair.start`:** needs a live relay connection (`offline` otherwise).
   `pair.await` blocks until the joiner finishes the exchange (at most 10
   minutes). `pair.finalize` needs `trust` and a valid `alias`; on a machine
@@ -269,12 +295,33 @@ with `auth_unavailable`.
   and `&`, `<`, `>` escaped, so the body cannot close the tag.
 
 ```jsonc
-// TaskView
+// TaskView (an inbound task)
 {"task_id": "01J...", "direction": "in", "peer": "gpu-box", "state": "running",
- "claimed_by": "codex@training", "result": "", "instructions": "...",
+ "claimed_by": "codex@training",
  "notes": [{"at": "2026-09-26T10:00:00Z", "text": "halfway"}],
- "files": [], "result_files": [], "updated_at": "2026-09-26T10:00:00Z"}
+ "files": [{"file_id": "01J...", "name": "", "size": 812}],
+ "wrapped": "<remote_message from=\"gpu-box\" ... kind=\"task\" task_id=\"01J...\">\nInstructions:\n...\n\nFiles:\n- eval.yaml (812 bytes, file_id 01J...)\n</remote_message>",
+ "updated_at": "2026-09-26T10:00:00Z"}
+```
 
+TaskView never returns text the peer wrote in a raw field. That text is
+rendered once, with the same wrapper as InboxView, in `wrapped`:
+
+- inbound task (`kind="task"`): the instructions and the attached file
+  names. `instructions` is omitted and `files[].name` is empty.
+- outbound task (`kind="task_update"`): the peer's `result`, the notes that
+  arrived in its `task.update` messages, and the result file names. `result`
+  is omitted, `notes` keeps only notes this machine wrote, and
+  `result_files[].name` is empty.
+
+`instructions` (outbound), `result` (inbound) and `notes` otherwise hold only
+text written on this machine. `claimed_by` on an outbound task, like
+`session` in InboxView, is the peer's session name, cleaned like a wrapper
+attribute (no control or invisible characters, at most 64 characters). `wrapped` is omitted when the peer wrote
+nothing yet. The MCP tools and the `--json` CLI pass TaskView through
+unchanged.
+
+```jsonc
 // PeerView
 {"alias": "gpu-box", "machine_id": "52 chars", "trust_in": "ask-first",
  "online": true, "paused": false, "paused_by_peer": false, "paired_at": "..."}
@@ -300,8 +347,8 @@ with `auth_unavailable`.
 ```
 
 Empty optional fields are omitted: `session`, `task_id`, `file_id`, `path`
-(InboxView); `claimed_by`, `result`, `notes`, `files`, `result_files`
-(TaskView); `path`, `reason` (FileView); `errors` (StatusResult); `peer`,
+(InboxView); `claimed_by`, `result`, `instructions`, `notes`, `files`,
+`result_files`, `wrapped` (TaskView); `path`, `reason` (FileView); `errors` (StatusResult); `peer`,
 `alias`, `item_id`, `hash`, `detail` (Event).
 
 `trust_in` is what that peer may do on this machine. A peer is `online` when
@@ -326,11 +373,12 @@ sessions, and `inbox_unread` is summed over them.
 | `bad_password` | Wrong password |
 | `already_claimed` | Another session claimed the task |
 | `bad_transition` | The task or file is not in a state that allows this |
-| `too_large` | Text over 64 KiB (65536 bytes); files over 100 MiB are `path_refused` |
+| `too_large` | Text over 64 KiB (65536 bytes), or a request or response line over 8 MiB; files over 100 MiB are `path_refused` |
 | `path_refused` | The file may not be sent (see `file.send`) |
 | `quota` | The peer's inbound file quota is used up |
 | `no_session` | The method needs `session.register` first |
-| `bad_request` | Invalid params (also an invalid alias) |
+| `bad_request` | Invalid params (also an invalid alias), or an unknown method |
+| `busy` | 32 requests are already running on this connection; retry when one finishes |
 | `internal` | Anything else (for example an alias already in use, a malformed bind code, low disk space, or a folder that does not exist) |
 
 Kinds registered by the daemon (`internal/app`) on top of these:
@@ -340,7 +388,7 @@ Kinds registered by the daemon (`internal/app`) on top of these:
 | `offline` | No live relay connection (for example `pair.start`), or the pairing service stopped (daemon shutdown or identity reset) |
 | `pairing_failed` | Wrong code, burned room, or an interrupted or tampered exchange |
 | `pairing_expired` | The exchange did not finish within 10 minutes, or it finished more than 10 minutes before `pair.finalize` |
-| `busy` | `pair.finalize` before the exchange finished |
+| `busy` | Also used for `pair.finalize` before the exchange finished |
 | `auth_unavailable` | No PAM (built without cgo), a `pam_service` that is not on the allowlist, or a PAM stack that accepted a random password |
 
 Clients map kinds back to the Go sentinel errors (`errors.Is` works on the
