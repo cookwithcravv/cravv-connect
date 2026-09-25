@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -86,7 +87,22 @@ func (s *Session) Connect(ctx context.Context) (Conn, error) {
 	return c, nil
 }
 
-// Call runs one daemon call, reconnecting once if the connection dropped.
+// retrySafe lists the read-only methods that may be sent again on a new
+// connection when the old one dropped mid-call. Everything else may already
+// have taken effect (a message sent, a task claimed, an inbox page marked
+// read), so it is not repeated: the error is returned and only the next call
+// reconnects.
+var retrySafe = map[string]bool{
+	ipc.MethodStatus:     true,
+	ipc.MethodPeerList:   true,
+	ipc.MethodTaskGet:    true,
+	ipc.MethodFilesList:  true,
+	ipc.MethodHookCounts: true,
+}
+
+// Call runs one daemon call. If the connection dropped, a read-only call is
+// retried once on a new connection; any other call fails with an error
+// wrapping ipc.ErrClosed, because it may or may not have been applied.
 func (s *Session) Call(ctx context.Context, method string, params, result any) error {
 	for attempt := 0; ; attempt++ {
 		c, err := s.Connect(ctx)
@@ -94,10 +110,16 @@ func (s *Session) Call(ctx context.Context, method string, params, result any) e
 			return err
 		}
 		err = c.Call(ctx, method, params, result)
-		if !errors.Is(err, ipc.ErrClosed) || attempt == 1 {
+		if !errors.Is(err, ipc.ErrClosed) {
 			return err
 		}
 		s.drop(c)
+		if attempt == 1 {
+			return err
+		}
+		if !retrySafe[method] {
+			return fmt.Errorf("%w during %s: it may or may not have been applied; check (for example with check_inbox or get_task) before trying again", err, method)
+		}
 	}
 }
 
