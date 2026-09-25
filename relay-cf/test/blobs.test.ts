@@ -1,7 +1,33 @@
-import { runDurableObjectAlarm } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { chunkKey } from "../src/blobmeta";
-import { Identity, member, relayFetch, testEnv } from "./helpers";
+import { handleBlobs } from "../src/blobs";
+import type { Env } from "../src/env";
+import { REGISTRY_NAME } from "../src/registry";
+import { Identity, member, ORIGIN, relayFetch, testEnv } from "./helpers";
+
+const GiB = 1024 * 1024 * 1024;
+
+// An R2 bucket whose put first runs `before`, to force a delete or expiry into the window
+// between the chunk being recorded and its bytes landing in R2.
+function racingBucket(before: () => Promise<void>): R2Bucket {
+  return {
+    put: async (key: string, value: Uint8Array) => {
+      await before();
+      return testEnv.BLOBS.put(key, value);
+    },
+    get: (key: string) => testEnv.BLOBS.get(key),
+    delete: (keys: string | string[]) => testEnv.BLOBS.delete(keys),
+  } as unknown as R2Bucket;
+}
+
+async function racedPut(up: Identity, blobId: string, before: () => Promise<void>): Promise<Response> {
+  const path = `/v1/blobs/${blobId}/chunks/0`;
+  const body = enc.encode("late");
+  const headers = await up.signedHeaders("PUT", path, body);
+  const env: Env = { ...testEnv, BLOBS: racingBucket(before) };
+  return handleBlobs(new Request(`${ORIGIN}${path}`, { method: "PUT", headers, body }), env);
+}
 
 const enc = new TextEncoder();
 
@@ -145,4 +171,94 @@ describe("blobs", () => {
       expect(sent).toBeLessThan(8 * 1048576);
     }
   }, 5000);
+
+  it("a chunk PUT racing a delete removes its own R2 object and answers 404", async () => {
+    const up = await registered();
+    const down = await registered();
+    const id = await createBlob(up, down);
+    const res = await racedPut(up, id, async () => {
+      expect((await signed(down, "DELETE", `/v1/blobs/${id}`)).status).toBe(204);
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ code: "not_found" });
+    expect(await testEnv.BLOBS.get(chunkKey(id, 0))).toBeNull();
+  });
+
+  it("a chunk PUT racing the TTL alarm removes its own R2 object and answers 410", async () => {
+    const up = await registered();
+    const down = await registered();
+    const id = await createBlob(up, down);
+    const res = await racedPut(up, id, async () => {
+      expect(await runDurableObjectAlarm(testEnv.BLOBMETA.getByName(id))).toBe(true);
+    });
+    expect(res.status).toBe(410);
+    expect(await res.json()).toMatchObject({ code: "gone" });
+    expect(await testEnv.BLOBS.get(chunkKey(id, 0))).toBeNull();
+  });
+
+  it("checks blob membership in the caller's own mailbox, not the registry", async () => {
+    const up = await registered();
+    const down = await registered();
+    // Registry says member, mailbox flag says not: the mailbox wins.
+    await runInDurableObject(testEnv.MAILBOX.getByName(up.mailboxId), (_inst, state) => {
+      state.storage.sql.exec("DELETE FROM meta WHERE key = 'registered'");
+    });
+    expect(await testEnv.REGISTRY.getByName(REGISTRY_NAME).isMember(up.mailboxId)).toBe(true);
+    const body = enc.encode(JSON.stringify({ size: 1, chunks: 1, recipient: down.ikB64 }));
+    expect((await signed(up, "POST", "/v1/blobs", body)).status).toBe(403);
+  });
+
+  it("enforces the per-member quota in the member's mailbox and frees it on delete", async () => {
+    const up = await registered();
+    const down = await registered();
+    const mailbox = testEnv.MAILBOX.getByName(up.mailboxId);
+    const exp = Date.now() + 60_000;
+    expect(await mailbox.reserveBlob("q1", GiB, exp)).toBe("ok");
+    expect(await mailbox.reserveBlob("q2", GiB - 5, exp)).toBe("ok");
+    const id = await createBlob(up, down, 5, 1);
+    const body = enc.encode(JSON.stringify({ size: 1, chunks: 1, recipient: down.ikB64 }));
+    const full = await signed(up, "POST", "/v1/blobs", body);
+    expect(full.status).toBe(413);
+    expect(await full.json()).toMatchObject({ code: "too_large" });
+    expect((await signed(up, "DELETE", `/v1/blobs/${id}`)).status).toBe(204);
+    expect((await signed(up, "POST", "/v1/blobs", body)).status).toBe(201);
+  });
+
+  it("caps live blobs per member at 256 with 413 too_large", async () => {
+    const up = await registered();
+    const down = await registered();
+    const exp = Date.now() + 60_000;
+    await runInDurableObject(testEnv.MAILBOX.getByName(up.mailboxId), (_inst, state) => {
+      for (let i = 0; i < 255; i++) {
+        state.storage.sql.exec("INSERT INTO blob_usage (blob_id, size, expires_at) VALUES (?, 1, ?)", `seed${i}`, exp);
+      }
+    });
+    await createBlob(up, down, 1, 1);
+    const body = enc.encode(JSON.stringify({ size: 1, chunks: 1, recipient: down.ikB64 }));
+    const res = await signed(up, "POST", "/v1/blobs", body);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ code: "too_large", message: "too many live blobs" });
+  });
+
+  it("refuses a blob when the relay-wide storage total is reached, and releases the member quota", async () => {
+    const up = await registered();
+    const down = await registered();
+    const registry = testEnv.REGISTRY.getByName(REGISTRY_NAME);
+    const used = await runInDurableObject(registry, (_inst, state) =>
+      state.storage.sql.exec<{ used: number }>("SELECT COALESCE(SUM(size), 0) AS used FROM blob_storage").one().used,
+    );
+    expect(await registry.reserveStorage("fill", 50 * GiB - used, Date.now() + 60_000)).toBe(true);
+    try {
+      const body = enc.encode(JSON.stringify({ size: 1, chunks: 1, recipient: down.ikB64 }));
+      const res = await signed(up, "POST", "/v1/blobs", body);
+      expect(res.status).toBe(413);
+      expect(await res.json()).toMatchObject({ code: "too_large" });
+      const left = await runInDurableObject(testEnv.MAILBOX.getByName(up.mailboxId), (_inst, state) =>
+        state.storage.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM blob_usage").one().n,
+      );
+      expect(left).toBe(0);
+    } finally {
+      await registry.releaseStorage("fill");
+    }
+  });
 });

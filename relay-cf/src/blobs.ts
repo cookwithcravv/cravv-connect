@@ -55,7 +55,8 @@ export async function handleBlobs(request: Request, env: Env): Promise<Response>
 
   const caller = await verifySignedRequest(request, body, Date.now(), limits.httpSkewSeconds);
   if (!caller) return jsonError(401, Code.AUTH_FAILED, "bad or missing request signature");
-  if (!(await env.REGISTRY.getByName(REGISTRY_NAME).isMember(caller.mailboxId))) {
+  // Membership lives in the caller's own Mailbox DO, so this never touches the global Registry.
+  if (!(await env.MAILBOX.getByName(caller.mailboxId).isRegistered())) {
     return jsonError(403, Code.FORBIDDEN, "not a member of this relay");
   }
 
@@ -113,9 +114,14 @@ async function createBlob(ctx: BlobContext): Promise<Response> {
 
   const blobId = randomBlobId();
   const expiresAt = Date.now() + ctx.limits.blobTtlMs;
+  const mailbox = ctx.env.MAILBOX.getByName(ctx.caller.mailboxId);
+  const reserved = await mailbox.reserveBlob(blobId, size, expiresAt);
+  if (reserved === "count") return jsonError(413, Code.TOO_LARGE, "too many live blobs");
+  if (reserved === "quota") return jsonError(413, Code.TOO_LARGE, "blob storage quota exceeded");
   const registry = ctx.env.REGISTRY.getByName(REGISTRY_NAME);
-  if (!(await registry.reserveBlob(ctx.caller.mailboxId, blobId, size, expiresAt))) {
-    return jsonError(413, Code.TOO_LARGE, "blob storage quota exceeded");
+  if (!(await registry.reserveStorage(blobId, size, expiresAt))) {
+    await mailbox.releaseBlob(blobId);
+    return jsonError(413, Code.TOO_LARGE, "relay blob storage is full");
   }
   const created = await ctx.env.BLOBMETA.getByName(blobId).create(
     blobId,
@@ -126,7 +132,8 @@ async function createBlob(ctx: BlobContext): Promise<Response> {
     expiresAt,
   );
   if (!created) {
-    await registry.releaseBlob(blobId);
+    await mailbox.releaseBlob(blobId);
+    await registry.releaseStorage(blobId);
     return jsonError(500, Code.INTERNAL, "blob id collision");
   }
   return Response.json({ blob_id: blobId }, { status: 201 });
@@ -153,7 +160,16 @@ async function putChunk(ctx: BlobContext): Promise<Response> {
   if (!(await ctx.env.BLOBMETA.getByName(ctx.blobId).recordChunk(ctx.chunk, ctx.body.length))) {
     return jsonError(413, Code.TOO_LARGE, "chunks exceed the declared size");
   }
-  await ctx.env.BLOBS.put(chunkKey(ctx.blobId, ctx.chunk), ctx.body);
+  const key = chunkKey(ctx.blobId, ctx.chunk);
+  await ctx.env.BLOBS.put(key, ctx.body);
+  // A delete or expiry may have run while the bytes were in flight; BlobMeta removed the
+  // chunks it knew about before this object existed. Re-check and clean up our own object so
+  // nothing is left in R2 outside any quota.
+  const after = await ctx.env.BLOBMETA.getByName(ctx.blobId).confirmChunk(ctx.chunk);
+  if (after !== 0) {
+    await ctx.env.BLOBS.delete(key);
+    return after === 410 ? jsonError(410, Code.GONE, "blob expired") : jsonError(404, Code.NOT_FOUND, "no such blob");
+  }
   return new Response(null, { status: 204 });
 }
 

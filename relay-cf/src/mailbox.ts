@@ -32,6 +32,8 @@ import {
 import { Meta, Queue } from "./queue";
 import { REGISTRY_NAME } from "./registry";
 
+export type BlobReservation = "ok" | "quota" | "count";
+
 type Stage = "hello" | "auth" | "register" | "ready";
 
 // Per-socket state. Stored with serializeAttachment so it survives hibernation.
@@ -49,8 +51,8 @@ const ROOM_CREATE_ATTEMPTS = 16;
 const MAX_ID_CHARS = 128;
 
 // Mailbox is one SQLite-backed Durable Object per mailbox id. It owns the queue, the allow-list
-// (keyed by sender mailbox id), and the seq counter, and holds at most one live WebSocket
-// (hibernation API).
+// (keyed by sender mailbox id), the seq counter, and this member's blob quota accounting, and
+// holds at most one live WebSocket (hibernation API).
 export class Mailbox extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private readonly limits: Limits;
@@ -70,6 +72,11 @@ export class Mailbox extends DurableObject<Env> {
     this.meta = new Meta(this.sql);
     this.queue = new Queue(this.sql, this.meta, this.limits);
     this.sql.exec("CREATE TABLE IF NOT EXISTS allow (mailbox_id TEXT PRIMARY KEY)");
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS blob_usage (
+      blob_id TEXT PRIMARY KEY,
+      size INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    )`);
     this.ops = {
       allow: (ws, _a, f, rid) => this.opAllow(ws, f, rid, true),
       deny: (ws, _a, f, rid) => this.opAllow(ws, f, rid, false),
@@ -369,6 +376,36 @@ export class Mailbox extends DurableObject<Env> {
     return Status.QUEUED;
   }
 
+  // ---------- RPC: called by the blob handlers and BlobMeta ----------
+
+  // The persisted registered flag. Blob requests check membership here, in the caller's own
+  // mailbox, instead of in the global Registry.
+  isRegistered(): boolean {
+    return this.meta.get("registered") === "1";
+  }
+
+  // Reserves a new blob against this member's quota (relay-v1 6.2) and live-blob cap.
+  // Expired reservations never count.
+  reserveBlob(blobId: string, size: number, expiresAt: number): BlobReservation {
+    this.sql.exec("DELETE FROM blob_usage WHERE expires_at <= ?", Date.now());
+    const row = this.sql
+      .exec<{ n: number; used: number }>("SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS used FROM blob_usage")
+      .one();
+    if (row.n + 1 > this.limits.maxLiveBlobs) return "count";
+    if (row.used + size > this.limits.blobQuotaBytes) return "quota";
+    this.sql.exec(
+      "INSERT OR REPLACE INTO blob_usage (blob_id, size, expires_at) VALUES (?, ?, ?)",
+      blobId,
+      size,
+      expiresAt,
+    );
+    return "ok";
+  }
+
+  releaseBlob(blobId: string): void {
+    this.sql.exec("DELETE FROM blob_usage WHERE blob_id = ?", blobId);
+  }
+
   // ---------- TTL ----------
 
   async alarm(): Promise<void> {
@@ -396,10 +433,6 @@ export class Mailbox extends DurableObject<Env> {
       if (a && a.stage === "ready" && ws.readyState === WebSocket.READY_STATE_OPEN) return ws;
     }
     return undefined;
-  }
-
-  private isRegistered(): boolean {
-    return this.meta.get("registered") === "1";
   }
 
   // Token bucket for requests on the live connection (relay-v1 section 7): burst

@@ -6,7 +6,9 @@ import { readLimits, type Limits } from "./limits";
 export const REGISTRY_NAME = "registry";
 
 // Registry is a single Durable Object instance (idFromName("registry")) that owns relay
-// membership, single-use invites, and per-member blob storage accounting.
+// membership, single-use invites, and the relay-wide total of live blob bytes. It is only
+// reached for registration, invites, and blob create/release: per-request membership checks
+// go to the caller's own Mailbox DO, so throwaway keys cannot flood this one instance.
 export class Registry extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private readonly limits: Limits;
@@ -24,9 +26,8 @@ export class Registry extends DurableObject<Env> {
       issuer TEXT NOT NULL,
       expires_at INTEGER NOT NULL
     )`);
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS blob_usage (
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS blob_storage (
       blob_id TEXT PRIMARY KEY,
-      mailbox_id TEXT NOT NULL,
       size INTEGER NOT NULL,
       expires_at INTEGER NOT NULL
     )`);
@@ -71,25 +72,24 @@ export class Registry extends DurableObject<Env> {
     return token;
   }
 
-  // Reserves blob storage against the uploader's quota. False when the quota would be exceeded.
-  reserveBlob(mailboxId: string, blobId: string, size: number, expiresAt: number): boolean {
-    const now = Date.now();
-    this.sql.exec("DELETE FROM blob_usage WHERE expires_at <= ?", now);
-    const row = this.sql
-      .exec<{ used: number }>("SELECT COALESCE(SUM(size), 0) AS used FROM blob_usage WHERE mailbox_id = ?", mailboxId)
-      .one();
-    if (row.used + size > this.limits.blobQuotaBytes) return false;
+  // Reserves size bytes of relay-wide blob storage. False when the relay total would exceed
+  // maxTotalBlobBytes. Expired reservations never count.
+  reserveStorage(blobId: string, size: number, expiresAt: number): boolean {
+    this.sql.exec("DELETE FROM blob_storage WHERE expires_at <= ?", Date.now());
+    const used = this.sql
+      .exec<{ used: number }>("SELECT COALESCE(SUM(size), 0) AS used FROM blob_storage")
+      .one().used;
+    if (used + size > this.limits.maxTotalBlobBytes) return false;
     this.sql.exec(
-      "INSERT INTO blob_usage (blob_id, mailbox_id, size, expires_at) VALUES (?, ?, ?, ?)",
+      "INSERT OR REPLACE INTO blob_storage (blob_id, size, expires_at) VALUES (?, ?, ?)",
       blobId,
-      mailboxId,
       size,
       expiresAt,
     );
     return true;
   }
 
-  releaseBlob(blobId: string): void {
-    this.sql.exec("DELETE FROM blob_usage WHERE blob_id = ?", blobId);
+  releaseStorage(blobId: string): void {
+    this.sql.exec("DELETE FROM blob_storage WHERE blob_id = ?", blobId);
   }
 }

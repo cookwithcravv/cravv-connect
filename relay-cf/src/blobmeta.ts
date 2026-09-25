@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./env";
+import { b64decode, mailboxIdOf } from "./crypto";
 import { readLimits, type Limits } from "./limits";
 import { REGISTRY_NAME } from "./registry";
 
@@ -91,10 +92,23 @@ export class BlobMeta extends DurableObject<Env> {
     return true;
   }
 
-  // Deletes chunks and metadata. Called after a successful authorize("delete").
+  // Called by a chunk PUT after its R2 write: 0 when the blob is still active and chunk n is
+  // recorded, otherwise 404 (deleted) or 410 (expired), and the caller deletes its object.
+  confirmChunk(n: number): 0 | 404 | 410 {
+    const r = this.row();
+    if (!r) return 404;
+    if (r.state !== "active" || r.expires_at <= Date.now()) return 410;
+    return this.sql.exec("SELECT 1 FROM chunk WHERE n = ?", n).toArray().length > 0 ? 0 : 404;
+  }
+
+  // Deletes chunks and metadata. Called after a successful authorize("delete"). The rows go
+  // first, synchronously, so a chunk PUT that finishes during the R2 deletes sees the blob as
+  // gone in confirmChunk and removes its own object.
   async destroy(): Promise<void> {
     const r = this.row();
     if (!r) return;
+    this.sql.exec("DELETE FROM blob");
+    this.sql.exec("DELETE FROM chunk");
     await this.removeChunks(r);
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
@@ -105,8 +119,10 @@ export class BlobMeta extends DurableObject<Env> {
     const r = this.row();
     if (!r) return;
     if (r.state === "active") {
-      await this.removeChunks(r);
+      // Mark first so a concurrent chunk PUT sees 410 in confirmChunk (see destroy).
       this.sql.exec("UPDATE blob SET state = 'expired' WHERE k = 1");
+      this.sql.exec("DELETE FROM chunk");
+      await this.removeChunks(r);
       await this.ctx.storage.setAlarm(Date.now() + this.limits.blobTtlMs);
       return;
     }
@@ -118,7 +134,9 @@ export class BlobMeta extends DurableObject<Env> {
     const keys: string[] = [];
     for (let n = 0; n < r.chunks; n++) keys.push(chunkKey(r.blob_id, n));
     for (let i = 0; i < keys.length; i += 1000) await this.env.BLOBS.delete(keys.slice(i, i + 1000));
-    await this.env.REGISTRY.getByName(REGISTRY_NAME).releaseBlob(r.blob_id);
+    const uploader = await mailboxIdOf(b64decode(r.uploader));
+    await this.env.MAILBOX.getByName(uploader).releaseBlob(r.blob_id);
+    await this.env.REGISTRY.getByName(REGISTRY_NAME).releaseStorage(r.blob_id);
   }
 
   private row(): BlobRow | undefined {

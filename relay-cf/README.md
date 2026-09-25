@@ -12,8 +12,8 @@ and nothing Cloudflare-specific leaks into the protocol. It only ever sees ciphe
 | `src/http.ts` | shared upgrade check, JSON error responses, and error-frame rejection of upgrades |
 | `src/crypto.ts` | base64, base32, SHA-256, Ed25519 verify, auth and HTTP signing strings |
 | `src/limits.ts` | limit values and their optional env overrides |
-| `src/registry.ts` | `Registry` Durable Object: members, single-use invites, blob quota |
-| `src/mailbox.ts` | `Mailbox` Durable Object (one per mailbox id): handshake, queue, allow-list, delivery |
+| `src/registry.ts` | `Registry` Durable Object: members, single-use invites, relay-wide blob storage total |
+| `src/mailbox.ts` | `Mailbox` Durable Object (one per mailbox id): handshake, queue, allow-list, delivery, the member's blob quota, and the membership check for blob requests |
 | `src/queue.ts` | SQLite queue and meta tables used by `Mailbox` |
 | `src/room.ts` | `Room` Durable Object (one per nameplate): pairing relay, one joiner, 10 minute life |
 | `src/blobmeta.ts` | `BlobMeta` Durable Object (one per blob): ACL, expiry, cleanup |
@@ -40,9 +40,14 @@ cd relay-cf
 npm ci
 npx wrangler login
 npx wrangler r2 bucket create cravv-relay-blobs
+npx wrangler r2 bucket lifecycle add cravv-relay-blobs expire-blobs blobs/ --expire-days 15
 npx wrangler secret put ADMIN_TOKEN      # paste a long random value, e.g. from: openssl rand -hex 32
 npx wrangler deploy
 ```
+
+The lifecycle rule is a backstop: `BlobMeta` deletes chunks on `DELETE` and at the 7 day TTL,
+so R2 only keeps an object past 15 days if that cleanup failed. Check it with
+`npx wrangler r2 bucket lifecycle list cravv-relay-blobs`.
 
 `wrangler deploy` prints the Worker URL (for example `https://cravv-relay.<account>.workers.dev`).
 Pin that URL as the relay origin that clients sign during auth, then deploy again:
@@ -88,10 +93,12 @@ external relay; the relay-cf Vitest suite covers them with `runInDurableObject` 
 
 Defaults match the cravv-connect spec: 256 KiB frames, 50 MB or 10000 frames per mailbox queue,
 7 day queue TTL, 10 minute rooms and invites, 16 buffered room messages, 100 MiB blobs in
-1 MiB chunks, 7 day blob TTL, 2 GiB of live blobs per member, 1000 requests per live mailbox
+1 MiB chunks, 7 day blob TTL, 2 GiB and 256 live blobs per member (more is `413 too_large`),
+50 GiB of live blobs across the relay (`413 too_large`), 20 unexpired invites per member (more is
+`res{status:"error",code:"rate_limited"}`), 1000 requests per live mailbox
 connection refilled at 200 per second, and 600 connects or blob requests per IP per minute. For local testing you can lower them in `.dev.vars` with
 `QUEUE_MAX_FRAMES`, `QUEUE_MAX_BYTES`, `QUEUE_TTL_SECONDS`, `ROOM_TTL_SECONDS`,
-`INVITE_TTL_SECONDS`, `BLOB_TTL_SECONDS`, `BLOB_QUOTA_BYTES`, `REQUEST_BURST`,
+`INVITE_TTL_SECONDS`, `BLOB_TTL_SECONDS`, `BLOB_QUOTA_BYTES`, `MAX_TOTAL_BLOB_BYTES`, `REQUEST_BURST`,
 `REQUEST_RATE_PER_SECOND`, and `DISABLE_RATE_LIMITS=1`. Leave them unset in production.
 
 ## Protocol notes specific to this relay

@@ -10,6 +10,9 @@ export interface Limits {
   inviteTtlMs: number;
   blobTtlMs: number;
   blobQuotaBytes: number;
+  maxLiveBlobs: number;
+  maxTotalBlobBytes: number;
+  maxOutstandingInvites: number;
   requestBurst: number;
   requestRatePerSecond: number;
   maxFrameBytes: number;
@@ -30,6 +33,12 @@ export const DEFAULT_LIMITS: Limits = {
   inviteTtlMs: 10 * 60 * 1000,
   blobTtlMs: 7 * 24 * 60 * 60 * 1000,
   blobQuotaBytes: 2 * 1024 * 1024 * 1024,
+  // Live (unexpired, undeleted) blobs one member may have at once; more is 413 too_large.
+  maxLiveBlobs: 256,
+  // Total bytes of live blobs across the whole relay; more is 413 too_large.
+  maxTotalBlobBytes: 50 * 1024 * 1024 * 1024,
+  // Unexpired invites one member may hold; more is res{status:"error", code:"rate_limited"}.
+  maxOutstandingInvites: 20,
   requestBurst: 1000,
   requestRatePerSecond: 200,
   maxFrameBytes: 262144,
@@ -63,6 +72,7 @@ export function readLimits(env: Env): Limits {
     inviteTtlMs: positiveInt(env.INVITE_TTL_SECONDS, DEFAULT_LIMITS.inviteTtlMs / 1000) * 1000,
     blobTtlMs: positiveInt(env.BLOB_TTL_SECONDS, DEFAULT_LIMITS.blobTtlMs / 1000) * 1000,
     blobQuotaBytes: positiveInt(env.BLOB_QUOTA_BYTES, DEFAULT_LIMITS.blobQuotaBytes),
+    maxTotalBlobBytes: positiveInt(env.MAX_TOTAL_BLOB_BYTES, DEFAULT_LIMITS.maxTotalBlobBytes),
     requestBurst: positiveInt(env.REQUEST_BURST, DEFAULT_LIMITS.requestBurst),
     requestRatePerSecond: positiveInt(env.REQUEST_RATE_PER_SECOND, DEFAULT_LIMITS.requestRatePerSecond),
   };

@@ -38,13 +38,20 @@ describe("registry", () => {
     expect(await registry().register(mid(6), undefined, invite)).toBe(false);
   });
 
-  it("enforces the per-member blob quota and frees it on release", async () => {
+  it("caps the relay-wide total of live blob bytes and frees it on release", async () => {
     const exp = Date.now() + 60_000;
-    expect(await registry().reserveBlob(mid(7), "b1", GiB, exp)).toBe(true);
-    expect(await registry().reserveBlob(mid(7), "b2", GiB, exp)).toBe(true);
-    expect(await registry().reserveBlob(mid(7), "b3", 1, exp)).toBe(false);
-    expect(await registry().reserveBlob(mid(8), "b4", 1, exp)).toBe(true);
-    await registry().releaseBlob("b1");
-    expect(await registry().reserveBlob(mid(7), "b3", 1, exp)).toBe(true);
+    expect(await registry().reserveStorage("t1", 50 * GiB - 1, exp)).toBe(true);
+    expect(await registry().reserveStorage("t2", 2, exp)).toBe(false);
+    expect(await registry().reserveStorage("t2", 1, exp)).toBe(true);
+    await registry().releaseStorage("t1");
+    expect(await registry().reserveStorage("t3", GiB, exp)).toBe(true);
+    await registry().releaseStorage("t2");
+    await registry().releaseStorage("t3");
+  });
+
+  it("does not count expired storage reservations", async () => {
+    expect(await registry().reserveStorage("t4", 50 * GiB, Date.now() - 1)).toBe(true);
+    expect(await registry().reserveStorage("t5", GiB, Date.now() + 60_000)).toBe(true);
+    await registry().releaseStorage("t5");
   });
 });

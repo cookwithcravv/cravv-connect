@@ -22,6 +22,7 @@ export interface Env {
   INVITE_TTL_SECONDS?: string;
   BLOB_TTL_SECONDS?: string;
   BLOB_QUOTA_BYTES?: string;
+  MAX_TOTAL_BLOB_BYTES?: string;
   REQUEST_BURST?: string;
   REQUEST_RATE_PER_SECOND?: string;
   DISABLE_RATE_LIMITS?: string;
