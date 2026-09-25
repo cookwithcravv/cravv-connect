@@ -454,3 +454,28 @@ func TestOutboundControlItemsAreNeverHeld(t *testing.T) {
 		t.Fatalf("control item not retried: %s", st)
 	}
 }
+
+// The relay drops a queued frame after core.RelayTTL; without a control.delivered by
+// then the item is sent again.
+func TestOutboundResendsQueuedItemAfterRelayTTL(t *testing.T) {
+	f := newOutboundFixture(t)
+	id := f.send(t, "are you there")
+	f.pass(t)
+	if it := f.status(t, id); it.Status != store.OutboxQueued || !it.NextAttempt.Equal(testEpoch.Add(core.RelayTTL)) {
+		t.Fatalf("after send: %+v, want queued until +RelayTTL", it)
+	}
+	f.clock.Advance(core.RelayTTL - time.Minute)
+	f.pass(t)
+	if n := len(f.mb.sentFrames()); n != 1 {
+		t.Fatalf("resent before the relay TTL: %d sends", n)
+	}
+	f.clock.Advance(time.Minute)
+	f.pass(t)
+	sent := f.mb.sentFrames()
+	if len(sent) != 2 || sent[1].ID != id {
+		t.Fatalf("not resent after the relay TTL: %+v", sent)
+	}
+	if st := f.status(t, id).Status; st != store.OutboxQueued {
+		t.Fatalf("status after resend = %s", st)
+	}
+}

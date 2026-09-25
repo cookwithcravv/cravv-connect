@@ -154,7 +154,9 @@ func (o *Outbound) Run(ctx context.Context) error {
 	}
 }
 
-// SendDue makes one pass over due outbox items. It does nothing while killed or offline.
+// SendDue makes one pass over due outbox items, after moving queued items the relay has
+// dropped (older than RelayTTL, never confirmed) back to pending. It does nothing while
+// killed or offline.
 func (o *Outbound) SendDue(ctx context.Context) error {
 	if o.killed() {
 		return nil
@@ -163,7 +165,11 @@ func (o *Outbound) SendDue(ctx context.Context) error {
 	if !ok {
 		return nil
 	}
-	items, err := o.outbox.Due(ctx, o.clock.Now(), outboundBatch)
+	now := o.clock.Now()
+	if _, err := o.outbox.RequeueStale(ctx, now); err != nil {
+		return err
+	}
+	items, err := o.outbox.Due(ctx, now, outboundBatch)
 	if err != nil {
 		return err
 	}
@@ -212,7 +218,9 @@ func (o *Outbound) attempt(ctx context.Context, mb transport.Mailbox, it store.O
 	}
 	switch st {
 	case transport.SendQueued:
-		return o.outbox.SetStatus(ctx, it.ID, store.OutboxQueued, it.Attempts+1, o.clock.Now())
+		// The relay keeps the frame for RelayTTL; if no control.delivered arrives by
+		// then, SendDue moves the item back to pending and it is sent again.
+		return o.outbox.SetStatus(ctx, it.ID, store.OutboxQueued, it.Attempts+1, o.clock.Now().Add(core.RelayTTL))
 	case transport.SendNotAllowed:
 		if err := o.markPausedByPeer(ctx, peer); err != nil {
 			return err
