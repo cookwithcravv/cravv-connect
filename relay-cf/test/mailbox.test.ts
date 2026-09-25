@@ -111,6 +111,18 @@ describe("registration", () => {
     conn.close();
   });
 
+  it("auth reads only the mailbox's own registered flag; register repairs a lost flag", async () => {
+    const id = await Identity.create();
+    await testEnv.REGISTRY.getByName("registry").register(id.mailboxId, ADMIN_TOKEN);
+    const { conn, authOk } = await handshake(id);
+    expect(authOk).toMatchObject({ t: "auth_ok", registered: false });
+    expect(await conn.request({ t: "register" })).toMatchObject({ status: "ok" });
+    conn.close();
+    const again = await handshake(id);
+    expect(again.authOk).toMatchObject({ t: "auth_ok", registered: true });
+    again.conn.close();
+  });
+
   it("invites are single-use", async () => {
     const owner = await Identity.create();
     const oc = await member(owner);

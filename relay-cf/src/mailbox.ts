@@ -212,11 +212,9 @@ export class Mailbox extends DurableObject<Env> {
       failSocket(ws, Code.AUTH_FAILED, "mailbox mismatch");
       return;
     }
-    let registered = this.isRegistered();
-    if (!registered) {
-      registered = await this.registry().isMember(mailboxId);
-      if (registered) this.meta.set("registered", "1");
-    }
+    // Only the mailbox's own flag: an unregistered (possibly throwaway) key never reaches the
+    // global Registry until it presents credentials in register.
+    const registered = this.isRegistered();
     ws.send(JSON.stringify({ t: "auth_ok", registered, mailbox_id: mailboxId }));
     if (registered) {
       this.activate(ws, a);
