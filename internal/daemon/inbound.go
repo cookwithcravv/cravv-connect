@@ -19,6 +19,11 @@ import (
 // receiptFlushEvery bounds how long a control.delivered receipt waits for batching.
 const receiptFlushEvery = 200 * time.Millisecond
 
+// ErrRetryLater is returned by Inbound.Run after a handler failed retryably: the
+// delivery was not acked, so the caller should reconnect (with backoff) and let the
+// relay redeliver it.
+var ErrRetryLater = errors.New("inbound: handler asked for a retry; reconnect to get a redelivery")
+
 // RetryableError marks a handler failure that should be retried: the delivery is not acked,
 // so the relay redelivers it on the next connection.
 type RetryableError struct{ Err error }
@@ -52,7 +57,6 @@ type Inbound struct {
 
 	mu      sync.Mutex
 	receipt map[core.MachineID][]string // envelope IDs awaiting control.delivered
-	retry   map[string]bool             // IDs whose handler asked for a retry
 }
 
 // NewInbound wires an Inbound. logger may be nil.
@@ -65,7 +69,6 @@ func NewInbound(id *keys.Identity, peers store.PeerStore, dedup store.DedupStore
 		identity: id, peers: peers, dedup: dedup, prekeys: prekeys, registry: registry,
 		sender: sender, clock: clock, logger: logger,
 		receipt: make(map[core.MachineID][]string),
-		retry:   make(map[string]bool),
 	}
 }
 
@@ -76,13 +79,15 @@ func (in *Inbound) Dropped() int64 { return in.dropped.Load() }
 func (in *Inbound) SkewRejected() int64 { return in.skewed.Load() }
 
 // Run consumes deliveries until the channel closes or ctx ends. Receipts are flushed
-// when a burst of deliveries ends and at least every 200ms.
+// when a burst of deliveries ends and at least every 200ms. When a delivery cannot be
+// handled now (a retryable handler failure or a dedup store error) it is not acked and
+// Run returns an error wrapping ErrRetryLater: acks are cumulative, so the caller must
+// reconnect and let the relay redeliver from that delivery on.
 func (in *Inbound) Run(ctx context.Context, mb transport.Mailbox) error {
 	ticker := time.NewTicker(receiptFlushEvery)
 	defer ticker.Stop()
 	defer in.flushReceipts(context.WithoutCancel(ctx))
 	deliveries := mb.Deliveries()
-	holdAcks := false // set after a retryable failure: acks are cumulative
 	for {
 		select {
 		case <-ctx.Done():
@@ -93,13 +98,11 @@ func (in *Inbound) Run(ctx context.Context, mb transport.Mailbox) error {
 			if !ok {
 				return nil
 			}
-			if !in.process(ctx, d) {
-				holdAcks = true
+			if err := in.process(ctx, d); err != nil {
+				return fmt.Errorf("%w: seq %d: %v", ErrRetryLater, d.Seq, err)
 			}
-			if !holdAcks {
-				if err := mb.Ack(ctx, d.Seq); err != nil {
-					in.logger.Warn("ack failed", "seq", d.Seq, "err", err)
-				}
+			if err := mb.Ack(ctx, d.Seq); err != nil {
+				in.logger.Warn("ack failed", "seq", d.Seq, "err", err)
 			}
 			if len(deliveries) == 0 {
 				in.flushReceipts(ctx)
@@ -108,65 +111,72 @@ func (in *Inbound) Run(ctx context.Context, mb transport.Mailbox) error {
 	}
 }
 
-// process handles one delivery. It returns false only when the delivery must not be acked.
-func (in *Inbound) process(ctx context.Context, d transport.Delivery) bool {
+// process handles one delivery. It returns an error only when the delivery must not be
+// acked (so it is redelivered); every other outcome, including drops, is acked.
+//
+// The dedup mark is written only once the handler succeeded or failed for good: a
+// retryable failure leaves the ID unmarked, so a redelivery after a restart runs the
+// handler again and no control.delivered is sent for a message that was not stored.
+func (in *Inbound) process(ctx context.Context, d transport.Delivery) error {
 	peer, err := in.peers.GetPeer(ctx, keys.MachineIDOf(d.From))
 	if err != nil {
 		in.drop("unknown sender", d, err)
-		return true
+		return nil
 	}
 	if peer.Paused {
 		in.drop("paused peer", d, nil)
-		return true
+		return nil
 	}
 	frame, err := sealing.ParseFrame(d.Frame)
 	if err != nil {
 		in.drop("unparseable frame", d, err)
-		return true
+		return nil
 	}
 	env, err := sealing.Open(frame, peer.IK, in.identity.MachineID(), in.prekeys)
 	if errors.Is(err, sealing.ErrUnknownPrekey) {
 		in.replyStalePrekey(ctx, peer, frame.Header.ID)
-		return true
+		return nil
 	}
 	if err != nil {
 		in.drop("unverifiable frame", d, err)
-		return true
+		return nil
 	}
 	if err := in.checkTimestamp(env); err != nil {
 		in.drop("bad timestamp", d, err)
-		return true
+		return nil
 	}
-	seen, err := in.dedup.SeenOrMark(ctx, env.ID, in.clock.Now())
+	seen, err := in.dedup.Seen(ctx, env.ID)
 	if err != nil {
 		in.logger.Error("dedup store failed", "id", env.ID, "err", err)
-		return false
+		return err
 	}
-	if seen && !in.takeRetry(env.ID) {
+	if seen {
 		if !env.Kind.IsControl() {
 			in.queueReceipt(peer.MachineID, env.ID)
 		}
-		return true
+		return nil
 	}
 	h, ok := in.registry.Lookup(env.Kind)
 	if !ok {
 		in.drop("no handler for kind "+string(env.Kind), d, nil)
-		return true
+		return nil
 	}
 	if err := h.Handle(ctx, peer, env); err != nil {
 		var re *RetryableError
 		if errors.As(err, &re) {
 			in.logger.Warn("handler failed, will retry", "kind", env.Kind, "id", env.ID, "err", err)
-			in.markRetry(env.ID)
-			return false
+			return err
 		}
+		// Received but unusable: confirm it anyway so the sender stops resending it.
 		in.logger.Warn("handler failed", "kind", env.Kind, "id", env.ID, "err", err)
-		return true
+	}
+	if _, err := in.dedup.SeenOrMark(ctx, env.ID, in.clock.Now()); err != nil {
+		in.logger.Error("dedup mark failed", "id", env.ID, "err", err)
 	}
 	if !env.Kind.IsControl() {
 		in.queueReceipt(peer.MachineID, env.ID)
 	}
-	return true
+	return nil
 }
 
 func (in *Inbound) checkTimestamp(env core.Envelope) error {
@@ -182,7 +192,15 @@ func (in *Inbound) checkTimestamp(env core.Envelope) error {
 	return nil
 }
 
+// replyStalePrekey tells the sender which prekey to use, at most once per (peer, message ID):
+// the relay may redeliver the frame, and each reply would otherwise trigger another resend.
 func (in *Inbound) replyStalePrekey(ctx context.Context, peer store.Peer, msgID string) {
+	key := "stale:" + string(peer.MachineID) + ":" + msgID
+	if seen, err := in.dedup.SeenOrMark(ctx, key, in.clock.Now()); err != nil {
+		in.logger.Warn("stale_prekey dedup failed", "id", msgID, "err", err)
+	} else if seen {
+		return
+	}
 	cur, err := in.prekeys.Current(ctx)
 	if err != nil {
 		in.logger.Error("no current prekey for stale_prekey reply", "err", err)
@@ -220,21 +238,4 @@ func (in *Inbound) flushReceipts(ctx context.Context) {
 			in.logger.Warn("delivered receipt failed", "peer", peer.Short(), "err", err)
 		}
 	}
-}
-
-func (in *Inbound) markRetry(id string) {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	in.retry[id] = true
-}
-
-// takeRetry reports whether id failed retryably before, and clears the mark.
-func (in *Inbound) takeRetry(id string) bool {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	if !in.retry[id] {
-		return false
-	}
-	delete(in.retry, id)
-	return true
 }

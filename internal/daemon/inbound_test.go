@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"sync"
 	"testing"
@@ -24,6 +25,7 @@ type inboundFixture struct {
 	sender   *recordingSender
 	registry *HandlerRegistry
 	clock    *core.FakeClock
+	dedup    *memDedup
 	gpu      testPeer
 
 	mu      sync.Mutex
@@ -53,7 +55,8 @@ func newInboundFixture(t *testing.T) *inboundFixture {
 		f.handled = append(f.handled, env.ID)
 		return nil
 	}))
-	f.in = NewInbound(me, f.peers, newMemDedup(), f.prekeys, f.registry, f.sender, f.clock, nil)
+	f.dedup = newMemDedup()
+	f.in = NewInbound(me, f.peers, f.dedup, f.prekeys, f.registry, f.sender, f.clock, nil)
 	f.gpu = newTestPeer(t, "gpu-box", core.TrustAskFirst)
 	mustPut(t, f.peers, f.gpu.rec)
 	return f
@@ -86,15 +89,21 @@ func (f *inboundFixture) frameFrom(t *testing.T, p testPeer, at time.Time, to ke
 // run feeds deliveries to Inbound.Run and waits for it to finish.
 func (f *inboundFixture) run(t *testing.T, ds ...transport.Delivery) *fakeMailbox {
 	t.Helper()
+	mb, err := f.runErr(ds...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mb
+}
+
+// runErr is run that returns Run's error instead of failing the test.
+func (f *inboundFixture) runErr(ds ...transport.Delivery) (*fakeMailbox, error) {
 	mb := newFakeMailbox(nil)
 	for _, d := range ds {
 		mb.deliveries <- d
 	}
 	close(mb.deliveries)
-	if err := f.in.Run(context.Background(), mb); err != nil {
-		t.Fatal(err)
-	}
-	return mb
+	return mb, f.in.Run(context.Background(), mb)
 }
 
 func deliveredIDs(t *testing.T, s *recordingSender) []string {
@@ -299,22 +308,25 @@ func TestInboundRetryableErrorNotAcked(t *testing.T) {
 	id, raw := f.frameFrom(t, f.gpu, testEpoch, f.myPK)
 	id2, raw2 := f.frameFrom(t, f.gpu, testEpoch, f.myPK)
 	f.failing[id] = Retryable(errBoom)
-	mb := f.run(t,
+	mb, err := f.runErr(
 		transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw},
 		transport.Delivery{Seq: 2, From: f.gpu.id.Public(), ID: id2, Frame: raw2},
 	)
+	if !errors.Is(err, ErrRetryLater) {
+		t.Fatalf("Run err = %v, want ErrRetryLater so the connection is recycled", err)
+	}
 	if got := mb.ackedSeqs(); len(got) != 0 {
 		t.Fatalf("acks = %v: a cumulative ack would drop the failed delivery", got)
 	}
-	if got := f.handledIDs(); !slices.Equal(got, []string{id2}) {
-		t.Fatalf("handled = %v", got)
+	if got := deliveredIDs(t, f.sender); len(got) != 0 {
+		t.Fatalf("confirmed %v before the handler succeeded", got)
 	}
 	// Reconnect: the relay redelivers both from seq 1.
 	mb = f.run(t,
 		transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw},
 		transport.Delivery{Seq: 2, From: f.gpu.id.Public(), ID: id2, Frame: raw2},
 	)
-	if got := f.handledIDs(); !slices.Equal(got, []string{id2, id}) {
+	if got := f.handledIDs(); !slices.Equal(got, []string{id, id2}) {
 		t.Fatalf("handled after redelivery = %v", got)
 	}
 	if got := mb.ackedSeqs(); !slices.Equal(got, []uint64{1, 2}) {
@@ -322,16 +334,62 @@ func TestInboundRetryableErrorNotAcked(t *testing.T) {
 	}
 }
 
-func TestInboundPlainHandlerErrorStillAcked(t *testing.T) {
+func TestInboundRetryableFailureSurvivesRestart(t *testing.T) {
+	f := newInboundFixture(t)
+	id, raw := f.frameFrom(t, f.gpu, testEpoch, f.myPK)
+	f.failing[id] = Retryable(errBoom)
+	d := transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
+	if _, err := f.runErr(d); !errors.Is(err, ErrRetryLater) {
+		t.Fatalf("Run err = %v", err)
+	}
+	if got := deliveredIDs(t, f.sender); len(got) != 0 {
+		t.Fatalf("receipt sent for a failed delivery: %v", got)
+	}
+	// Daemon restart: a fresh Inbound over the same dedup store.
+	f.sender = &recordingSender{}
+	f.in = NewInbound(f.me, f.peers, f.dedup, f.prekeys, f.registry, f.sender, f.clock, nil)
+	f.run(t, d)
+	if got := f.handledIDs(); !slices.Equal(got, []string{id}) {
+		t.Fatalf("handled after restart = %v: the retried message was lost", got)
+	}
+	if got := deliveredIDs(t, f.sender); !slices.Equal(got, []string{id}) {
+		t.Fatalf("receipt after success = %v", got)
+	}
+}
+
+func TestInboundPlainHandlerErrorStillAckedAndConfirmed(t *testing.T) {
 	f := newInboundFixture(t)
 	id, raw := f.frameFrom(t, f.gpu, testEpoch, f.myPK)
 	f.failing[id] = errBoom
-	mb := f.run(t, transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw})
+	d := transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
+	mb := f.run(t, d)
 	if got := mb.ackedSeqs(); !slices.Equal(got, []uint64{1}) {
 		t.Fatalf("acks = %v", got)
 	}
-	if got := deliveredIDs(t, f.sender); len(got) != 0 {
-		t.Fatalf("confirmed an item the handler failed to store: %v", got)
+	// The message was received; the sender must stop resending it.
+	if got := deliveredIDs(t, f.sender); !slices.Equal(got, []string{id}) {
+		t.Fatalf("delivered receipt ids = %v", got)
+	}
+	f.run(t, d)
+	if n := len(f.handledIDs()); n != 0 {
+		t.Fatalf("non-retryable failure handled again on redelivery (%d)", n)
+	}
+}
+
+func TestInboundStalePrekeyReplyOncePerMessage(t *testing.T) {
+	f := newInboundFixture(t)
+	gone, err := keys.GeneratePrekey(testEpoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, raw := f.frameFrom(t, f.gpu, testEpoch, gone.Signed(f.me))
+	id2, raw2 := f.frameFrom(t, f.gpu, testEpoch, gone.Signed(f.me))
+	d := transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
+	f.run(t, d, d, transport.Delivery{Seq: 2, From: f.gpu.id.Public(), ID: id2, Frame: raw2})
+	f.run(t, d)
+	sent := f.sender.ofKind(core.KindControlStalePrekey)
+	if len(sent) != 2 {
+		t.Fatalf("stale_prekey replies = %d, want one per message ID", len(sent))
 	}
 }
 
