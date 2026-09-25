@@ -136,9 +136,13 @@ func (s *FileService) StopDownloads() {
 // Wait blocks until every running download has finished.
 func (s *FileService) Wait() { s.wg.Wait() }
 
-// List returns every file record.
+// List returns every file record without its key, so no API can leak file keys.
 func (s *FileService) List(ctx context.Context) ([]store.FileRecord, error) {
-	return s.d.Files.ListFiles(ctx)
+	recs, err := s.d.Files.ListFiles(ctx)
+	for i := range recs {
+		recs[i].Key = nil
+	}
+	return recs, err
 }
 
 // SendFile checks the path, encrypts and uploads it, and sends a file.offer.
@@ -270,8 +274,8 @@ func (s *FileService) handleOffer(ctx context.Context, peer store.Peer, env core
 	if err := checkGateDecision(ctx, decision, core.KindFileOffer, b.FileID); err != nil {
 		return err
 	}
-	if _, err := s.d.Files.GetFile(ctx, b.FileID); err == nil {
-		return nil // duplicate offer
+	if cur, err := s.d.Files.GetFile(ctx, b.FileID); err == nil {
+		return Retryable(s.redeliverOffer(ctx, peer, cur, env.ID))
 	} else if !errors.Is(err, core.ErrNotFound) {
 		return Retryable(err)
 	}
@@ -290,20 +294,20 @@ func (s *FileService) handleOffer(ctx context.Context, peer store.Peer, env core
 		if err := s.d.Files.PutFile(ctx, rec); err != nil {
 			return Retryable(err)
 		}
-		return s.notice(ctx, rec)
+		return Retryable(s.notice(ctx, rec))
 	case DecisionReject:
 		rec.State, rec.Reason = store.FileDeclined, "not permitted"
 		if err := s.d.Files.PutFile(ctx, rec); err != nil {
 			return Retryable(err)
 		}
-		return s.declined(ctx, peer, rec)
+		return Retryable(s.declined(ctx, peer, rec))
 	}
 	if err := s.admit(ctx, rec); err != nil {
 		rec.State, rec.Reason = store.FileDeclined, err.Error()
 		if perr := s.d.Files.PutFile(ctx, rec); perr != nil {
 			return Retryable(perr)
 		}
-		return s.declined(ctx, peer, rec)
+		return Retryable(s.declined(ctx, peer, rec))
 	}
 	rec.State = store.FileDownloading
 	if err := s.d.Files.PutFile(ctx, rec); err != nil {
@@ -311,6 +315,28 @@ func (s *FileService) handleOffer(ctx context.Context, peer store.Peer, env core
 	}
 	s.startDownload(rec.FileID)
 	return nil
+}
+
+// redeliverOffer handles a file.offer whose record already exists. When it is a
+// redelivery of the offer that created a held or declined record and the
+// earlier attempt failed before the inbox notice was written, the notice (and
+// for a decline, the note to the sender) is written now. Anything else is a
+// duplicate and ignored.
+func (s *FileService) redeliverOffer(ctx context.Context, peer store.Peer, cur store.FileRecord, msgID string) error {
+	if cur.Direction != store.TaskInbound || cur.Peer != peer.MachineID || cur.MsgID != msgID {
+		return nil
+	}
+	if cur.State != store.FileHeld && cur.State != store.FileDeclined {
+		return nil
+	}
+	done, err := s.d.Inbox.Delivered(ctx, msgID)
+	if err != nil || done {
+		return err
+	}
+	if cur.State == store.FileHeld {
+		return s.notice(ctx, cur)
+	}
+	return s.declined(ctx, peer, cur)
 }
 
 // Accept downloads a held file. It is a human-only action: unlocked must be
@@ -336,11 +362,19 @@ func (s *FileService) Accept(ctx context.Context, fileID string, unlocked bool) 
 	if s.d.Policy.Decide(peer.TrustIn, core.KindFileOffer) == DecisionReject {
 		return fmt.Errorf("%s is %s: %w", peer.Alias, peer.TrustIn, core.ErrNotPermitted)
 	}
-	if aerr := s.admit(ctx, rec); aerr != nil {
-		rec, err = s.d.Files.UpdateFile(ctx, fileID, func(f *store.FileRecord) error {
-			f.State, f.Reason = store.FileDeclined, aerr.Error()
+	// The state is checked again inside each update, so of two concurrent
+	// accepts exactly one moves the file on.
+	fromHeld := func(state store.FileState, reason string) func(f *store.FileRecord) error {
+		return func(f *store.FileRecord) error {
+			if f.State != store.FileHeld {
+				return fmt.Errorf("file %s is %s, not held: %w", fileID, f.State, core.ErrBadTransition)
+			}
+			f.State, f.Reason = state, reason
 			return nil
-		})
+		}
+	}
+	if aerr := s.admit(ctx, rec); aerr != nil {
+		rec, err = s.d.Files.UpdateFile(ctx, fileID, fromHeld(store.FileDeclined, aerr.Error()))
 		if err != nil {
 			return err
 		}
@@ -349,10 +383,7 @@ func (s *FileService) Accept(ctx context.Context, fileID string, unlocked bool) 
 		}
 		return aerr
 	}
-	if _, err := s.d.Files.UpdateFile(ctx, fileID, func(f *store.FileRecord) error {
-		f.State, f.Reason = store.FileDownloading, ""
-		return nil
-	}); err != nil {
+	if _, err := s.d.Files.UpdateFile(ctx, fileID, fromHeld(store.FileDownloading, "")); err != nil {
 		return err
 	}
 	_ = s.d.Audit.Record(audit.Event{Type: audit.EvFileAccept, Peer: rec.Peer, Alias: peer.Alias, ItemID: fileID, Hash: hex.EncodeToString(rec.SHA256)})
@@ -581,7 +612,7 @@ func (s *FileService) finish(ctx context.Context, rec store.FileRecord) {
 	if err := s.d.Blobs().Delete(ctx, rec.BlobID); err != nil {
 		s.d.Log.Warn("blob delete failed", "file_id", rec.FileID, "err", err)
 	}
-	rec, err := s.d.Files.UpdateFile(ctx, rec.FileID, func(f *store.FileRecord) error {
+	done, err := s.d.Files.UpdateFile(ctx, rec.FileID, func(f *store.FileRecord) error {
 		f.State, f.Reason = store.FileDone, ""
 		return nil
 	})
@@ -589,6 +620,7 @@ func (s *FileService) finish(ctx context.Context, rec store.FileRecord) {
 		s.d.Log.Error("file record update failed", "file_id", rec.FileID, "err", err)
 		return
 	}
+	rec = done
 	alias := s.aliasOf(ctx, rec.Peer)
 	_ = s.d.Audit.Record(audit.Event{
 		Type: audit.EvFileIn, Peer: rec.Peer, Alias: alias, ItemID: rec.FileID, Hash: hex.EncodeToString(rec.SHA256),
