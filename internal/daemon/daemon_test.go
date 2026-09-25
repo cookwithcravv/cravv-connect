@@ -600,3 +600,20 @@ func TestRetryableInboundFailureReconnectsForRedelivery(t *testing.T) {
 		return calls == 2
 	})
 }
+
+func TestCloseAndResetStopPairing(t *testing.T) {
+	ctx := context.Background()
+	d := d2NewDaemon(t, t.TempDir(), &d2Relay{})
+	old := d.Pairing()
+	if err := d.ResetIdentity(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := old.Start(ctx); !errors.Is(err, ErrPairingClosed) {
+		t.Fatalf("old pairing service after reset: %v", err)
+	}
+	cur := d.Pairing()
+	d.Close()
+	if _, _, err := cur.Start(ctx); !errors.Is(err, ErrPairingClosed) {
+		t.Fatalf("pairing after Close: %v", err)
+	}
+}

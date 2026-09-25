@@ -29,6 +29,8 @@ var (
 	ErrPairingInProgress = errors.New("pairing still in progress")
 	// ErrOfflineForPairing is returned by Start when there is no live registered mailbox.
 	ErrOfflineForPairing = errors.New("not connected to the relay")
+	// ErrPairingClosed is returned by Start after Close (daemon shutdown or identity reset).
+	ErrPairingClosed = errors.New("pairing service stopped")
 )
 
 // pairAAD binds the sealed messages to this protocol; pairAck is the final confirmation.
@@ -61,7 +63,7 @@ type pairPayload struct {
 
 type pendingPair struct {
 	role     string // "creator" | "joiner"
-	expires  int64  // unix ms, from the injected clock
+	expires  int64  // unix ms, from the injected clock; guarded by PairingService.mu
 	done     chan struct{}
 	proposal Proposal
 	peer     pairPayload
@@ -82,6 +84,10 @@ type PairingService struct {
 	clock     core.Clock
 	audit     audit.Logger
 
+	// base bounds background exchanges to the service's lifetime; Close cancels it.
+	base context.Context
+	stop context.CancelFunc
+
 	mu      sync.Mutex
 	pending map[string]*pendingPair
 }
@@ -90,16 +96,24 @@ type PairingService struct {
 func NewPairingService(id *keys.Identity, rooms transport.Rooms, mailboxes MailboxProvider, pf pake.Factory,
 	peers store.PeerStore, prekeys PrekeyProvider, registrar Registrar, cfg PairingConfig,
 	clock core.Clock, lg audit.Logger) *PairingService {
+	base, stop := context.WithCancel(context.Background())
 	return &PairingService{
 		identity: id, rooms: rooms, mailboxes: mailboxes, pake: pf, peers: peers, prekeys: prekeys,
 		registrar: registrar, cfg: cfg, clock: clock, audit: lg,
+		base: base, stop: stop,
 		pending: make(map[string]*pendingPair),
 	}
 }
 
+// Close stops every background exchange (their Await calls fail) and makes Start refuse.
+func (s *PairingService) Close() { s.stop() }
+
 // Start creates a room and an invite and returns the bind code. The exchange runs in the
 // background until a joiner arrives or the room lifetime ends; Await waits for it.
 func (s *PairingService) Start(ctx context.Context) (pendingID, code string, err error) {
+	if s.base.Err() != nil {
+		return "", "", ErrPairingClosed
+	}
 	mb, ok := s.mailboxes.Mailbox()
 	if !ok {
 		return "", "", ErrOfflineForPairing
@@ -128,8 +142,8 @@ func (s *PairingService) Start(ctx context.Context) (pendingID, code string, err
 	p := s.newPending("creator")
 	id := p.proposal.PendingID
 	go func() {
-		// Detached from the IPC call; bounded by the room lifetime.
-		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), core.RoomTTL)
+		// Detached from the IPC call; bounded by the room lifetime and the service's.
+		rctx, cancel := context.WithTimeout(s.base, core.RoomTTL)
 		defer cancel()
 		defer room.Close()
 		if err := room.WaitPeer(rctx); err != nil {
@@ -268,10 +282,7 @@ func (s *PairingService) exchange(ctx context.Context, room transport.Room, side
 		}
 		return pairPayload{}, fmt.Errorf("%w (%s: %v)", ErrPairingFailed, step, err)
 	}
-	peerSide := pake.SideB
-	if side == pake.SideB {
-		peerSide = pake.SideA
-	}
+	peerSide := side.Other()
 	ex, err := s.pake.New([]byte(code), side)
 	if err != nil {
 		return fail("pake", err)
@@ -356,7 +367,7 @@ func (s *PairingService) validatePeer(p pairPayload) error {
 	if err := keys.SignedPrekeyFromWire(p.Prekey).Verify(p.IK); err != nil {
 		return err
 	}
-	return nil
+	return validRelayURL(p.RelayURL)
 }
 
 func (s *PairingService) ownPayload(ctx context.Context) (pairPayload, error) {
@@ -391,8 +402,13 @@ func (s *PairingService) newPending(role string) *pendingPair {
 	return p
 }
 
+// complete records the outcome. A successful exchange gets a fresh RoomTTL for the human
+// to finalize, however long the joiner took to arrive.
 func (s *PairingService) complete(p *pendingPair, peer pairPayload, err error) {
 	if err == nil {
+		s.mu.Lock()
+		p.expires = s.clock.Now().Add(core.RoomTTL).UnixMilli()
+		s.mu.Unlock()
 		id := keys.MachineIDOf(peer.IK)
 		name := SanitizeAlias(peer.Name)
 		if name == "" {
@@ -417,6 +433,8 @@ func (s *PairingService) lookup(id string) (*pendingPair, error) {
 }
 
 func (s *PairingService) expired(p *pendingPair) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.clock.Now().UnixMilli() > p.expires
 }
 

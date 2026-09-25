@@ -384,7 +384,7 @@ func (d *Daemon) ResetIdentity(ctx context.Context) error {
 	_ = d.audit.Record(audit.Event{Type: audit.EvResetIdentity, Detail: map[string]any{
 		"old_machine_id": string(old), "new_machine_id": string(id.MachineID()),
 	}})
-	d.svc.Store(d.build(id))
+	d.svc.Swap(d.build(id)).pairing.Close()
 	d.mu.Lock()
 	cancel := d.cancelRun
 	d.mu.Unlock()
@@ -394,8 +394,11 @@ func (d *Daemon) ResetIdentity(ctx context.Context) error {
 	return nil
 }
 
-// Close releases the store.
-func (d *Daemon) Close() error { return d.store.Close() }
+// Close stops background pairing exchanges and releases the store.
+func (d *Daemon) Close() error {
+	d.svc.Load().pairing.Close()
+	return d.store.Close()
+}
 
 // Accessors used by the API layer (internal/app adapts them to api ports).
 

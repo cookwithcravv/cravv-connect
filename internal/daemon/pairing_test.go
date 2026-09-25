@@ -397,3 +397,66 @@ func TestPairingFinalizeValidation(t *testing.T) {
 		t.Fatalf("Await without a joiner err = %v", err)
 	}
 }
+
+func TestPairingRejectsBadPeerRelayURL(t *testing.T) {
+	ctx := context.Background()
+	rooms := newMemRooms()
+	a := newPairSide(t, rooms, "a", true)
+	b := newPairSide(t, rooms, "b", false)
+	b.svc.cfg.RelayURL = "http://relay.attacker.example" // plaintext relay for a remote host
+	pendingA, code, err := a.svc.Start(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = b.svc.Join(ctx, code)
+	if _, err := a.svc.Await(ctx, pendingA); !errors.Is(err, ErrPairingFailed) {
+		t.Fatalf("creator accepted a plaintext remote relay URL: %v", err)
+	}
+}
+
+func TestPairingExpiryStartsWhenExchangeCompletes(t *testing.T) {
+	ctx := context.Background()
+	rooms := newMemRooms()
+	a := newPairSide(t, rooms, "a", true)
+	b := newPairSide(t, rooms, "b", false)
+	pendingA, code, err := a.svc.Start(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The joiner shows up late in the room lifetime.
+	a.clock.Advance(core.RoomTTL - time.Minute)
+	prop, err := b.svc.Join(ctx, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.svc.Await(ctx, pendingA); err != nil {
+		t.Fatal(err)
+	}
+	// The human takes a few minutes to choose an alias: still valid.
+	a.clock.Advance(3 * time.Minute)
+	b.clock.Advance(3 * time.Minute)
+	if _, err := a.svc.Finalize(ctx, pendingA, "b", core.TrustAskFirst); err != nil {
+		t.Fatalf("creator finalize: %v", err)
+	}
+	if _, err := b.svc.Finalize(ctx, prop.PendingID, "a", core.TrustAskFirst); err != nil {
+		t.Fatalf("joiner finalize: %v", err)
+	}
+}
+
+func TestPairingCloseStopsWaitingCreator(t *testing.T) {
+	ctx := context.Background()
+	a := newPairSide(t, newMemRooms(), "a", true)
+	pendingA, _, err := a.svc.Start(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.svc.Close()
+	awaitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if _, err := a.svc.Await(awaitCtx, pendingA); !errors.Is(err, ErrPairingFailed) {
+		t.Fatalf("Await after Close err = %v, want ErrPairingFailed", err)
+	}
+	if _, _, err := a.svc.Start(ctx); err == nil {
+		t.Fatal("Start after Close succeeded")
+	}
+}
