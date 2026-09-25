@@ -13,6 +13,17 @@ import (
 // keys.Identity must satisfy Signer so the daemon can dial with it directly.
 var _ transport.Signer = (*keys.Identity)(nil)
 
+// Mailbox is exactly FrameConn plus RelayControl, so code that needs only one half
+// can depend on the narrower interface and still accept any Mailbox.
+var (
+	_ transport.FrameConn    = transport.Mailbox(nil)
+	_ transport.RelayControl = transport.Mailbox(nil)
+	_ transport.Mailbox      = struct {
+		transport.FrameConn
+		transport.RelayControl
+	}{}
+)
+
 func TestSendStatusMatchesWire(t *testing.T) {
 	pairs := map[transport.SendStatus]string{
 		transport.SendQueued:         relayproto.StatusQueued,

@@ -34,18 +34,29 @@ type Delivery struct {
 // Credentials are used only when the relay says the mailbox is not registered yet.
 type Credentials struct{ AdminToken, Invite string }
 
-// Mailbox is one authenticated, live connection to the caller's relay mailbox.
-type Mailbox interface {
+// FrameConn is the frame-carrying half of a mailbox connection: what a component
+// that only moves peer frames needs.
+type FrameConn interface {
 	Send(ctx context.Context, to core.MachineID, id string, frame []byte) (SendStatus, error)
 	Deliveries() <-chan Delivery // closed when the connection ends
 	Ack(ctx context.Context, seq uint64) error
+	Done() <-chan struct{}
+	Err() error // why Done closed
+	Close() error
+}
+
+// RelayControl is the relay-management half of a mailbox connection.
+type RelayControl interface {
 	Allow(ctx context.Context, ik ed25519.PublicKey) error
 	Deny(ctx context.Context, ik ed25519.PublicKey) error
 	RequestInvite(ctx context.Context) (string, error)
 	CreateRoom(ctx context.Context) (nameplate, creatorToken string, err error)
-	Done() <-chan struct{}
-	Err() error // why Done closed
-	Close() error
+}
+
+// Mailbox is one authenticated, live connection to the caller's relay mailbox.
+type Mailbox interface {
+	FrameConn
+	RelayControl
 }
 
 // Dialer opens a Mailbox. It does not reconnect; the caller owns reconnection.
