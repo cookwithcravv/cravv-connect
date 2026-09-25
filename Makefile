@@ -20,3 +20,12 @@ relay-test:
 
 clean:
 	rm -rf bin
+
+.PHONY: relay-cf-test conformance-cf
+
+relay-cf-test:
+	cd relay-cf && npm ci && npm run typecheck && npm test
+
+conformance-cf:
+	cd relay-cf && npm ci
+	relay-cf/scripts/conformance.sh
