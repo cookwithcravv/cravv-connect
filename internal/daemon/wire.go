@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/cravv/cravv-connect/internal/audit"
@@ -46,8 +47,20 @@ func New(opts Options) (*Daemon, error) {
 	}
 	// A verifier that accepts any password (for example a PAM stack ending
 	// in pam_permit) would turn every password gate into a no-op: refuse.
-	if err := auth.SelfTest(opts.Verifier, opts.Username); err != nil {
-		return nil, fmt.Errorf("refusing to start: %w", err)
+	// The self-test is a failed login against the OS account (pam_faillock
+	// counts it), so it runs once per PAM service and the result is kept in
+	// the store. A fresh install runs it before the store is created.
+	serviceID := selfTestIdentity(opts.Config)
+	_, statErr := os.Stat(opts.Paths.DB)
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return nil, statErr
+	}
+	tested := false
+	if statErr != nil { // no store yet
+		if err := selfTest(opts); err != nil {
+			return nil, err
+		}
+		tested = true
 	}
 	if err := os.MkdirAll(opts.Paths.Files, 0o700); err != nil {
 		return nil, err
@@ -56,12 +69,51 @@ func New(opts Options) (*Daemon, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := recordSelfTest(db, opts, serviceID, tested); err != nil {
+		db.Close()
+		return nil, err
+	}
 	d, err := assemble(opts, db)
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
 	return d, nil
+}
+
+// selfTestIdentity names the password stack the self-test ran against.
+func selfTestIdentity(cfg config.Config) string {
+	svc := cfg.PAMService
+	if svc == "" {
+		svc = auth.DefaultPAMService()
+	}
+	return runtime.GOOS + ":" + svc
+}
+
+func selfTest(opts Options) error {
+	if err := auth.SelfTest(opts.Verifier, opts.Username); err != nil {
+		return fmt.Errorf("refusing to start: %w", err)
+	}
+	return nil
+}
+
+// recordSelfTest runs the self-test unless it already passed for serviceID
+// (or just ran), and stores serviceID once it has passed.
+func recordSelfTest(db store.SettingsStore, opts Options, serviceID string, tested bool) error {
+	ctx := context.Background()
+	v, ok, err := db.GetSetting(ctx, SettingAuthSelfTestOK)
+	if err != nil {
+		return err
+	}
+	if ok && v == serviceID {
+		return nil
+	}
+	if !tested {
+		if err := selfTest(opts); err != nil {
+			return err
+		}
+	}
+	return db.SetSetting(ctx, SettingAuthSelfTestOK, serviceID)
 }
 
 func normalize(o *Options) error {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cravv/cravv-connect/internal/auth"
@@ -54,5 +55,64 @@ func TestNewRefusesVerifierThatAcceptsAnyPassword(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "store.db")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("store opened before the verifier self-test: %v", err)
+	}
+}
+
+// d2CountingVerifier accepts "pw" and counts every Verify call.
+type d2CountingVerifier struct{ calls atomic.Int32 }
+
+func (v *d2CountingVerifier) Verify(user, password string) error {
+	v.calls.Add(1)
+	return auth.Fake{Password: "pw"}.Verify(user, password)
+}
+
+// On Linux with pam_faillock every self-test is a failed login against the OS
+// account, so it runs once per PAM service, not on every daemon start.
+func TestSelfTestRunsOncePerPAMService(t *testing.T) {
+	dir := t.TempDir()
+	v := &d2CountingVerifier{}
+	open := func(service string) {
+		t.Helper()
+		opts := d2Options(dir, &d2Relay{})
+		opts.Verifier = v
+		opts.Config.PAMService = service
+		d, err := New(opts)
+		if err != nil {
+			t.Fatalf("New(%q): %v", service, err)
+		}
+		d.Close()
+	}
+	open("login")
+	if n := v.calls.Load(); n != 1 {
+		t.Fatalf("first start: %d verifier calls, want 1", n)
+	}
+	open("login")
+	if n := v.calls.Load(); n != 1 {
+		t.Fatalf("second start re-ran the self-test (%d calls)", n)
+	}
+	open("sshd")
+	if n := v.calls.Load(); n != 2 {
+		t.Fatalf("changed PAM service: %d calls, want 2", n)
+	}
+	open("sshd")
+	if n := v.calls.Load(); n != 2 {
+		t.Fatalf("restart after service change: %d calls, want 2", n)
+	}
+}
+
+// A store that exists but was never self-tested (or for another service) is
+// still checked, and the daemon refuses to start.
+func TestSelfTestStillRefusesOnExistingStore(t *testing.T) {
+	dir := t.TempDir()
+	d := d2NewDaemon(t, dir, &d2Relay{})
+	d.Close()
+	opts := d2Options(dir, &d2Relay{})
+	opts.Verifier = d2AcceptAll{}
+	opts.Config.PAMService = "other"
+	if d, err := New(opts); !errors.Is(err, auth.ErrAcceptsAnyPassword) {
+		if d != nil {
+			d.Close()
+		}
+		t.Fatalf("New err = %v, want ErrAcceptsAnyPassword", err)
 	}
 }

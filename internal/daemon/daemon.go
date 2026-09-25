@@ -26,6 +26,9 @@ const (
 	SettingRelayInvite = "relay_invite"
 	// SettingRelayRegistered is "1" once this identity has a relay mailbox.
 	SettingRelayRegistered = "relay_registered"
+	// SettingAuthSelfTestOK holds GOOS:PAM-service once the password verifier
+	// self-test passed for that service; it runs again when the service changes.
+	SettingAuthSelfTestOK = "auth_selftest_ok"
 )
 
 // RelayFactory builds the relay transports. *relayclient.Client implements it.
