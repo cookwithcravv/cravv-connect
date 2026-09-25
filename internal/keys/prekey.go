@@ -67,10 +67,19 @@ func (s SignedPrekey) signingBytes() []byte {
 }
 
 // Verify checks the signature against the owner's identity key and that Pub
-// is a valid X25519 public key.
+// is a usable X25519 public key: 32 bytes, not all zero, and not a
+// low-order point (ECDH with a fresh key must succeed).
 func (s SignedPrekey) Verify(ik ed25519.PublicKey) error {
-	if _, err := ecdh.X25519().NewPublicKey(s.Pub); err != nil {
+	pub, err := ecdh.X25519().NewPublicKey(s.Pub)
+	if err != nil || isZero(s.Pub) {
 		return fmt.Errorf("%w: invalid public key", ErrBadPrekeySignature)
+	}
+	probe, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		return fmt.Errorf("keys: probe key: %w", err)
+	}
+	if _, err := probe.ECDH(pub); err != nil {
+		return fmt.Errorf("%w: low-order public key", ErrBadPrekeySignature)
 	}
 	if s.ID == "" || !Verify(ik, s.signingBytes(), s.Sig) {
 		return ErrBadPrekeySignature
@@ -86,4 +95,12 @@ func (s SignedPrekey) Wire() core.SignedPrekeyWire {
 // SignedPrekeyFromWire converts back from the core mirror type.
 func SignedPrekeyFromWire(w core.SignedPrekeyWire) SignedPrekey {
 	return SignedPrekey{ID: w.ID, Pub: w.Pub, CreatedAt: w.CreatedAt, Sig: w.Sig}
+}
+
+func isZero(b []byte) bool {
+	var acc byte
+	for _, c := range b {
+		acc |= c
+	}
+	return acc == 0
 }

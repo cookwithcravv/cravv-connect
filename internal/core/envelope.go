@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // EnvelopeVersion is the peer-v1 envelope version.
@@ -31,16 +32,22 @@ func NewEnvelope(clock Clock, from, to MachineID, kind Kind, body any) (Envelope
 	if err != nil {
 		return Envelope{}, fmt.Errorf("core: marshal %s body: %w", kind, err)
 	}
+	now := fixedClock(clock.Now()) // read the clock once so ID and TS agree
 	return Envelope{
 		V:           EnvelopeVersion,
-		ID:          NewID(),
-		TS:          clock.Now().UnixMilli(),
+		ID:          NewIDAt(now),
+		TS:          time.Time(now).UnixMilli(),
 		FromMachine: from,
 		ToMachine:   to,
 		Kind:        kind,
 		Body:        raw,
 	}, nil
 }
+
+// fixedClock always returns the same instant.
+type fixedClock time.Time
+
+func (c fixedClock) Now() time.Time { return time.Time(c) }
 
 type ChatBody struct {
 	Text string `json:"text"`

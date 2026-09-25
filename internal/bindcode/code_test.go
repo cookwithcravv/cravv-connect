@@ -102,19 +102,31 @@ func TestParseRejects(t *testing.T) {
 	inputs := []string{
 		"",
 		"CRAVV",
-		"7K3F-9QXM-TR2A",          // no prefix
-		"CRAV-7K3F-9QXM-TR2A",     // wrong prefix
-		"XRAVV-7K3F-9QXM-TR2A",    // wrong prefix
-		"CRAVV-7K3F-9QXM-TR2",     // too short
-		"CRAVV-7K3F-9QXM-TR2AB",   // too long
-		"CRAVV-7K3F-9QXM-TR2U",    // U excluded
-		"CRAVV-7K3F-9QXM-TR2*",    // invalid char
-		"CRAVV-7K3F_9QXM-TR2A",    // underscore
-		"CRAVV-7K3F-9QXM-TR2A-00", // extra group
+		"7K3F-9QXM-TR2A",             // no prefix
+		"CRAV-7K3F-9QXM-TR2A",        // wrong prefix
+		"XRAVV-7K3F-9QXM-TR2A",       // wrong prefix
+		"CRAVV-7K3F-9QXM-TR2",        // too short
+		"CRAVV-7K3F-9QXM-TR2AB",      // too long
+		"CRAVV-7K3F-9QXM-TR2U",       // U excluded
+		"CRAVV-7K3F-9QXM-TR2*",       // invalid char
+		"CRAVV-7K3F_9QXM-TR2A",       // underscore
+		"CRAVV-7K3F-9QXM-TR2A-00",    // extra group
+		"CRAVV-7K3F-9QXM-TR\u0131A",  // dotless i upper-cases to I
+		"CRAVV-7K3F-9QXM-TR2\u017f",  // long s upper-cases to S
+		"\u0131CRAVV-7K3F-9QXM-TR2A", // non-ASCII outside the body
+		"CRAVV-7K3F-9QXM-TR2A\u00e9", // any byte >= 0x80
 	}
 	for _, in := range inputs {
 		if _, err := Parse(in); !errors.Is(err, ErrInvalid) {
 			t.Errorf("Parse(%q) = %v, want ErrInvalid", in, err)
+		}
+	}
+}
+
+func TestZeroCodeStringDoesNotPanic(t *testing.T) {
+	for _, c := range []Code{{}, {Nameplate: "7K3F", Secret: "SHORT"}, {Nameplate: "7K", Secret: "9QXMTR2A"}} {
+		if got := c.String(); got != "CRAVV-invalid" {
+			t.Errorf("%+v.String() = %q, want CRAVV-invalid", c, got)
 		}
 	}
 }

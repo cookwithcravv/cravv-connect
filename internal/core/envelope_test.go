@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -105,5 +106,17 @@ func TestEnvelopeJSONFieldNames(t *testing.T) {
 	raw, _ = json.Marshal(env)
 	if strings.Contains(string(raw), "session") {
 		t.Fatalf("empty sessions must be omitted: %s", raw)
+	}
+}
+
+func TestNewEnvelopeIDMatchesTS(t *testing.T) {
+	at := time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC)
+	env, err := NewEnvelope(NewFakeClock(at), "a", "b", KindChat, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := newIDAt(time.UnixMilli(env.TS), bytes.NewReader(make([]byte, 10)))
+	if env.ID[:9] != want[:9] {
+		t.Fatalf("envelope ID %q does not encode TS %d (want prefix %q)", env.ID, env.TS, want[:9])
 	}
 }

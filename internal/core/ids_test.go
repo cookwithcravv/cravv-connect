@@ -75,3 +75,19 @@ func TestNewIDRandomFailure(t *testing.T) {
 		t.Fatal("expected an error when randomness is unavailable")
 	}
 }
+
+func TestNewIDAtUsesClock(t *testing.T) {
+	at := time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC)
+	want, err := newIDAt(at, bytes.NewReader(make([]byte, 10)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := NewIDAt(NewFakeClock(at))
+	if !idPattern.MatchString(id) {
+		t.Fatalf("NewIDAt = %q", id)
+	}
+	// The first 9 characters (45 bits) are pure timestamp.
+	if id[:9] != want[:9] {
+		t.Fatalf("NewIDAt prefix = %q, want %q", id[:9], want[:9])
+	}
+}

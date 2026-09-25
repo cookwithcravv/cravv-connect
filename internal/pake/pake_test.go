@@ -2,8 +2,13 @@ package pake
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
+	"io"
 	"testing"
+
+	"golang.org/x/crypto/hkdf"
 )
 
 func run(t *testing.T, pwA, pwB string) (keyA, keyB []byte) {
@@ -142,5 +147,18 @@ func TestNewValidation(t *testing.T) {
 	m[1] ^= 1
 	if bytes.Equal(m, a.Message()) {
 		t.Fatal("Message() must return a copy")
+	}
+}
+
+func TestConfirmTagDomainSeparated(t *testing.T) {
+	key := bytes.Repeat([]byte{7}, 32)
+	sub := make([]byte, 32)
+	if _, err := io.ReadFull(hkdf.New(sha256.New, key, nil, []byte("cravv-connect/pair-v1/confirm")), sub); err != nil {
+		t.Fatal(err)
+	}
+	m := hmac.New(sha256.New, sub)
+	m.Write([]byte{'A'})
+	if !bytes.Equal(ConfirmTag(key, SideA), m.Sum(nil)) {
+		t.Fatal(`ConfirmTag must use HKDF info "cravv-connect/pair-v1/confirm"`)
 	}
 }

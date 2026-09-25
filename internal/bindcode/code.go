@@ -53,14 +53,25 @@ func randomSecret() (string, error) {
 	return string(out), nil
 }
 
-// String renders "CRAVV-NNNN-SSSS-SSSS".
+// String renders "CRAVV-NNNN-SSSS-SSSS", or "CRAVV-invalid" for a Code
+// whose fields have the wrong lengths (such as the zero Code).
 func (c Code) String() string {
+	if len(c.Nameplate) != NameplateLen || len(c.Secret) != SecretLen {
+		return prefix + "-invalid"
+	}
 	return prefix + "-" + c.Nameplate + "-" + c.Secret[:4] + "-" + c.Secret[4:]
 }
 
 // Parse accepts a code in any case, with or without spaces and hyphens,
-// reading O as 0 and I or L as 1. U and other characters are refused.
+// reading O as 0 and I or L as 1. U and other characters are refused, as is
+// any non-ASCII byte (checked before upper-casing, since Unicode case mapping
+// turns letters such as U+0131 and U+017F into ASCII I and S).
 func Parse(s string) (Code, error) {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return Code{}, ErrInvalid
+		}
+	}
 	s = strings.ToUpper(strings.Join(strings.Fields(s), ""))
 	if !strings.HasPrefix(s, prefix) {
 		return Code{}, ErrInvalid
@@ -75,8 +86,15 @@ func Parse(s string) (Code, error) {
 // normalize upper-cases s, maps O to 0 and I/L to 1, and reports whether
 // every character is then in Alphabet.
 func normalize(s string) (string, bool) {
-	b := []byte(strings.ToUpper(s))
+	b := []byte(s)
 	for i, c := range b {
+		if c >= 0x80 {
+			return "", false
+		}
+		if 'a' <= c && c <= 'z' {
+			c -= 'a' - 'A'
+			b[i] = c
+		}
 		switch c {
 		case 'O':
 			b[i] = '0'

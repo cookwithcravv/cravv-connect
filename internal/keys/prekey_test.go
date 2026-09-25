@@ -2,6 +2,7 @@ package keys
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
@@ -104,4 +105,31 @@ func flip(b []byte) []byte {
 	c := append([]byte(nil), b...)
 	c[0] ^= 1
 	return c
+}
+
+func TestSignedPrekeyRejectsLowOrderPub(t *testing.T) {
+	id, _ := GenerateIdentity()
+	lowOrder := map[string][]byte{
+		"all zero": make([]byte, 32),
+		"u=1":      append([]byte{1}, make([]byte, 31)...),
+		"order 8":  mustHex(t, "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800"),
+		"order 8b": mustHex(t, "5f9c95bca3508c24b1d0b1559c83ef5b04445cc4581c8e86d8224eddd09f1157"),
+		"p-1":      mustHex(t, "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"),
+	}
+	for name, pub := range lowOrder {
+		s := SignedPrekey{ID: "PK1", Pub: pub, CreatedAt: 1}
+		s.Sig = id.Sign(s.signingBytes()) // correctly signed, but a useless key
+		if err := s.Verify(id.Public()); !errors.Is(err, ErrBadPrekeySignature) {
+			t.Errorf("%s: Verify = %v, want ErrBadPrekeySignature", name, err)
+		}
+	}
+}
+
+func mustHex(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

@@ -16,8 +16,12 @@ const IDLen = 26
 // NewID returns a 26-character, time-sortable identifier: 48 bits of unix
 // milliseconds followed by 80 random bits, encoded as upper-case Crockford
 // base32. IDs created in later milliseconds sort after earlier ones.
-func NewID() string {
-	id, err := newIDAt(SystemClock{}.Now(), rand.Reader)
+func NewID() string { return NewIDAt(SystemClock{}) }
+
+// NewIDAt is NewID with the timestamp taken from clock, so an ID made for
+// an envelope encodes the same millisecond as the envelope's TS.
+func NewIDAt(clock Clock) string {
+	id, err := newIDAt(clock.Now(), rand.Reader)
 	if err != nil {
 		// crypto/rand.Reader never returns an error on supported platforms.
 		panic("core: crypto/rand failed: " + err.Error())

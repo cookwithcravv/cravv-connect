@@ -17,10 +17,10 @@ func derive(key []byte, info string) []byte {
 	return out
 }
 
-// ConfirmTag is HMAC-SHA256(HKDF(key, "confirm"), "A" or "B"). Each side
-// sends the tag for its own side.
+// ConfirmTag is HMAC-SHA256(HKDF(key, "cravv-connect/pair-v1/confirm"),
+// "A" or "B"). Each side sends the tag for its own side.
 func ConfirmTag(key []byte, side Side) []byte {
-	m := hmac.New(sha256.New, derive(key, "confirm"))
+	m := hmac.New(sha256.New, derive(key, "cravv-connect/pair-v1/confirm"))
 	m.Write([]byte{sideByte(side)})
 	return m.Sum(nil)
 }

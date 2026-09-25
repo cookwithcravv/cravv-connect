@@ -19,6 +19,13 @@ var ErrBadMessage = errors.New("pake: malformed peer message")
 
 // SPAKE2 implements Factory with gospake2's Ed25519 group (the variant
 // magic-wormhole and python-spake2 use).
+//
+// There are no cross-implementation test vectors (for example against
+// python-spake2): gospake2 draws its scalar from crypto/rand internally and
+// offers no way to inject randomness, so a deterministic transcript cannot be
+// reproduced. Wire compatibility is instead pinned by the exact gospake2
+// version in go.mod; upgrading it is a protocol change and must be checked
+// against a live peer.
 type SPAKE2 struct{}
 
 // New starts one side of the exchange.
