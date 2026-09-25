@@ -33,9 +33,12 @@ const (
 
 var errDiskFull = errors.New("not enough disk space")
 
-// OutboundChecker validates a path a session wants to send. Implemented by *AllowPaths.
+// OutboundChecker validates a path a session wants to send and opens it.
+// The returned file is the very file the checks approved (no symlink swap,
+// a single hard link); info comes from fstat and the caller reads at most
+// info.Size() bytes and closes the file. Implemented by *AllowPaths.
 type OutboundChecker interface {
-	Check(ctx context.Context, projectDir, path string) (string, os.FileInfo, error)
+	Open(ctx context.Context, projectDir, path string) (*os.File, os.FileInfo, error)
 }
 
 // FileDeps are the FileService collaborators.
@@ -111,10 +114,12 @@ func (s *FileService) List(ctx context.Context) ([]store.FileRecord, error) {
 
 // SendFile checks the path, encrypts and uploads it, and sends a file.offer.
 func (s *FileService) SendFile(ctx context.Context, to core.MachineID, projectDir, path, taskID string) (core.FileRef, error) {
-	abs, info, err := s.d.Guard.Check(ctx, projectDir, path)
+	f, info, err := s.d.Guard.Open(ctx, projectDir, path)
 	if err != nil {
 		return core.FileRef{}, err
 	}
+	defer f.Close()
+	abs := f.Name()
 	peer, err := s.d.Peers.GetPeer(ctx, to)
 	if err != nil {
 		return core.FileRef{}, err
@@ -138,7 +143,7 @@ func (s *FileService) SendFile(ctx context.Context, to core.MachineID, projectDi
 	if err := s.d.Files.PutFile(ctx, rec); err != nil {
 		return core.FileRef{}, err
 	}
-	blobID, sum, err := s.upload(ctx, peer, rec, key)
+	blobID, sum, err := s.upload(ctx, peer, rec, key, f)
 	if err != nil {
 		s.markOutFailed(ctx, rec.FileID, err)
 		return core.FileRef{}, err
@@ -165,12 +170,10 @@ func (s *FileService) SendFile(ctx context.Context, to core.MachineID, projectDi
 	return core.FileRef{FileID: rec.FileID, Name: rec.Name, Size: size}, nil
 }
 
-func (s *FileService) upload(ctx context.Context, peer store.Peer, rec store.FileRecord, key []byte) (string, []byte, error) {
-	f, err := os.Open(rec.LocalPath)
-	if err != nil {
-		return "", nil, err
-	}
-	defer f.Close()
+// upload streams at most rec.Size bytes of f, which the guard opened and
+// fstat'ed, so a file that grows is caught by a second fstat, not by reading on.
+func (s *FileService) upload(ctx context.Context, peer store.Peer, rec store.FileRecord, key []byte, f *os.File) (string, []byte, error) {
+	r := io.LimitReader(f, rec.Size)
 	blobs := s.d.Blobs()
 	blobID, err := blobs.Create(ctx, peer.IK, rec.Size, rec.Chunks)
 	if err != nil {
@@ -180,7 +183,7 @@ func (s *FileService) upload(ctx context.Context, peer store.Peer, rec store.Fil
 	buf := make([]byte, core.FileChunkBytes)
 	for i := uint32(0); i < rec.Chunks; i++ {
 		want := chunkLen(rec.Size, i)
-		if _, err := io.ReadFull(f, buf[:want]); err != nil {
+		if _, err := io.ReadFull(r, buf[:want]); err != nil {
 			return "", nil, fmt.Errorf("file changed while sending: %w", err)
 		}
 		h.Write(buf[:want])
@@ -192,8 +195,8 @@ func (s *FileService) upload(ctx context.Context, peer store.Peer, rec store.Fil
 			return "", nil, err
 		}
 	}
-	if n, _ := f.Read(buf[:1]); n > 0 {
-		return "", nil, errors.New("file changed while sending: it grew")
+	if fi, err := f.Stat(); err != nil || fi.Size() != rec.Size {
+		return "", nil, errors.New("file changed while sending: its size changed")
 	}
 	return blobID, h.Sum(nil), nil
 }

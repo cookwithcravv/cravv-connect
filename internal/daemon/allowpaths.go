@@ -90,3 +90,14 @@ func (a *AllowPaths) Check(ctx context.Context, projectDir, path string) (string
 	}
 	return pathguard.NewOutbound(roots).Check(projectDir, path)
 }
+
+// Open applies the same rules as Check and opens the approved file without
+// following symlinks, refusing a file with more than one hard link. The
+// caller reads at most info.Size() bytes and closes the file.
+func (a *AllowPaths) Open(ctx context.Context, projectDir, path string) (*os.File, os.FileInfo, error) {
+	roots, err := a.List(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return pathguard.NewOutbound(roots).Open(projectDir, path)
+}

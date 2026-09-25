@@ -222,6 +222,33 @@ func TestSendFileRefusesSecrets(t *testing.T) {
 	}
 }
 
+// A hard link inside the project to a file stored elsewhere passes the path
+// checks but must not be sent: the guard opens the file and refuses Nlink > 1.
+func TestSendFileRefusesHardlinkedSecret(t *testing.T) {
+	ctx := context.Background()
+	e := d2FileSvc(t, 0)
+	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
+	secret := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(secret, []byte("PRIVATE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(secret, filepath.Join(e.project, "notes.txt")); err != nil {
+		t.Skipf("hard links unsupported here: %v", err)
+	}
+	if _, err := e.files.SendFile(ctx, peer.MachineID, e.project, "notes.txt", ""); !errors.Is(err, core.ErrPathRefused) {
+		t.Fatalf("SendFile(hard link) err = %v, want ErrPathRefused", err)
+	}
+	if n := len(e.te.sender.ofKind(core.KindFileOffer)); n != 0 {
+		t.Fatalf("%d offers sent for a refused file", n)
+	}
+	if recs, _ := e.files.List(ctx); len(recs) != 0 {
+		t.Fatalf("records for a refused file: %+v", recs)
+	}
+	if len(e.blobs.blobs) != 0 {
+		t.Fatal("refused file was uploaded")
+	}
+}
+
 func TestReceiveFileRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	e := d2FileSvc(t, 0)
