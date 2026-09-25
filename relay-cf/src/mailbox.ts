@@ -307,14 +307,20 @@ export class Mailbox extends DurableObject<Env> {
   private async opSend(ws: WebSocket, a: Attachment, f: Frame, rid: string): Promise<void> {
     const to = str(f.to) ?? "";
     const id = str(f.id) ?? "";
-    let frame: Uint8Array | null = null;
-    try {
-      const raw = str(f.frame);
-      if (raw !== undefined) frame = b64decode(raw);
-    } catch {
-      frame = null;
+    const raw = str(f.frame);
+    if (to === "" || id === "" || id.length > MAX_ID_CHARS || raw === undefined) {
+      ws.send(resFrame(rid, { status: Status.ERROR, code: Code.BAD_REQUEST }));
+      return;
     }
-    if (to === "" || id === "" || id.length > MAX_ID_CHARS || frame === null) {
+    // A string this long cannot decode to an allowed frame, so skip decoding it at all.
+    if (raw.length > Math.ceil((this.limits.maxFrameBytes * 4) / 3) + 4) {
+      ws.send(resFrame(rid, { status: Status.TOO_LARGE }));
+      return;
+    }
+    let frame: Uint8Array;
+    try {
+      frame = b64decode(raw);
+    } catch {
       ws.send(resFrame(rid, { status: Status.ERROR, code: Code.BAD_REQUEST }));
       return;
     }

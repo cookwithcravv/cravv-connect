@@ -127,4 +127,22 @@ describe("blobs", () => {
     expect((await signed(down, "GET", `/v1/blobs/${id}/chunks/0`)).status).toBe(410);
     expect(await testEnv.BLOBS.get(chunkKey(id, 0))).toBeNull();
   });
+
+  it("stops reading an oversize body without Content-Length at the limit", async () => {
+    let sent = 0;
+    const endless = () =>
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          sent += 65536;
+          controller.enqueue(new Uint8Array(65536));
+        },
+      });
+    for (const [method, path] of [["PUT", "/v1/blobs/aaaaaaaaaaaaaaaaaaaaaaaaaa/chunks/0"], ["POST", "/v1/blobs"]]) {
+      sent = 0;
+      const res = await relayFetch(path, { method, body: endless() });
+      expect(res.status).toBe(413);
+      expect(await res.json()).toMatchObject({ code: "too_large" });
+      expect(sent).toBeLessThan(8 * 1048576);
+    }
+  }, 5000);
 });

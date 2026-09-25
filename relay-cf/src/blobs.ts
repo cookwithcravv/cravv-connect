@@ -50,8 +50,8 @@ export async function handleBlobs(request: Request, env: Env): Promise<Response>
   const maxBody = request.method === "PUT" ? limits.chunkBytes + limits.chunkOverhead : limits.maxCreateBody;
   const declared = Number(request.headers.get("Content-Length") ?? "0");
   if (declared > maxBody) return jsonError(413, Code.TOO_LARGE, "body too large");
-  const body = new Uint8Array(await request.arrayBuffer());
-  if (body.length > maxBody) return jsonError(413, Code.TOO_LARGE, "body too large");
+  const body = await readBody(request, maxBody);
+  if (!body) return jsonError(413, Code.TOO_LARGE, "body too large");
 
   const caller = await verifySignedRequest(request, body, Date.now(), limits.httpSkewSeconds);
   if (!caller) return jsonError(401, Code.AUTH_FAILED, "bad or missing request signature");
@@ -64,6 +64,32 @@ export async function handleBlobs(request: Request, env: Env): Promise<Response>
     return jsonError(404, Code.NOT_FOUND, "no such blob");
   }
   return route.handler({ env, limits, caller, body, blobId, chunk: Number(m[2] ?? "0") });
+}
+
+// Reads the request body, counting bytes as they arrive. Returns null as soon as the body
+// exceeds max bytes, without buffering the rest (Content-Length may be absent or wrong).
+async function readBody(request: Request, max: number): Promise<Uint8Array | null> {
+  if (!request.body) return new Uint8Array(0);
+  const reader = request.body.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) {
+    out.set(p, off);
+    off += p.byteLength;
+  }
+  return out;
 }
 
 async function createBlob(ctx: BlobContext): Promise<Response> {

@@ -164,6 +164,17 @@ describe("send, deliver, ack", () => {
     cb.close();
   });
 
+  it("replies too_large to an oversize frame string before decoding it", async () => {
+    const { b, ca, cb } = await pair();
+    // Not valid base64, but longer than any 256 KiB frame could encode to.
+    const junk = "*".repeat(Math.ceil((262144 * 4) / 3) + 5);
+    expect((await ca.request({ t: "send", to: b.mailboxId, id: "junk", frame: junk })).status).toBe("too_large");
+    const padded = b64encode(new Uint8Array(262144)) + "==";
+    expect((await ca.request({ t: "send", to: b.mailboxId, id: "pad", frame: padded })).status).toBe("queued");
+    ca.close();
+    cb.close();
+  });
+
   it("redelivers unacked frames in seq order after reconnect, and seq is never reused", async () => {
     const { b, ca, cb } = await pair();
     cb.close();
