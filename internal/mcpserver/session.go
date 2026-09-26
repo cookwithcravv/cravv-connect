@@ -36,6 +36,10 @@ var (
 // reattachAttempt bounds one background reconnect and reattach.
 const reattachAttempt = 10 * time.Second
 
+// backgroundReattach turns the keeper on; tests of the on-demand path
+// (reattach on the next tool call) turn it off.
+var backgroundReattach = true
+
 // Session owns the daemon connection and this MCP process's session
 // registration. It connects lazily, so the MCP server starts (and lists its
 // tools) even when the daemon is down, and it reconnects and re-registers
@@ -102,7 +106,7 @@ func (s *Session) SetReattach(token string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reattach, s.pending = token, false
-	if token != "" && !s.keeping && !s.closed {
+	if token != "" && backgroundReattach && !s.keeping && !s.closed {
 		s.keeping = true
 		s.keepers.Add(1)
 		go s.keep()

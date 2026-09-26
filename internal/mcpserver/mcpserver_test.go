@@ -374,6 +374,7 @@ func TestShareKeepsReattachTokenForReconnects(t *testing.T) {
 // the token and is tried again on the next call; only not_found (the session
 // closed meanwhile) forgets it.
 func TestReattachForgetsTokenOnlyWhenNotFound(t *testing.T) {
+	onDemandReattach(t)
 	d := newDaemonFake(t)
 	var mu sync.Mutex
 	var reattached []string
@@ -536,4 +537,12 @@ func TestShareWritesAPrivateWakeFile(t *testing.T) {
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Fatalf("wake file left after the MCP server stopped: %v", entries)
 	}
+}
+
+// onDemandReattach turns the background keeper off, so a test counts only
+// the reattaches tool calls make (keeper_test.go covers the keeper).
+func onDemandReattach(t *testing.T) {
+	t.Helper()
+	backgroundReattach = false
+	t.Cleanup(func() { backgroundReattach = true })
 }
