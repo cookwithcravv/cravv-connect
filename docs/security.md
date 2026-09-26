@@ -188,6 +188,27 @@ password; anything that narrows it does not. `resume-peer` is the one
 exception without a password, because it only restores a state the human
 already chose when pairing.
 
+## The web UI
+
+`cravv-connect ui` asks the daemon to serve a local page on `127.0.0.1`
+(random port) and opens it with a one-time launch link. Each browser session
+talks to the daemon over its own in-process IPC connection, so the gates,
+tiers and password lockout above apply unchanged.
+
+### Honest limits
+
+- **Launch links.** At most 8 unused launch links are live. When all 8 are
+  younger than 10 seconds, `ui.start` is refused as busy ("wait a few seconds
+  and run cravv-connect ui again"); otherwise a new link drops the oldest
+  unused one. A local process that calls `ui.start` in a loop can therefore
+  make a link the human has not opened within 10 seconds stop working; run
+  `cravv-connect ui` again.
+- **Browser sessions.** At most 8 browser sessions are live and a new one
+  ends the oldest. A local process of the same user can open 8 launch links
+  of its own and so end the human's browser session (the page then says the
+  session ended; run `cravv-connect ui` again). This denies service; it gives
+  that process nothing it could not already do over the daemon socket.
+
 ## What agents can and cannot do
 
 Through MCP or the JSON agent commands (`cravv-connect send`, `inbox`,

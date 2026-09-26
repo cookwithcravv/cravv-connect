@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cravv/cravv-connect/internal/ipc"
 )
 
 // maxFormBytes caps a form body.
@@ -37,7 +38,7 @@ type server struct {
 
 	mu       sync.Mutex
 	last     time.Time
-	tokens   map[string]time.Time // launch token -> expiry
+	tokens   map[string]time.Time // launch token -> when it was minted
 	sessions map[string]*uiSession
 	order    []string // session IDs, oldest first
 }
@@ -116,7 +117,20 @@ func randomToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// mintToken adds a launch token that works once within LaunchTokenTTL.
+// ErrTooManyLaunches refuses ui.start while MaxLaunchTokens unused launch
+// links are all younger than LaunchTokenGrace. It is an ipc.ErrBusy, so it
+// reaches the CLI as kind "busy" with its own wording.
+var ErrTooManyLaunches error = busyError("too many unused web UI links; wait a few seconds and run cravv-connect ui again")
+
+type busyError string
+
+func (e busyError) Error() string { return string(e) }
+func (busyError) Unwrap() error   { return ipc.ErrBusy }
+
+// mintToken adds a launch token that works once within LaunchTokenTTL. At
+// MaxLaunchTokens it drops the oldest token only if that one is at least
+// LaunchTokenGrace old, so a burst of ui.start calls cannot knock out a
+// link a browser is about to open; otherwise it refuses.
 func (s *server) mintToken() (string, error) {
 	tok, err := randomToken()
 	if err != nil {
@@ -125,21 +139,24 @@ func (s *server) mintToken() (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.clock.Now()
-	for t, exp := range s.tokens {
-		if !now.Before(exp) {
+	for t, minted := range s.tokens {
+		if now.Sub(minted) >= LaunchTokenTTL {
 			delete(s.tokens, t)
 		}
 	}
-	for len(s.tokens) >= MaxLaunchTokens {
+	if len(s.tokens) >= MaxLaunchTokens {
 		var oldest string
-		for t, exp := range s.tokens {
-			if oldest == "" || exp.Before(s.tokens[oldest]) {
+		for t, minted := range s.tokens {
+			if oldest == "" || minted.Before(s.tokens[oldest]) {
 				oldest = t
 			}
 		}
+		if now.Sub(s.tokens[oldest]) < LaunchTokenGrace {
+			return "", ErrTooManyLaunches
+		}
 		delete(s.tokens, oldest)
 	}
-	s.tokens[tok] = now.Add(LaunchTokenTTL)
+	s.tokens[tok] = now
 	return tok, nil
 }
 
@@ -151,10 +168,10 @@ func (s *server) takeToken(tok string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.clock.Now()
-	for t, exp := range s.tokens {
+	for t, minted := range s.tokens {
 		if subtle.ConstantTimeCompare([]byte(t), []byte(tok)) == 1 {
 			delete(s.tokens, t)
-			return now.Before(exp)
+			return now.Sub(minted) < LaunchTokenTTL
 		}
 	}
 	return false

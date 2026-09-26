@@ -26,8 +26,13 @@ const (
 	LaunchTokenTTL = 2 * time.Minute
 	// MaxSessions caps browser sessions; the oldest is ended first.
 	MaxSessions = 8
-	// MaxLaunchTokens caps unused launch tokens; the oldest is dropped first.
+	// MaxLaunchTokens caps unused launch tokens. At the cap a new one drops
+	// the oldest only if it is at least LaunchTokenGrace old; otherwise
+	// ui.start is refused as busy.
 	MaxLaunchTokens = 8
+	// LaunchTokenGrace is how long a new launch token cannot be dropped to
+	// make room, so the browser the CLI opens gets to use it.
+	LaunchTokenGrace = 10 * time.Second
 	// DefaultSweepEvery is how often the idle timeout is checked.
 	DefaultSweepEvery = time.Minute
 )

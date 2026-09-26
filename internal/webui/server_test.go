@@ -96,6 +96,43 @@ func TestOnlyGetConsumesTheLaunchToken(t *testing.T) {
 	}
 }
 
+// At MaxLaunchTokens live tokens, ui.start drops the oldest token only if
+// it is at least LaunchTokenGrace old; otherwise it refuses with busy, so
+// a flood of ui.start calls cannot knock out the link the human's browser
+// is about to open.
+func TestLaunchTokensAreNotEvictedWhileFresh(t *testing.T) {
+	u := newUI(t, statusDaemon(t))
+	var older, newer []string
+	for range MaxLaunchTokens / 2 {
+		older = append(older, u.launchURL())
+	}
+	u.clock.Advance(LaunchTokenGrace)
+	for range MaxLaunchTokens - MaxLaunchTokens/2 {
+		newer = append(newer, u.launchURL())
+	}
+	// Each new start drops one of the older tokens.
+	for range older {
+		newer = append(newer, u.launchURL())
+	}
+	if _, err := u.l.Start(context.Background()); !errors.Is(err, ipc.ErrBusy) {
+		t.Fatalf("start with only fresh tokens live: %v", err)
+	}
+	for _, l := range older {
+		if r := newBrowser(t, l).do("GET", l, nil, nil); r.code != http.StatusForbidden {
+			t.Fatalf("evicted token: %d", r.code)
+		}
+	}
+	for _, l := range newer {
+		if r := newBrowser(t, l).do("GET", l, nil, nil); r.code != http.StatusSeeOther {
+			t.Fatalf("fresh token: %d", r.code)
+		}
+	}
+	// Used tokens free their places.
+	if _, err := u.l.Start(context.Background()); err != nil {
+		t.Fatalf("start after the tokens were used: %v", err)
+	}
+}
+
 // Only 127.0.0.1:<port> and localhost:<port> are served (DNS rebinding).
 func TestHostMustBeTheUIAddress(t *testing.T) {
 	u := newUI(t, statusDaemon(t))
