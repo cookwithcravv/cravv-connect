@@ -1,0 +1,53 @@
+# Vet and test on every push to main and every pull request: the Go module
+# with cgo (PAM) on Linux and macOS, the no-cgo build, and the Cloudflare
+# relay's typecheck and tests.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: go (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install the PAM headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
+      - name: gofmt
+        run: test -z "$(gofmt -l internal e2e cmd)"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./... -race -count=1
+      - name: Build without cgo
+        run: CGO_ENABLED=0 go build ./...
+
+  relay-cf:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: relay-cf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: relay-cf/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

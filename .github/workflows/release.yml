@@ -1,0 +1,82 @@
+# Builds the release archives when a v* tag is pushed and publishes them with
+# SHA256SUMS on the GitHub release. cravv-connect needs cgo for PAM, so each
+# platform builds on a native runner; cravv-relay and cravv-conformance are
+# pure Go (CGO_ENABLED=0). scripts/install.sh downloads these archives.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: macos-14, goos: darwin, goarch: arm64 }
+          - { runner: macos-13, goos: darwin, goarch: amd64 }
+          - { runner: ubuntu-24.04, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install the PAM headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
+      - name: Check the runner builds for its own platform
+        run: test "$(go env GOOS)/$(go env GOARCH)" = "${{ matrix.goos }}/${{ matrix.goarch }}"
+      - name: Test
+        run: go test ./... -count=1
+      - name: Build the archive
+        env:
+          TAG: ${{ github.ref_name }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -eu
+          version="${TAG#v}"
+          name="cravv-connect_${version}_${GOOS}_${GOARCH}"
+          mkdir -p "dist/$name"
+          CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X github.com/cravv/cravv-connect/internal/cli.Version=${TAG}" \
+            -o "dist/$name/cravv-connect" ./cmd/cravv-connect
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/$name/cravv-relay" ./cmd/cravv-relay
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/$name/cravv-conformance" ./cmd/cravv-conformance
+          cp README.md "dist/$name/"
+          "dist/$name/cravv-connect" version | grep -F "cravv-connect ${TAG} (${GOOS}/${GOARCH})"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cravv-connect-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Write SHA256SUMS
+        working-directory: dist
+        run: |
+          set -eu
+          test "$(ls *.tar.gz | wc -l)" -eq 4
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" dist/*.tar.gz dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes --verify-tag
