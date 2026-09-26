@@ -539,3 +539,45 @@ func TestRealSetupSystem(t *testing.T) {
 		t.Fatal("a web server passed for a relay")
 	}
 }
+
+// --reset keeps the daemon running until the new relay is known to answer:
+// a relay that does not answer changes nothing.
+func TestSetupResetUnreachableRelayKeepsDaemon(t *testing.T) {
+	r := newSetupRig(t, connected)
+	r.configure(t, "https://relay.example.com")
+	r.daemon.up()
+	r.prompt.lines, r.prompt.passwords = []string{"y"}, []string{""}
+	if code := r.run("--reset", "--relay", "https://down.example.com", "--no-agents"); code != 1 ||
+		r.errb.String() != "error: the relay https://down.example.com does not answer: connection refused. "+
+			"Nothing changed: this machine still uses relay https://relay.example.com\n" {
+		t.Fatalf("code %d stderr %q", code, r.errb.String())
+	}
+	if len(r.daemon.events) != 0 || !daemonUp(context.Background(), r.env) {
+		t.Fatalf("service %v", r.daemon.events)
+	}
+	if r.config(t).RelayURL != "https://relay.example.com" {
+		t.Fatal("config changed")
+	}
+}
+
+// When setup fails after it stopped the daemon for a reset, it starts the
+// daemon again and says so.
+func TestSetupResetRestartsDaemonAfterFailure(t *testing.T) {
+	r := newSetupRig(t, connected)
+	r.configure(t, "https://relay.example.com")
+	r.daemon.up()
+	r.sys.healthy["https://other.example.com"] = true
+	r.env.OpenSettings = func(string) (store.SettingsStore, func() error, error) {
+		return nil, nil, errors.New("database is locked")
+	}
+	r.prompt.lines, r.prompt.passwords = []string{"y"}, []string{""}
+	if code := r.run("--reset", "--relay", "https://other.example.com", "--no-agents"); code != 1 || r.errb.String() != "error: database is locked\n" {
+		t.Fatalf("code %d stderr %q", code, r.errb.String())
+	}
+	if !slices.Equal(r.daemon.events, []string{"stop", "start"}) || !daemonUp(context.Background(), r.env) {
+		t.Fatalf("service %v", r.daemon.events)
+	}
+	if !strings.Contains(r.out.String(), "Setup did not finish, so the daemon was started again.\n") {
+		t.Fatalf("stdout\n%s", r.out.String())
+	}
+}

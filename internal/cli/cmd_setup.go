@@ -67,6 +67,13 @@ type setup struct {
 	o     setupOptions
 	w     io.Writer
 	paths config.Paths
+
+	// resetting is set when --reset was agreed on a set-up machine: the
+	// daemon is stopped only once the new relay answers and is confirmed
+	// (stopForReset), so an aborted reset leaves it running.
+	resetting bool
+	// stopped is set once stopForReset stopped a running daemon.
+	stopped bool
 }
 
 func runSetup(ctx context.Context, env *Env, o setupOptions) error {
@@ -96,15 +103,51 @@ func runSetup(ctx context.Context, env *Env, o setupOptions) error {
 			fmt.Fprintln(s.w, "Nothing changed.")
 			return nil
 		}
-		if err := s.stopDaemon(); err != nil {
-			return err
-		}
-		configured = false
+		s.resetting, configured = true, false
 	}
 	if jc != nil {
-		return s.joinFlow(*jc, cfg, configured)
+		err = s.joinFlow(*jc, cfg, configured)
+	} else {
+		err = s.hostFlow(cfg, configured)
 	}
-	return s.hostFlow(cfg, configured)
+	return s.finishReset(cfg, err)
+}
+
+// stopForReset stops a running daemon before init writes the new relay; it
+// is called only after the new relay answers and was confirmed.
+func (s *setup) stopForReset() error {
+	if !s.resetting || !daemonUp(s.ctx, s.env) {
+		return nil
+	}
+	s.stopped = true
+	return s.run(newDaemonStopCmd)
+}
+
+// finishReset handles a reset that did not finish: before the daemon was
+// stopped nothing changed, and the error says so; after, the daemon is
+// started again so the machine is not left without it.
+func (s *setup) finishReset(old config.Config, err error) error {
+	if !s.resetting {
+		return err
+	}
+	if !s.stopped {
+		if err != nil {
+			return fmt.Errorf("%w. Nothing changed: this machine still uses relay %s", err, old.RelayURL)
+		}
+		return nil
+	}
+	ctx := context.WithoutCancel(s.ctx)
+	if daemonUp(ctx, s.env) {
+		return err
+	}
+	cmd := newDaemonStartCmd(s.env)
+	cmd.SetContext(ctx)
+	if serr := cmd.RunE(cmd, nil); serr != nil {
+		fmt.Fprintf(s.w, "Setup did not finish, and the daemon could not be started again: %v. Run `cravv-connect daemon start`.\n", serr)
+	} else {
+		fmt.Fprintln(s.w, "Setup did not finish, so the daemon was started again.")
+	}
+	return err
 }
 
 // current loads this machine's configuration; configured is false when no
@@ -133,6 +176,9 @@ func (s *setup) hostFlow(cfg config.Config, configured bool) error {
 		s.section("Relay")
 		relay, token, err := s.chooseRelay()
 		if err != nil {
+			return err
+		}
+		if err := s.stopForReset(); err != nil {
 			return err
 		}
 		s.section("This machine")
@@ -298,14 +344,6 @@ func (s *setup) run(f Factory) error {
 	cmd := f(s.env)
 	cmd.SetContext(s.ctx)
 	return cmd.RunE(cmd, nil)
-}
-
-// stopDaemon stops a running daemon so it restarts with the new setup.
-func (s *setup) stopDaemon() error {
-	if !daemonUp(s.ctx, s.env) {
-		return nil
-	}
-	return s.run(newDaemonStopCmd)
 }
 
 // installChecker is implemented by installers that can tell whether their

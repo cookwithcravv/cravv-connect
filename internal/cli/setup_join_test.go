@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
@@ -160,4 +161,32 @@ func TestSetupJoinInputs(t *testing.T) {
 		t.Fatalf("with --relay: %d %q", code, r.errb.String())
 	}
 	r.notConfigured(t)
+}
+
+// --reset --join keeps the daemon running until the new relay is confirmed
+// and answers.
+func TestSetupResetJoinKeepsDaemonUntilConfirmed(t *testing.T) {
+	r := joinRig(t)
+	r.configure(t, "https://other.example.com")
+	r.daemon.up()
+	r.prompt.lines = []string{"y", "n"}
+	if code := r.run("--reset", "--join", testJoinCode, "--no-agents"); code != 0 || !strings.HasSuffix(r.out.String(), "Nothing changed.\n") {
+		t.Fatalf("code %d stdout %q stderr %q", code, r.out.String(), r.errb.String())
+	}
+	if len(r.daemon.events) != 0 || !daemonUp(context.Background(), r.env) || r.config(t).RelayURL != "https://other.example.com" {
+		t.Fatalf("service %v relay %q", r.daemon.events, r.config(t).RelayURL)
+	}
+
+	r2 := joinRig(t)
+	r2.configure(t, "https://other.example.com")
+	r2.daemon.up()
+	r2.prompt.lines = []string{"y", "y"}
+	if code := r2.run("--reset", "--join", codeFor(t, "https://down.example.com"), "--no-agents"); code != 1 ||
+		r2.errb.String() != "error: the relay https://down.example.com does not answer: connection refused. "+
+			"Nothing changed: this machine still uses relay https://other.example.com\n" {
+		t.Fatalf("code %d stderr %q", code, r2.errb.String())
+	}
+	if len(r2.daemon.events) != 0 || !daemonUp(context.Background(), r2.env) {
+		t.Fatalf("service %v", r2.daemon.events)
+	}
 }

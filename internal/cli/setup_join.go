@@ -52,6 +52,9 @@ func (s *setup) joinFlow(c joincode.Code, cfg config.Config, configured bool) er
 		if err := s.sys.RelayHealthy(s.ctx, c.Relay); err != nil {
 			return fmt.Errorf("the relay %s does not answer: %w", c.Relay, err)
 		}
+		if err := s.stopForReset(); err != nil {
+			return err
+		}
 		s.section("This machine")
 		if err := runInit(s.ctx, s.env, c.Relay, "", s.o.name, s.o.reset); err != nil {
 			return err
