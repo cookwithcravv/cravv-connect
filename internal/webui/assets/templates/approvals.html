@@ -1,0 +1,44 @@
+{{define "content"}}{{$csrf := .CSRF}}{{with .Data}}{{$d := .}}
+<section>
+<h2>Link requests</h2>
+{{if .Requests}}
+{{range .Requests}}<div>
+<p>Link {{.Link}}: <strong>{{.Machine}}/{{.RemoteSession}}</strong> asks to link with your session <strong>{{dash .Session}}</strong> and asks for <strong>{{.Proposed}}</strong>.</p>
+{{if .Peer}}<p class="muted">From the other machine:</p><pre class="peer">{{.Peer}}</pre>{{end}}
+<form method="post" action="/approvals/link/accept">
+<input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="link" value="{{.Link}}">
+<label>Grant <select name="permission">{{$p := .Proposed}}{{range $d.Permissions}}<option value="{{.}}"{{if eq (print .) $p}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+{{template "password" (not $.Unlocked)}}
+<button type="submit">Accept</button>
+</form>
+<form method="post" action="/approvals/link/reject">
+<input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="link" value="{{.Link}}">
+<button type="submit" class="secondary">Reject</button>
+</form>
+</div>{{end}}
+{{else}}<p class="muted">No link requests.</p>{{end}}
+</section>
+<section>
+<h2>Tasks waiting for approval</h2>
+{{if .TasksLocked}}
+<p>Enter your password to see tasks waiting for your approval.</p>
+<form method="post" action="/approvals/unlock" class="block">
+<input type="hidden" name="csrf" value="{{$csrf}}">
+{{template "password" true}}
+<button type="submit">Show tasks</button>
+</form>
+{{else if .Tasks}}
+{{range .Tasks}}<div>
+<p>Task <code>{{.TaskID}}</code> from <strong>{{.Peer}}</strong>, received {{time .Received}}. {{.Size}} bytes, SHA-256 <code>{{.SHA256}}</code>.</p>
+<pre class="peer">{{.PreviewText}}</pre>
+{{if .Truncated}}<details><summary>Full text</summary><pre class="peer">{{.FullText}}</pre></details>{{end}}
+<form method="post" action="/approvals/task">
+<input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="task_id" value="{{.TaskID}}">
+{{template "password" (not $.Unlocked)}}
+<button type="submit" name="decision" value="approve">Approve</button>
+<button type="submit" name="decision" value="deny" class="secondary">Deny</button>
+</form>
+</div>{{end}}
+{{else}}<p class="muted">No tasks waiting.</p>{{end}}
+</section>
+{{end}}{{end}}

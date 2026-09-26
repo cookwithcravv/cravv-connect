@@ -1,0 +1,59 @@
+{{define "content"}}{{$csrf := .CSRF}}{{with .Data}}{{$d := .}}
+<section>
+<h2>Shared sessions on this machine</h2>
+{{if .Local}}
+<div class="table-wrap"><table>
+<thead><tr><th>Session</th><th>Purpose</th><th>Visible to</th><th>State</th><th>Agent</th></tr></thead>
+<tbody>
+{{range .Local}}<tr><td>{{.Name}}</td><td>{{dash (clean .Purpose)}}</td><td>{{.Visibility}}</td><td>{{.State}}</td><td>{{dash .Agent}}</td></tr>
+{{end}}
+</tbody>
+</table></div>
+{{else}}<p class="muted">No shared sessions. An agent chat shares one with its session_share tool.</p>{{end}}
+</section>
+<section>
+<h2>Links</h2>
+{{if .Requests}}<p>Link requests waiting for you: {{.Requests}}. <a href="/approvals">Decide them on the Approvals page.</a></p>{{end}}
+{{if .Links}}
+<div class="table-wrap"><table>
+<thead><tr><th>Link</th><th>Session</th><th>Other side</th><th>State</th><th>They may</th><th>You may</th><th></th></tr></thead>
+<tbody>
+{{range .Links}}<tr>
+<td>{{.Link}}</td><td>{{dash .Session}}</td><td>{{.Machine}}/{{.RemoteSession}}{{if .Peer}}<pre class="peer">{{.Peer}}</pre>{{end}}</td>
+<td>{{.StateText}}</td><td>{{.TheyMay}}</td><td>{{dash .PermissionOut}}</td>
+<td>{{if ne .State "closed"}}
+{{if .Lower}}<form method="post" action="/sessions/restrict"><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="link" value="{{.Link}}">
+<select name="permission">{{range .Lower}}<option value="{{.}}">{{.}}</option>{{end}}</select><button type="submit" class="secondary">Restrict</button></form>{{end}}
+<form method="post" action="/sessions/disconnect" data-confirm="Disconnect link {{.Link}}? It closes for good on both sides."><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="link" value="{{.Link}}"><button type="submit" class="danger">Disconnect</button></form>
+{{end}}</td>
+</tr>{{end}}
+</tbody>
+</table></div>
+{{else}}<p class="muted">No links.</p>{{end}}
+</section>
+<section>
+<h2>Sessions on other devices</h2>
+{{if .Peers}}<p>{{range .Peers}}<a href="/sessions?machine={{.Alias}}">Show sessions on {{.Alias}}</a> {{end}}</p>{{else}}<p class="muted">No paired devices. Pair one on the Devices page.</p>{{end}}
+{{if .Machine}}
+<h2>{{.Machine}}</h2>
+{{if .Remote}}
+<div class="table-wrap"><table>
+<thead><tr><th>Session</th><th>State</th><th>Agent</th><th>Ask for a link</th></tr></thead>
+<tbody>
+{{range .Remote}}<tr>
+<td>{{.Name}}{{if .Purpose}}<pre class="peer">{{.Purpose}}</pre>{{end}}</td><td>{{.State}}</td><td>{{dash .Agent}}</td>
+<td>{{if $d.Open}}<form method="post" action="/sessions/connect">
+<input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="machine" value="{{$d.Machine}}"><input type="hidden" name="remote" value="{{.Name}}">
+<label>From <select name="session">{{range $d.Open}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+<label>To do there <select name="permission">{{range $d.Permissions}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+<input name="note" maxlength="280" placeholder="Note (optional)">
+{{template "password" (not $.Unlocked)}}
+<button type="submit">Connect</button>
+</form>{{else}}<span class="muted">Share a session here first.</span>{{end}}</td>
+</tr>{{end}}
+</tbody>
+</table></div>
+{{else}}<p class="muted">{{.Machine}} shows you no sessions.</p>{{end}}
+{{end}}
+</section>
+{{end}}{{end}}

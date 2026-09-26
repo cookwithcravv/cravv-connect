@@ -62,6 +62,8 @@ func DefaultRegistry() *Registry {
 	r := &Registry{}
 	for _, add := range []func(*Registry){
 		addDevices,
+		addSessions,
+		addApprovals,
 		addActivity,
 		addStatus,
 	} {
