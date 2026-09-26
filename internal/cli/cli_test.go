@@ -14,6 +14,7 @@ import (
 	"github.com/cravv/cravv-connect/internal/auth"
 	"github.com/cravv/cravv-connect/internal/config"
 	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cravv/cravv-connect/internal/daemon"
 	"github.com/cravv/cravv-connect/internal/ipc"
 	"github.com/cravv/cravv-connect/internal/store"
 )
@@ -529,5 +530,65 @@ func TestAuthUnavailableOtherCausesKeepMessage(t *testing.T) {
 	r := fd.run(nil, "pair")
 	if r.code != 1 || strings.Contains(r.stderr, "built without PAM support") || !strings.Contains(r.stderr, auth.ErrServiceNotAllowed.Error()) {
 		t.Fatalf("%q", r.stderr)
+	}
+}
+
+func TestInitDefaultNameStopsAtFirstDot(t *testing.T) {
+	fd := newFakeDaemon(t)
+	env, out, errb := fd.env(&fakePrompter{}, "")
+	env.Hostname = func() (string, error) { return "GPU-Box.lan.example.com", nil }
+	if code := Main([]string{"init", "--relay", "https://relay.example.com"}, env); code != 0 {
+		t.Fatalf("code %d: %s", code, errb.String())
+	}
+	paths, _ := env.Paths()
+	if cfg, _ := config.Load(paths); cfg.DeviceName != "gpu-box" {
+		t.Fatalf("device name %q, want gpu-box (%s)", cfg.DeviceName, out.String())
+	}
+}
+
+// Moving to another relay with init --force: the old mailbox registration
+// means nothing there, so the daemon must register again; peers are not told.
+func TestInitForceNewRelayClearsRegistration(t *testing.T) {
+	fd := newFakeDaemon(t)
+	settings := mapSettings{}
+	open := func(env *Env) {
+		env.OpenSettings = func(string) (store.SettingsStore, func() error, error) {
+			return settings, func() error { return nil }, nil
+		}
+	}
+	env, _, _ := fd.env(&fakePrompter{}, "")
+	open(env)
+	if code := Main([]string{"init", "--relay", "https://old.example.com"}, env); code != 0 {
+		t.Fatal("first init failed")
+	}
+	settings[settingRelayRegistered] = "1"
+	settings[settingRelayInvite] = "INV"
+
+	env2, out2, _ := fd.env(&fakePrompter{}, "")
+	open(env2)
+	if code := Main([]string{"init", "--relay", "https://OLD.example.com:443", "--force"}, env2); code != 0 {
+		t.Fatal("same-relay init failed")
+	}
+	if settings[settingRelayRegistered] != "1" || strings.Contains(out2.String(), "pair") {
+		t.Fatalf("same relay cleared the registration: %v %q", settings, out2.String())
+	}
+
+	env3, out3, _ := fd.env(&fakePrompter{}, "")
+	open(env3)
+	if code := Main([]string{"init", "--relay", "https://new.example.com", "--force"}, env3); code != 0 {
+		t.Fatal("new-relay init failed")
+	}
+	if settings[settingRelayRegistered] != "" || settings[settingRelayInvite] != "" {
+		t.Fatalf("registration kept after a relay change: %v", settings)
+	}
+	if !strings.Contains(out3.String(), "re-pair") || !strings.Contains(out3.String(), "https://old.example.com") {
+		t.Fatalf("no note about peers: %q", out3.String())
+	}
+}
+
+func TestInitSettingKeysMatchDaemon(t *testing.T) {
+	if settingRelayRegistered != daemon.SettingRelayRegistered || settingRelayInvite != daemon.SettingRelayInvite ||
+		SettingRelayAdminToken != daemon.SettingRelayAdminToken {
+		t.Fatal("cli and daemon settings keys differ")
 	}
 }

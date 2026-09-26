@@ -20,6 +20,13 @@ import (
 // token under. The daemon reads it for its first mailbox registration.
 const SettingRelayAdminToken = "relay_admin_token"
 
+// The daemon's relay registration state (daemon.SettingRelayRegistered and
+// daemon.SettingRelayInvite), cleared when init moves to another relay.
+const (
+	settingRelayRegistered = "relay_registered"
+	settingRelayInvite     = "relay_invite"
+)
+
 func init() { Register(newInitCmd) }
 
 func newInitCmd(env *Env) *cobra.Command {
@@ -80,14 +87,28 @@ func runInit(ctx context.Context, env *Env, relay, token, name string, force boo
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(paths.Config); err == nil && !force {
-		return errors.New("already initialized (config.toml exists); use --force to overwrite")
+	oldRelay := ""
+	if _, err := os.Stat(paths.Config); err == nil {
+		if !force {
+			return errors.New("already initialized (config.toml exists); use --force to overwrite")
+		}
+		if old, err := config.Load(paths); err == nil && old.RelayURL != "" {
+			if o, err := relayOrigin(old.RelayURL); err == nil {
+				oldRelay = o
+			} else {
+				oldRelay = old.RelayURL
+			}
+		}
 	}
+	movedRelay := oldRelay != "" && oldRelay != relay
 	if name == "" {
 		host, err := env.Hostname()
 		if err != nil {
 			host = "machine"
 		}
+		// "gpu-box.lan" or "Prith's MacBook.local": the name is the part
+		// before the domain.
+		host, _, _ = strings.Cut(host, ".")
 		name = host
 	}
 	name = suggestAlias(name)
@@ -103,14 +124,24 @@ func runInit(ctx context.Context, env *Env, relay, token, name string, force boo
 	if err := config.Save(paths, cfg); err != nil {
 		return err
 	}
-	if token != "" {
+	if token != "" || movedRelay {
 		settings, closeFn, err := env.OpenSettings(paths.DB)
 		if err != nil {
 			return err
 		}
 		defer closeFn()
-		if err := settings.SetSetting(ctx, SettingRelayAdminToken, token); err != nil {
-			return err
+		if movedRelay {
+			// The mailbox and any invite belong to the old relay: register again.
+			for _, k := range []string{settingRelayRegistered, settingRelayInvite} {
+				if err := settings.SetSetting(ctx, k, ""); err != nil {
+					return err
+				}
+			}
+		}
+		if token != "" {
+			if err := settings.SetSetting(ctx, SettingRelayAdminToken, token); err != nil {
+				return err
+			}
 		}
 	}
 	w := env.Stdout
@@ -119,6 +150,12 @@ func runInit(ctx context.Context, env *Env, relay, token, name string, force boo
 	fmt.Fprintf(w, "Device name: %s\n", name)
 	if token != "" {
 		fmt.Fprintln(w, "Admin token saved; the daemon registers this machine with the relay on first start.")
+	}
+	if movedRelay {
+		fmt.Fprintf(w, "The relay changed from %s: this machine registers again on the new relay "+
+			"(it needs --relay-token or an invite from a pairing). Your peers are not told about the move "+
+			"(this version does not send control.relay_moved): re-pair with each of them on the new relay. "+
+			"Restart the daemon to use it.\n", oldRelay)
 	}
 	fmt.Fprintln(w, "Next: run `cravv-connect daemon install` (starts at login) or `cravv-connect daemon run`.")
 	return nil

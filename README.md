@@ -94,8 +94,8 @@ cravv-connect status
 
 The admin token is used once, to create this machine's mailbox, and then
 deleted. Use `--relay-token -` to read it from stdin, and `--name` to choose
-the device name peers see as a suggestion (default: the host name; lowercased
-to letters, digits and dashes, at most 24 characters).
+the device name peers see as a suggestion (default: the host name up to the
+first `.`; lowercased to letters, digits and dashes, at most 24 characters).
 
 ### 3. Set up the other machine
 
@@ -220,7 +220,7 @@ switch is on, only `resume` (and `status`, `peers`, `log`, `kill` again, and
 
 | Command | What it does |
 |---|---|
-| `init --relay <url> [--relay-token <t>] [--name <n>] [--force]` | Write `config.toml`; store the admin token for the first machine. The relay URL must be an origin, `scheme://host[:port]`, with no path |
+| `init --relay <url> [--relay-token <t>] [--name <n>] [--force]` | Write `config.toml`; store the admin token for the first machine. The relay URL must be an origin, `scheme://host[:port]`, with no path. `--force` with a different relay clears this machine's relay registration so it registers again there; peers are not told, so re-pair with them |
 | `daemon run [--log-file <path>]` | Run the daemon in the foreground. Logs JSON to stderr, or with `--log-file` to that file, rotated at 10 MiB with 3 old files kept |
 | `daemon start` / `daemon stop` / `daemon status` | Control the daemon. `stop` asks the daemon over its socket to shut down and waits up to 10 seconds for it to exit; it never signals a process that does not answer on the socket |
 | `daemon install` / `daemon uninstall` | Run the daemon at login (launchd or systemd user unit) |
