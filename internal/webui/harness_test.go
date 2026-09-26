@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -95,6 +96,19 @@ type ui struct {
 	fd     *fakeDaemon
 	l      *Launcher
 	cancel context.CancelFunc
+	pipes  atomic.Int64 // daemon connections the UI holds open
+}
+
+// countedCaller counts the UI's open daemon connections.
+type countedCaller struct {
+	Caller
+	once  sync.Once
+	pipes *atomic.Int64
+}
+
+func (c *countedCaller) Close() error {
+	c.once.Do(func() { c.pipes.Add(-1) })
+	return c.Caller.Close()
 }
 
 func newUI(t *testing.T, fd *fakeDaemon) *ui {
@@ -102,11 +116,14 @@ func newUI(t *testing.T, fd *fakeDaemon) *ui {
 	clock := fd.clock
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
+	u := &ui{t: t, clock: clock, fd: fd, cancel: cancel}
 	dial := func() (Caller, error) {
 		c, _ := fd.srv.Pipe(ctx)
-		return c, nil
+		u.pipes.Add(1)
+		return &countedCaller{Caller: c, pipes: &u.pipes}, nil
 	}
-	return &ui{t: t, clock: clock, fd: fd, cancel: cancel, l: NewLauncher(ctx, Options{Clock: clock, Dial: dial})}
+	u.l = NewLauncher(ctx, Options{Clock: clock, Dial: dial})
+	return u
 }
 
 // launchURL asks for a new launch URL.

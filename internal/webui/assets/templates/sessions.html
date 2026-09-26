@@ -47,7 +47,7 @@
 <label>From <select name="session">{{range $d.Open}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
 <label>To do there <select name="permission">{{range $d.Permissions}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
 <input name="note" maxlength="280" placeholder="Note (optional)">
-{{template "password" (not $.Unlocked)}}
+{{template "password"}}
 <button type="submit">Connect</button>
 </form>{{else}}<span class="muted">Share a session here first.</span>{{end}}</td>
 </tr>{{end}}

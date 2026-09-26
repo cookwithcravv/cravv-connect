@@ -66,13 +66,12 @@ type navItem struct {
 
 // view is what the layout renders.
 type view struct {
-	Title    string
-	Nav      []navItem
-	Flash    []flash
-	Error    string
-	CSRF     string
-	Unlocked string
-	Data     any
+	Title string
+	Nav   []navItem
+	Flash []flash
+	Error string
+	CSRF  string
+	Data  any
 }
 
 // render writes a page, or a plain 500 if the template fails.
@@ -82,15 +81,12 @@ func (s *server) render(w http.ResponseWriter, rq *Request, current, title, tmpl
 		s.deny(w, http.StatusInternalServerError, "Unknown page.")
 		return
 	}
-	v := view{Title: title, Flash: rq.sess.takeFlashes(), CSRF: rq.sess.csrf, Data: data}
+	v := view{Title: title, Flash: rq.sess.takeFlashes(), CSRF: rq.sess.csrfToken(), Data: data}
 	for _, p := range s.pages.Pages() {
 		v.Nav = append(v.Nav, navItem{Path: p.Path, Title: p.Title, Current: p.Path == current})
 	}
 	if loadErr != nil {
 		v.Error = message(loadErr)
-	}
-	if until := rq.sess.unlockedUntil(); !until.IsZero() {
-		v.Unlocked = "Password unlocked until " + until.UTC().Format("15:04 UTC")
 	}
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, "layout", v); err != nil {
@@ -116,6 +112,8 @@ func message(err error) string {
 		return "The kill switch is on. Resume on the Status page first."
 	case errors.Is(err, ipc.ErrClosed):
 		return "The connection to the daemon ended. Run cravv-connect ui again."
+	case errors.Is(err, errFlowEnded):
+		return "This pairing ended. Start again on the Devices page."
 	}
 	return cleanLine(err.Error())
 }

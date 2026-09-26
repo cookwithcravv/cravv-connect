@@ -118,9 +118,8 @@ func wantPage(t *testing.T, page string, parts ...string) {
 
 // Two humans link two sessions from their web UIs alone: alice asks
 // bob/trainer for a link from lead (with her password), bob accepts at a
-// lower level (with his), and both daemons agree the link is active. The
-// UI goes through the real IPC gates: without the password the request is
-// refused.
+// lower level (with his), and both daemons agree the link is active.
+// Without the password the request is refused.
 func TestWebUIConnectAndAccept(t *testing.T) {
 	t.Parallel()
 	_, a, b := NewPair(t)
@@ -146,8 +145,7 @@ func TestWebUIConnectAndAccept(t *testing.T) {
 	accept := url.Values{"link": {num}, "permission": {"messages"}}
 	wantPage(t, ub.Submit("/approvals", "/approvals/link/accept", accept), "This needs your login password.")
 	accept.Set("password", Password)
-	wantPage(t, ub.Submit("/approvals", "/approvals/link/accept", accept), "Accepted link "+num+": alice/lead may now use messages.",
-		"Password unlocked until")
+	wantPage(t, ub.Submit("/approvals", "/approvals/link/accept", accept), "Accepted link "+num+": alice/lead may now use messages.")
 
 	a.WaitLink(10*time.Second, "alice sees the link accepted", func(l ipc.LinkView) bool {
 		return l.State == "active" && l.RemoteSession == "trainer" && l.PermissionOut == "messages"

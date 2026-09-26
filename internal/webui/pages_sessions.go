@@ -101,8 +101,8 @@ func connectAs(ctx context.Context, rq *Request) (Reply, error) {
 	session, machine, remote := rq.Form("session"), rq.Form("machine"), rq.Form("remote")
 	target := machine + "/" + remote
 	var v ipc.LinkView
-	if err := rq.WithPassword(ctx, func() error {
-		return rq.Call(ctx, ipc.MethodLinkConnectAs, ipc.LinkConnectAsParams{
+	if err := rq.WithPassword(ctx, func(c Conn) error {
+		return c.Call(ctx, ipc.MethodLinkConnectAs, ipc.LinkConnectAsParams{
 			Session: session, Target: target, Permission: rq.Form("permission"), Note: rq.Form("note"),
 		}, &v)
 	}); err != nil {

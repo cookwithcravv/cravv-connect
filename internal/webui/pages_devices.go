@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"strings"
 
@@ -41,59 +42,79 @@ func loadDevices(ctx context.Context, rq *Request) (any, error) {
 
 // pairCode is the step that shows the bind code and waits.
 type pairCode struct {
-	PendingID string
-	Code      string
+	Flow string
+	Code string
 }
 
 // pairName is the step that names the new device.
 type pairName struct {
-	PendingID string
+	Flow      string
 	MachineID string
-	Suggested string
+	Alias     string
 }
 
+// pairStart starts a pairing on a connection of its own (StartFlow),
+// unlocked with the password.
 func pairStart(ctx context.Context, rq *Request) (Reply, error) {
 	var start ipc.PairStartResult
-	if err := rq.WithPassword(ctx, func() error { return rq.Call(ctx, ipc.MethodPairStart, nil, &start) }); err != nil {
+	flow, err := rq.StartFlow(ctx, func(c Conn) (string, error) {
+		err := c.Call(ctx, ipc.MethodPairStart, nil, &start)
+		return start.PendingID, err
+	})
+	if err != nil {
 		return Reply{}, err
 	}
-	return Reply{Template: "pair.html", Title: "Pair a new device", Data: pairCode{PendingID: start.PendingID, Code: start.Code}}, nil
+	return Reply{Template: "pair.html", Title: "Pair a new device", Data: pairCode{Flow: flow, Code: start.Code}}, nil
 }
 
-// pairWait blocks until the other device joins with the code.
+// pairWait blocks until the other device joins with the code. It needs no
+// password: it runs on the pairing's own connection, which only this
+// browser session can name. If it fails, the pairing ends.
 func pairWait(ctx context.Context, rq *Request) (Reply, error) {
 	var p ipc.PendingPeerResult
-	if err := rq.WithPassword(ctx, func() error {
-		return rq.Call(ctx, ipc.MethodPairAwait, ipc.PairAwaitParams{PendingID: rq.Form("pending_id")}, &p)
-	}); err != nil {
+	flow, err := rq.FlowStep(ctx, false, func(c Conn, pending string) error {
+		return c.Call(ctx, ipc.MethodPairAwait, ipc.PairAwaitParams{PendingID: pending}, &p)
+	})
+	if err != nil {
+		rq.EndFlow(flow)
 		return Reply{}, err
 	}
-	return nameStep(p), nil
+	return nameStep(flow, p.MachineID, suggestAlias(p.SuggestedName)), nil
 }
 
 func joinStart(ctx context.Context, rq *Request) (Reply, error) {
 	var p ipc.PendingPeerResult
-	if err := rq.WithPassword(ctx, func() error {
-		return rq.Call(ctx, ipc.MethodJoinStart, ipc.JoinStartParams{Code: rq.Form("code")}, &p)
-	}); err != nil {
+	flow, err := rq.StartFlow(ctx, func(c Conn) (string, error) {
+		err := c.Call(ctx, ipc.MethodJoinStart, ipc.JoinStartParams{Code: rq.Form("code")}, &p)
+		return p.PendingID, err
+	})
+	if err != nil {
 		return Reply{}, err
 	}
-	return nameStep(p), nil
+	return nameStep(flow, p.MachineID, suggestAlias(p.SuggestedName)), nil
 }
 
-func nameStep(p ipc.PendingPeerResult) Reply {
+func nameStep(flow, machineID, alias string) Reply {
 	return Reply{Template: "pairname.html", Title: "Name the new device", Data: pairName{
-		PendingID: p.PendingID, MachineID: cleanLine(p.MachineID), Suggested: suggestAlias(p.SuggestedName),
+		Flow: flow, MachineID: cleanLine(machineID), Alias: alias,
 	}}
 }
 
+// pairFinish names the new device and finishes the pairing. It needs the
+// password again; an error keeps the naming step so it can be retried.
 func pairFinish(ctx context.Context, rq *Request) (Reply, error) {
 	var res ipc.PairFinalizeResult
-	if err := rq.WithPassword(ctx, func() error {
-		return rq.Call(ctx, ipc.MethodPairFinalize, ipc.PairFinalizeParams{PendingID: rq.Form("pending_id"), Alias: rq.Form("alias")}, &res)
-	}); err != nil {
+	alias := rq.Form("alias")
+	flow, err := rq.FlowStep(ctx, true, func(c Conn, pending string) error {
+		return c.Call(ctx, ipc.MethodPairFinalize, ipc.PairFinalizeParams{PendingID: pending, Alias: alias}, &res)
+	})
+	if errors.Is(err, errFlowEnded) {
 		return Reply{}, err
 	}
+	if err != nil {
+		return nameStep(flow, rq.Form("machine"), alias), err
+	}
+	rq.EndFlow(flow)
 	return Reply{To: "/devices", Notice: "Paired with " + res.Alias + ". Its sessions can now ask to link with yours; you decide each link."}, nil
 }
 

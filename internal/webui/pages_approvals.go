@@ -2,7 +2,6 @@ package webui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/cravv/cravv-connect/internal/core"
@@ -20,8 +19,8 @@ func addApprovals(r *Registry) {
 			return Reply{}, err
 		}
 		var v ipc.LinkView
-		if err := rq.WithPassword(ctx, func() error {
-			return rq.Call(ctx, ipc.MethodLinkDecide, ipc.LinkDecideParams{Link: n, Accept: true, Permission: rq.Form("permission")}, &v)
+		if err := rq.WithPassword(ctx, func(c Conn) error {
+			return c.Call(ctx, ipc.MethodLinkDecide, ipc.LinkDecideParams{Link: n, Accept: true, Permission: rq.Form("permission")}, &v)
 		}); err != nil {
 			return Reply{}, err
 		}
@@ -37,19 +36,11 @@ func addApprovals(r *Registry) {
 		}
 		return Reply{Notice: fmt.Sprintf("Rejected link %d.", n)}, nil
 	}})
-	r.AddAction(Action{Path: "/approvals/unlock", Back: "/approvals", Run: func(ctx context.Context, rq *Request) (Reply, error) {
-		if rq.HTTP.PostFormValue("password") == "" {
-			return Reply{}, core.ErrAuthRequired
-		}
-		if err := rq.WithPassword(ctx, func() error { return nil }); err != nil {
-			return Reply{}, err
-		}
-		return Reply{}, nil
-	}})
+	r.AddAction(Action{Path: "/approvals/tasks", Back: "/approvals", Run: showTasks})
 	r.AddAction(Action{Path: "/approvals/task", Back: "/approvals", Run: func(ctx context.Context, rq *Request) (Reply, error) {
 		id, approve := rq.Form("task_id"), rq.Form("decision") == "approve"
-		if err := rq.WithPassword(ctx, func() error {
-			return rq.Call(ctx, ipc.MethodApprovalsDecide, ipc.ApprovalsDecideParams{TaskID: id, Approve: approve}, nil)
+		if err := rq.WithPassword(ctx, func(c Conn) error {
+			return c.Call(ctx, ipc.MethodApprovalsDecide, ipc.ApprovalsDecideParams{TaskID: id, Approve: approve}, nil)
 		}); err != nil {
 			return Reply{}, err
 		}
@@ -76,8 +67,10 @@ type approvalsData struct {
 	Permissions []core.Permission
 }
 
+// loadApprovals shows the link requests. Tasks need the password, so the
+// page only offers the form that shows them (showTasks).
 func loadApprovals(ctx context.Context, rq *Request) (any, error) {
-	d := approvalsData{Permissions: permissions}
+	d := approvalsData{Permissions: permissions, TasksLocked: true}
 	var links ipc.LinksResult
 	if err := rq.Call(ctx, ipc.MethodLinks, nil, &links); err != nil {
 		return nil, err
@@ -87,17 +80,27 @@ func loadApprovals(ctx context.Context, rq *Request) (any, error) {
 			d.Requests = append(d.Requests, newLinkRow(l))
 		}
 	}
+	return d, nil
+}
+
+// showTasks answers the password form with the Approvals page including
+// the tasks waiting for approval. They appear only in this answer; loading
+// the page again hides them.
+func showTasks(ctx context.Context, rq *Request) (Reply, error) {
 	var tasks ipc.ApprovalsListResult
-	err := rq.Call(ctx, ipc.MethodApprovalsList, nil, &tasks)
-	if errors.Is(err, core.ErrAuthRequired) {
-		d.TasksLocked = true
-		return d, nil
+	if err := rq.WithPassword(ctx, func(c Conn) error {
+		return c.Call(ctx, ipc.MethodApprovalsList, nil, &tasks)
+	}); err != nil {
+		return Reply{}, err
 	}
+	data, err := loadApprovals(ctx, rq)
 	if err != nil {
-		return d, err
+		return Reply{}, err
 	}
+	d := data.(approvalsData)
+	d.TasksLocked = false
 	for _, t := range tasks.Tasks {
 		d.Tasks = append(d.Tasks, taskRow{ApprovalView: t, PreviewText: peerLines(t.Preview), FullText: peerLines(t.Full), Truncated: t.Preview != t.Full})
 	}
-	return d, nil
+	return Reply{Template: "approvals.html", Title: "Approvals", Data: d}, nil
 }

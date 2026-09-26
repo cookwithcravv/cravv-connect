@@ -296,33 +296,80 @@ func TestStopsWithTheDaemon(t *testing.T) {
 	}
 }
 
-// A password typed on the page unlocks only this browser session's
-// connection; wrong passwords and the lockout are shown on the page.
-func TestPasswordUnlocksOnlyThisBrowser(t *testing.T) {
+// No password unlock outlives the request that carried the password: each
+// password action unlocks a fresh daemon connection, uses it once and
+// closes it. The browser session's own connection is never unlocked, so a
+// second action needs the password again. Wrong passwords and the lockout
+// are shown on the page.
+func TestNoUnlockOutlivesTheRequest(t *testing.T) {
 	fd := statusDaemon(t)
 	fd.setKilled(true)
 	u := newUI(t, fd)
-	a, b := u.open(), u.open()
+	a := u.open()
 
 	wantContains(t, a.follow("/status", "/status/resume", nil).body, "This needs your login password.")
+	if n := len(fd.called(ipc.MethodAuthUnlock)); n != 0 {
+		t.Fatalf("an empty password reached the daemon %d times", n)
+	}
 	wantContains(t, a.follow("/status", "/status/resume", url.Values{"password": {"nope"}}).body, "Incorrect password.")
 	page := a.follow("/status", "/status/resume", url.Values{"password": {"pw"}}).body
-	wantContains(t, page, "Resumed.", "Password unlocked until 12:10 UTC", "Turn on the kill switch")
-
-	fd.setKilled(true)
-	wantContains(t, b.follow("/status", "/status/resume", nil).body, "This needs your login password.")
-	if strings.Contains(b.get("/status").body, "Password unlocked") {
-		t.Fatal("the other browser session shows as unlocked")
+	wantContains(t, page, "Resumed.", "Turn on the kill switch")
+	if strings.Contains(page, "unlocked") {
+		t.Fatal("the page shows an unlock window")
 	}
-	// a's window is still open: no password needed.
-	wantContains(t, a.follow("/status", "/status/resume", nil).body, "Resumed.")
+	if n := u.pipes.Load(); n != 1 {
+		t.Fatalf("%d daemon connections open after the password action, want only the session's", n)
+	}
 
 	fd.setKilled(true)
+	wantContains(t, a.follow("/status", "/status/resume", nil).body, "This needs your login password.")
+	if !fd.isKilled() {
+		t.Fatal("resumed without the password right after a password action")
+	}
+
 	for range 4 {
-		b.follow("/status", "/status/resume", url.Values{"password": {"nope"}})
+		a.follow("/status", "/status/resume", url.Values{"password": {"nope"}})
 	}
-	wantContains(t, b.follow("/status", "/status/resume", url.Values{"password": {"pw"}}).body,
+	wantContains(t, a.follow("/status", "/status/resume", url.Values{"password": {"pw"}}).body,
 		"Too many wrong passwords. Password actions are locked for 15 minutes.")
+}
+
+// A cookie replayed from another client (another local process that read
+// it: cookies for 127.0.0.1 are sent to every port) cannot do a password
+// action without the password, and a password action by the human rotates
+// the cookie and the CSRF token, so the copies stop working.
+func TestReplayedCookieCannotUseThePassword(t *testing.T) {
+	fd := statusDaemon(t)
+	fd.setKilled(true)
+	u := newUI(t, fd)
+	human := u.open()
+	thief := newBrowser(t, human.base)
+	thief.cookie = human.cookie
+
+	// The thief replays the cookie right after the human typed the password.
+	oldCookie, oldCSRF := human.cookie.Value, human.csrf("/status")
+	wantContains(t, human.follow("/status", "/status/resume", url.Values{"password": {"pw"}}).body, "Resumed.")
+	fd.setKilled(true)
+	if human.cookie.Value == oldCookie {
+		t.Fatal("the session cookie was not rotated after a password action")
+	}
+	if r := thief.do("POST", "/status/resume", url.Values{"csrf": {oldCSRF}}, func(r *http.Request) { r.Header.Set("Origin", thief.base) }); r.code != http.StatusUnauthorized {
+		t.Fatalf("old cookie after rotation: %d %s", r.code, r.body)
+	}
+	if r := thief.get("/status"); r.code != http.StatusUnauthorized {
+		t.Fatalf("old cookie reads a page after rotation: %d", r.code)
+	}
+	// The old CSRF token does not work with the new cookie either.
+	if r := human.do("POST", "/status/kill", url.Values{"csrf": {oldCSRF}}, func(r *http.Request) { r.Header.Set("Origin", human.base) }); r.code != http.StatusForbidden {
+		t.Fatalf("old CSRF token after rotation: %d", r.code)
+	}
+
+	// A copy of the current cookie still needs the password.
+	thief.cookie = human.cookie
+	wantContains(t, thief.follow("/status", "/status/resume", nil).body, "This needs your login password.")
+	if !fd.isKilled() {
+		t.Fatal("a replayed cookie resumed without the password")
+	}
 }
 
 // Past MaxSessions the oldest browser session ends.

@@ -189,32 +189,32 @@ func (s *server) launch(w http.ResponseWriter, r *http.Request) {
 		s.deny(w, http.StatusForbidden, "This link was already used or has expired. Run cravv-connect ui again for a new one.")
 		return
 	}
-	sess, err := s.newSession()
+	_, id, err := s.newSession()
 	if err != nil {
 		s.log.Warn("web UI session", "err", err)
 		s.deny(w, http.StatusServiceUnavailable, "Could not reach the daemon. Run cravv-connect ui again.")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: s.cookie, Value: sess.id, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	s.setCookie(w, id)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // newSession opens a daemon connection for a new browser session, ending
 // the oldest session beyond MaxSessions.
-func (s *server) newSession() (*uiSession, error) {
+func (s *server) newSession() (*uiSession, string, error) {
 	id, err := randomToken()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	csrf, err := randomToken()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	c, err := s.dial()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	sess := &uiSession{id: id, csrf: csrf, c: c, clock: s.clock}
+	sess := newUISession(c, csrf)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[id] = sess
@@ -223,29 +223,84 @@ func (s *server) newSession() (*uiSession, error) {
 		old := s.order[0]
 		s.order = s.order[1:]
 		if o, ok := s.sessions[old]; ok {
-			o.c.Close()
+			o.end()
 			delete(s.sessions, old)
 		}
 	}
-	return sess, nil
+	return sess, id, nil
 }
 
-// session returns the browser session named by the request's cookie.
-func (s *server) session(r *http.Request) *uiSession {
+func (s *server) setCookie(w http.ResponseWriter, id string) {
+	http.SetCookie(w, &http.Cookie{Name: s.cookie, Value: id, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
+}
+
+// session returns the browser session named by the request's cookie and
+// its cookie ID.
+func (s *server) session(r *http.Request) (*uiSession, string) {
 	ck, err := r.Cookie(s.cookie)
 	if err != nil {
-		return nil
+		return nil, ""
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.sessions[ck.Value]
+	sess := s.sessions[ck.Value]
+	if sess == nil {
+		return nil, ""
+	}
+	return sess, ck.Value
+}
+
+// rotate gives a session a new cookie ID and CSRF token after a password
+// action, so a copy of the old cookie or token (read by another local
+// process) stops working.
+func (s *server) rotate(w http.ResponseWriter, sess *uiSession, oldID string) {
+	id, err := randomToken()
+	if err != nil {
+		s.log.Warn("web UI session rotation", "err", err)
+		return
+	}
+	csrf, err := randomToken()
+	if err != nil {
+		s.log.Warn("web UI session rotation", "err", err)
+		return
+	}
+	s.mu.Lock()
+	if s.sessions[oldID] != sess {
+		// Ended meanwhile.
+		s.mu.Unlock()
+		return
+	}
+	delete(s.sessions, oldID)
+	s.sessions[id] = sess
+	for i, o := range s.order {
+		if o == oldID {
+			s.order[i] = id
+		}
+	}
+	s.mu.Unlock()
+	sess.setCSRF(csrf)
+	s.setCookie(w, id)
+}
+
+// sweepFlows ends every session's expired pairings.
+func (s *server) sweepFlows() {
+	s.mu.Lock()
+	list := make([]*uiSession, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		list = append(list, sess)
+	}
+	s.mu.Unlock()
+	now := s.clock.Now()
+	for _, sess := range list {
+		sess.sweepFlows(now)
+	}
 }
 
 func (s *server) closeSessions() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, sess := range s.sessions {
-		sess.c.Close()
+		sess.end()
 		delete(s.sessions, id)
 	}
 	s.order = nil
@@ -259,7 +314,7 @@ func (s *server) sameOrigin(r *http.Request) bool {
 }
 
 func (s *server) home(w http.ResponseWriter, r *http.Request) {
-	if s.session(r) == nil {
+	if sess, _ := s.session(r); sess == nil {
 		s.denyNoSession(w)
 		return
 	}
@@ -285,22 +340,23 @@ func (s *server) deny(w http.ResponseWriter, code int, msg string) {
 // page serves a page's GET view.
 func (s *server) page(p Page) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess := s.session(r)
+		sess, _ := s.session(r)
 		if sess == nil {
 			s.denyNoSession(w)
 			return
 		}
-		rq := &Request{HTTP: r, sess: sess}
+		rq := &Request{HTTP: r, sess: sess, srv: s}
 		data, err := p.Load(r.Context(), rq)
 		s.render(w, rq, p.Path, p.Title, p.Template, data, err)
 	}
 }
 
 // action runs a state-changing POST: it needs the session cookie, the
-// session's CSRF token and a matching Origin.
+// session's CSRF token and a matching Origin. Once a password was accepted
+// the session gets a new cookie and CSRF token.
 func (s *server) action(a Action) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess := s.session(r)
+		sess, id := s.session(r)
 		if sess == nil {
 			s.denyNoSession(w)
 			return
@@ -318,8 +374,16 @@ func (s *server) action(a Action) http.HandlerFunc {
 			s.deny(w, http.StatusForbidden, "Missing or wrong form token. Reload the page and try again.")
 			return
 		}
-		rq := &Request{HTTP: r, sess: sess}
+		rq := &Request{HTTP: r, sess: sess, srv: s}
 		rep, err := a.Run(r.Context(), rq)
+		if rq.passwordOK {
+			s.rotate(w, sess, id)
+		}
+		if err != nil && rep.Template != "" {
+			// A step of a multi-step flow shows its own error in place.
+			s.render(w, rq, a.Back, rep.Title, rep.Template, rep.Data, err)
+			return
+		}
 		if err != nil {
 			sess.addFlash(flashError, message(err))
 			http.Redirect(w, r, a.Back, http.StatusSeeOther)

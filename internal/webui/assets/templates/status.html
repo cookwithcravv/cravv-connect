@@ -5,7 +5,7 @@
 <p class="warn">The kill switch is on. Links are closed and nothing is sent or received.</p>
 <form method="post" action="/status/resume">
 <input type="hidden" name="csrf" value="{{$csrf}}">
-{{template "password" (not $.Unlocked)}}
+{{template "password"}}
 <button type="submit">Resume</button>
 </form>
 {{else}}

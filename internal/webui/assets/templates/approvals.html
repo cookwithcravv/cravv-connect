@@ -8,7 +8,7 @@
 <form method="post" action="/approvals/link/accept">
 <input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="link" value="{{.Link}}">
 <label>Grant <select name="permission">{{$p := .Proposed}}{{range $d.Permissions}}<option value="{{.}}"{{if eq (print .) $p}} selected{{end}}>{{.}}</option>{{end}}</select></label>
-{{template "password" (not $.Unlocked)}}
+{{template "password"}}
 <button type="submit">Accept</button>
 </form>
 <form method="post" action="/approvals/link/reject">
@@ -22,9 +22,9 @@
 <h2>Tasks waiting for approval</h2>
 {{if .TasksLocked}}
 <p>Enter your password to see tasks waiting for your approval.</p>
-<form method="post" action="/approvals/unlock" class="block">
+<form method="post" action="/approvals/tasks" class="block">
 <input type="hidden" name="csrf" value="{{$csrf}}">
-{{template "password" true}}
+{{template "password"}}
 <button type="submit">Show tasks</button>
 </form>
 {{else if .Tasks}}
@@ -34,7 +34,7 @@
 {{if .Truncated}}<details><summary>Full text</summary><pre class="peer">{{.FullText}}</pre></details>{{end}}
 <form method="post" action="/approvals/task">
 <input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="task_id" value="{{.TaskID}}">
-{{template "password" (not $.Unlocked)}}
+{{template "password"}}
 <button type="submit" name="decision" value="approve">Approve</button>
 <button type="submit" name="decision" value="deny" class="secondary">Deny</button>
 </form>

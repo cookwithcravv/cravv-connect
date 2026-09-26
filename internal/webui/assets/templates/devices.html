@@ -26,7 +26,7 @@
 <p>Creates a one-time bind code for the other device. It works once and expires in 10 minutes.</p>
 <form method="post" action="/devices/pair" class="block">
 <input type="hidden" name="csrf" value="{{$csrf}}">
-{{template "password" (not $.Unlocked)}}
+{{template "password"}}
 <button type="submit">Create a bind code</button>
 </form>
 <h2>Join with a code</h2>
@@ -34,7 +34,7 @@
 <form method="post" action="/devices/join" class="block">
 <input type="hidden" name="csrf" value="{{$csrf}}">
 <label>Bind code <input name="code" required autocomplete="off"></label>
-{{template "password" (not $.Unlocked)}}
+{{template "password"}}
 <button type="submit">Join</button>
 </form>
 </section>

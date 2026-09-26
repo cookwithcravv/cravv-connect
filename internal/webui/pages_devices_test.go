@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -58,34 +59,76 @@ func TestDevicesPauseResumeUnpair(t *testing.T) {
 	}
 }
 
-// Pairing on the page: the password unlocks, the bind code shows, the wait
-// form (submitted by the script, or by hand) returns the other device, and
-// naming it finishes the pairing.
+var flowField = regexp.MustCompile(`name="flow" value="([^"]+)"`)
+
+// flowID reads the pairing flow ID from a pairing step.
+func flowID(t *testing.T, body string) string {
+	t.Helper()
+	m := flowField.FindStringSubmatch(body)
+	if m == nil {
+		t.Fatalf("no flow field:\n%s", body)
+	}
+	return m[1]
+}
+
+// Pairing on the page: the password starts the pairing on a daemon
+// connection of its own, the bind code shows, the wait form (submitted by
+// the script, or by hand) returns the other device, and naming it with the
+// password again finishes the pairing and closes that connection. The
+// daemon's pending ID never reaches the page.
 func TestPairNewDeviceOnThePage(t *testing.T) {
 	fd := devicesDaemon(t)
-	b := newUI(t, fd).open()
+	u := newUI(t, fd)
+	b := u.open()
 	wantContains(t, b.follow("/devices", "/devices/pair", nil).body, "This needs your login password.")
 
 	r := b.post("/devices", "/devices/pair", url.Values{"password": {"pw"}})
 	if r.code != http.StatusOK {
 		t.Fatalf("pair: %d %s", r.code, r.body)
 	}
-	wantContains(t, r.body, `<p class="code">ABCD-2345</p>`, "cravv-connect join ABCD-2345",
-		`action="/devices/pair/wait" data-autosubmit`, `name="pending_id" value="P1"`)
+	wantContains(t, r.body, `<p class="code">ABCD-2345</p>`, "cravv-connect join ABCD-2345", `action="/devices/pair/wait" data-autosubmit`)
+	flow := flowID(t, r.body)
+	if strings.Contains(r.body, `value="P1"`) {
+		t.Fatal("the daemon's pending ID reached the page")
+	}
+	if n := u.pipes.Load(); n != 2 {
+		t.Fatalf("%d daemon connections open during pairing, want the session's and the pairing's", n)
+	}
 
-	r = b.post("/devices", "/devices/pair/wait", url.Values{"pending_id": {"P1"}})
+	r = b.post("/devices", "/devices/pair/wait", url.Values{"flow": {flow}})
 	if r.code != http.StatusOK {
 		t.Fatalf("wait: %d %s", r.code, r.body)
 	}
-	wantContains(t, r.body, "<code>NEWMACHINEID0000</code>", `name="alias" value="gpu-box-b"`)
+	wantContains(t, r.body, "<code>NEWMACHINEID0000</code>", `name="alias" value="gpu-box-b"`, `name="flow" value="`+flow+`"`)
 	if strings.Contains(r.body, "<b>") {
 		t.Fatal("the other device's suggested name reached the page unescaped")
 	}
-	page := b.follow("/devices", "/devices/pair/finish", url.Values{"pending_id": {"P1"}, "alias": {"gpu"}}).body
+	if got := fd.called(ipc.MethodPairAwait); len(got) != 1 || got[0] != `{"pending_id":"P1"}` {
+		t.Fatalf("await calls %v", got)
+	}
+
+	// Naming the device needs the password again; a wrong one keeps the
+	// naming step.
+	r = b.post("/devices", "/devices/pair/finish", url.Values{"flow": {flow}, "alias": {"gpu"}})
+	if r.code != http.StatusOK {
+		t.Fatalf("finish without the password: %d %s", r.code, r.body)
+	}
+	wantContains(t, r.body, "This needs your login password.", `name="flow" value="`+flow+`"`, `name="alias" value="gpu"`)
+	r = b.post("/devices", "/devices/pair/finish", url.Values{"flow": {flow}, "alias": {"gpu"}, "password": {"nope"}})
+	wantContains(t, r.body, "Incorrect password.", `name="flow" value="`+flow+`"`)
+	if n := len(fd.called(ipc.MethodPairFinalize)); n != 0 {
+		t.Fatalf("finalize called %d times without the password", n)
+	}
+
+	page := b.follow("/devices", "/devices/pair/finish", url.Values{"flow": {flow}, "alias": {"gpu"}, "password": {"pw"}}).body
 	wantContains(t, page, "Paired with gpu. Its sessions can now ask to link with yours; you decide each link.")
 	if got := fd.called(ipc.MethodPairFinalize); len(got) != 1 || got[0] != `{"pending_id":"P1","alias":"gpu"}` {
 		t.Fatalf("finalize calls %v", got)
 	}
+	if n := u.pipes.Load(); n != 1 {
+		t.Fatalf("%d daemon connections open after pairing", n)
+	}
+	wantContains(t, b.follow("/devices", "/devices/pair/wait", url.Values{"flow": {flow}}).body, "This pairing ended.")
 }
 
 func TestJoinWithACodeOnThePage(t *testing.T) {
@@ -95,9 +138,56 @@ func TestJoinWithACodeOnThePage(t *testing.T) {
 	if r.code != http.StatusOK {
 		t.Fatalf("join: %d %s", r.code, r.body)
 	}
-	wantContains(t, r.body, `action="/devices/pair/finish"`, `name="pending_id" value="P1"`)
+	wantContains(t, r.body, `action="/devices/pair/finish"`)
+	flow := flowID(t, r.body)
 	if got := fd.called(ipc.MethodJoinStart); len(got) != 1 || got[0] != `{"code":"ABCD-2345"}` {
 		t.Fatalf("join calls %v", got)
+	}
+	wantContains(t, b.follow("/devices", "/devices/pair/finish", url.Values{"flow": {flow}, "alias": {"gpu"}, "password": {"pw"}}).body, "Paired with gpu.")
+}
+
+// A pairing belongs to the browser session that started it: another
+// session (or a replayed old cookie) cannot use its flow ID. It ends after
+// PairFlowTTL, and when its browser session ends.
+func TestPairingFlowIsBoundAndExpires(t *testing.T) {
+	fd := devicesDaemon(t)
+	u := newUI(t, fd)
+	b := u.open()
+	stale := *b.cookie
+	r := b.post("/devices", "/devices/pair", url.Values{"password": {"pw"}})
+	flow := flowID(t, r.body)
+
+	other := u.open()
+	wantContains(t, other.follow("/devices", "/devices/pair/wait", url.Values{"flow": {flow}}).body, "This pairing ended.")
+	old := newBrowser(t, b.base)
+	old.cookie = &stale
+	if r := old.get("/devices"); r.code != http.StatusUnauthorized {
+		t.Fatalf("cookie from before the password: %d", r.code)
+	}
+	if n := len(fd.called(ipc.MethodPairAwait)); n != 0 {
+		t.Fatalf("await called %d times by another session", n)
+	}
+
+	u.clock.Advance(PairFlowTTL)
+	u.l.sweep()
+	if n := u.pipes.Load(); n != 2 {
+		t.Fatalf("%d daemon connections open after the pairing expired, want two sessions'", n)
+	}
+	wantContains(t, b.follow("/devices", "/devices/pair/wait", url.Values{"flow": {flow}}).body, "This pairing ended.")
+
+	// Session end closes a pairing's connection.
+	b.post("/devices", "/devices/pair", url.Values{"password": {"pw"}})
+	if n := u.pipes.Load(); n != 3 {
+		t.Fatalf("%d daemon connections open with a new pairing", n)
+	}
+	for range MaxSessions {
+		u.open()
+	}
+	if r := b.get("/devices"); r.code != http.StatusUnauthorized {
+		t.Fatalf("evicted session: %d", r.code)
+	}
+	if n := u.pipes.Load(); n != MaxSessions {
+		t.Fatalf("%d daemon connections open after the session ended, want %d", n, MaxSessions)
 	}
 }
 

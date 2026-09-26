@@ -11,7 +11,6 @@
 <header>
 <span class="brand">cravv-connect</span>
 <nav>{{range .Nav}}<a href="{{.Path}}"{{if .Current}} aria-current="page"{{end}}>{{.Title}}</a>{{end}}</nav>
-{{if .Unlocked}}<span class="unlocked">{{.Unlocked}}</span>{{end}}
 </header>
 <main>
 <h1>{{.Title}}</h1>
@@ -22,4 +21,4 @@
 </body>
 </html>
 {{end}}
-{{define "password"}}<label class="password">Login password <input type="password" name="password" autocomplete="current-password"{{if .}} required{{end}}></label>{{end}}
+{{define "password"}}<label class="password">Login password <input type="password" name="password" autocomplete="current-password" required></label>{{end}}

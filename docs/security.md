@@ -195,7 +195,35 @@ already chose when pairing.
 talks to the daemon over its own in-process IPC connection, so the gates,
 tiers and password lockout above apply unchanged.
 
+- **No unlock outlives a request.** The browser session's own connection is
+  never unlocked. Every action that needs the password carries it in its
+  own form: the UI opens a fresh connection, unlocks it with that password,
+  runs the one call and closes it. There is no "unlocked for 10 minutes"
+  window in the browser. Tasks waiting for approval are shown only in the
+  answer to the form that carried the password.
+- **Pairing** spans several pages (the bind code, the wait, the name), so
+  it keeps one connection of its own, unlocked by the password that started
+  it. The page only sees a random flow ID; the connection belongs to the
+  browser session that started it and is closed when the pairing is
+  finished, after 10 minutes, or when that session ends. Naming the new
+  device asks for the password again.
+- **After every accepted password** the session gets a new cookie and a new
+  form token, so copies of the old ones stop working.
+- The session cookie is `HttpOnly` and `SameSite=Strict`; every form post
+  also needs the session's form token and the UI's own `Origin`.
+
 ### Honest limits
+
+- **Cookies are shared across ports.** Browsers send a cookie for
+  `127.0.0.1` to every port on that address, so a local program the browser
+  visits on another port can read the session cookie, and one that can set
+  cookies there can plant one. With it, that program can do what needs no
+  password (kill, pause, disconnect, reject a link, read the pages) until
+  the session ends or the cookie rotates. It cannot do anything that needs
+  the password, because no unlock is kept between requests.
+- Any local process of the same user can run `cravv-connect ui` and use the
+  no-password actions, exactly as it could with the CLI. Wrong passwords
+  typed on the page count toward the same 15-minute lockout.
 
 - **Launch links.** At most 8 unused launch links are live. When all 8 are
   younger than 10 seconds, `ui.start` is refused as busy ("wait a few seconds

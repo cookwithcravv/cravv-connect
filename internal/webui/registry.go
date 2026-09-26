@@ -2,9 +2,11 @@ package webui
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/ipc"
 )
 
@@ -76,9 +78,23 @@ func DefaultRegistry() *Registry {
 type Request struct {
 	HTTP *http.Request
 	sess *uiSession
+	srv  *server
+	// passwordOK is set once the daemon accepted a password in this
+	// request; the server then rotates the session's cookie and CSRF token.
+	passwordOK bool
 }
 
-// Call calls the daemon on this browser session's connection.
+// Conn is a daemon connection a password action runs on.
+type Conn interface {
+	Call(ctx context.Context, method string, params, result any) error
+}
+
+// errFlowEnded is returned for a pairing step whose flow is gone (finished,
+// expired, ended with its browser session, or never this session's).
+var errFlowEnded = errors.New("this pairing ended")
+
+// Call calls the daemon on this browser session's connection, which is
+// never unlocked.
 func (rq *Request) Call(ctx context.Context, method string, params, result any) error {
 	return rq.sess.c.Call(ctx, method, params, result)
 }
@@ -93,18 +109,95 @@ func (rq *Request) Query(name string) string {
 	return strings.TrimSpace(rq.HTTP.URL.Query().Get(name))
 }
 
-// WithPassword runs fn, an action the daemon gates behind the password. A
-// password typed into the form's "password" field first unlocks this
-// browser session's connection; the daemon's Guard checks it with the same
-// rate limit and lockout as the CLI. Without one, fn runs as is and fails
-// with the daemon's auth_required unless the window is still open.
-func (rq *Request) WithPassword(ctx context.Context, fn func() error) error {
-	if pw := rq.HTTP.PostFormValue("password"); pw != "" {
-		var r ipc.UnlockResult
-		if err := rq.Call(ctx, ipc.MethodAuthUnlock, ipc.UnlockParams{Password: pw}, &r); err != nil {
-			return err
-		}
-		rq.sess.setUnlocked(r.ExpiresAt)
+// WithPassword runs fn, an action the daemon gates behind the password, on
+// a fresh daemon connection unlocked with the password typed into this
+// request's "password" field, and closes that connection afterwards. No
+// unlock outlives the request. The daemon's Guard checks the password with
+// the same rate limit and lockout as the CLI; an empty field is refused
+// here without counting as an attempt.
+func (rq *Request) WithPassword(ctx context.Context, fn func(c Conn) error) error {
+	c, err := rq.unlocked(ctx)
+	if err != nil {
+		return err
 	}
-	return fn()
+	defer c.Close()
+	return fn(c)
 }
+
+// unlocked opens a daemon connection and unlocks it with the request's
+// password.
+func (rq *Request) unlocked(ctx context.Context) (Caller, error) {
+	pw := rq.HTTP.PostFormValue("password")
+	if pw == "" {
+		return nil, core.ErrAuthRequired
+	}
+	c, err := rq.srv.dial()
+	if err != nil {
+		return nil, err
+	}
+	if err := unlock(ctx, c, pw); err != nil {
+		c.Close()
+		return nil, err
+	}
+	rq.passwordOK = true
+	return c, nil
+}
+
+func unlock(ctx context.Context, c Conn, pw string) error {
+	var r ipc.UnlockResult
+	return c.Call(ctx, ipc.MethodAuthUnlock, ipc.UnlockParams{Password: pw}, &r)
+}
+
+// StartFlow begins a pairing, which spans several requests: start runs on a
+// new daemon connection unlocked with this request's password and returns
+// the daemon's pending ID. The connection stays open for the flow's later
+// steps until FinishFlow, PairFlowTTL, or the end of the browser session.
+// It returns the flow ID for the page.
+func (rq *Request) StartFlow(ctx context.Context, start func(c Conn) (pendingID string, err error)) (string, error) {
+	c, err := rq.unlocked(ctx)
+	if err != nil {
+		return "", err
+	}
+	pending, err := start(c)
+	if err != nil {
+		c.Close()
+		return "", err
+	}
+	id, err := randomToken()
+	if err != nil {
+		c.Close()
+		return "", err
+	}
+	f := &pairFlow{c: c, pendingID: pending, expires: rq.srv.clock.Now().Add(PairFlowTTL)}
+	if !rq.sess.addFlow(id, f) {
+		c.Close()
+		return "", ipc.ErrClosed
+	}
+	return id, nil
+}
+
+// FlowStep runs a later step of this session's pairing called by the
+// form's "flow" field on the pairing's connection, with its pending ID. If
+// needPassword, the request's password must unlock that connection again
+// first. It returns the flow ID.
+func (rq *Request) FlowStep(ctx context.Context, needPassword bool, step func(c Conn, pendingID string) error) (string, error) {
+	id := rq.Form("flow")
+	f := rq.sess.flow(id, rq.srv.clock.Now())
+	if f == nil {
+		return id, errFlowEnded
+	}
+	if needPassword {
+		pw := rq.HTTP.PostFormValue("password")
+		if pw == "" {
+			return id, core.ErrAuthRequired
+		}
+		if err := unlock(ctx, f.c, pw); err != nil {
+			return id, err
+		}
+		rq.passwordOK = true
+	}
+	return id, step(f.c, f.pendingID)
+}
+
+// EndFlow ends this session's pairing called id and closes its connection.
+func (rq *Request) EndFlow(id string) { rq.sess.endFlow(id) }

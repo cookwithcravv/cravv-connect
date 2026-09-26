@@ -1,8 +1,11 @@
 // Package webui is the local web UI: an HTTP server on 127.0.0.1 that the
 // daemon starts on request (ui.start). It is a thin client over the IPC API.
 // Every browser session holds its own in-process IPC connection, so the
-// daemon's gates, tiers and password lockout apply unchanged, and a password
-// unlock belongs to that browser session only.
+// daemon's gates, tiers and password lockout apply unchanged. That
+// connection is never unlocked: a password action unlocks a fresh
+// connection with the password of that one request and closes it, so no
+// unlock outlives the request (a cookie for 127.0.0.1 reaches every port on
+// that address, so the cookie alone must never be worth a password).
 package webui
 
 import (
@@ -33,6 +36,12 @@ const (
 	// LaunchTokenGrace is how long a new launch token cannot be dropped to
 	// make room, so the browser the CLI opens gets to use it.
 	LaunchTokenGrace = 10 * time.Second
+	// PairFlowTTL is how long a pairing started on the page keeps its
+	// unlocked daemon connection (the bind code's lifetime).
+	PairFlowTTL = 10 * time.Minute
+	// MaxPairFlows caps pairings in progress per browser session; the
+	// oldest is ended first.
+	MaxPairFlows = 2
 	// DefaultSweepEvery is how often the idle timeout is checked.
 	DefaultSweepEvery = time.Minute
 )
@@ -167,11 +176,16 @@ func (l *Launcher) sweepLoop(r *running) {
 	}
 }
 
-// sweep stops the server once IdleTimeout has passed since the last request.
+// sweep ends expired pairings and stops the server once IdleTimeout has
+// passed since the last request.
 func (l *Launcher) sweep() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.run != nil && l.o.Clock.Now().Sub(l.run.srv.lastRequest()) >= IdleTimeout {
+	if l.run == nil {
+		return
+	}
+	l.run.srv.sweepFlows()
+	if l.o.Clock.Now().Sub(l.run.srv.lastRequest()) >= IdleTimeout {
 		l.o.Logger.Info("web UI idle, stopping")
 		l.stopRunLocked()
 	}

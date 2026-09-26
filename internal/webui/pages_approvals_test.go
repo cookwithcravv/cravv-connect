@@ -2,6 +2,7 @@ package webui
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -45,7 +46,8 @@ func TestLinkRequestsOnTheApprovalsPage(t *testing.T) {
 	wantContains(t, b.follow("/approvals", "/approvals/link/accept", accept).body, "Accepted link 2: mac/helper may now use messages.")
 	wantContains(t, b.follow("/approvals", "/approvals/link/reject", url.Values{"link": {"2"}}).body, "Rejected link 2.")
 	got := fd.called(ipc.MethodLinkDecide)
-	if len(got) != 3 || got[1] != `{"link":2,"accept":true,"permission":"messages"}` || got[2] != `{"link":2,"accept":false}` {
+	// Accepting without a password never reaches the daemon.
+	if len(got) != 2 || got[0] != `{"link":2,"accept":true,"permission":"messages"}` || got[1] != `{"link":2,"accept":false}` {
 		t.Fatalf("decide calls %v", got)
 	}
 }
@@ -61,21 +63,39 @@ func TestRejectNeedsNoPassword(t *testing.T) {
 	}
 }
 
-// Tasks waiting for approval need the password to see and to decide.
+// Tasks waiting for approval need the password to see and to decide. The
+// task text is shown only in the answer to the POST that carried the
+// password; loading the page again hides it, and each decision needs the
+// password again.
 func TestTasksNeedThePassword(t *testing.T) {
 	fd := approvalsDaemon(t)
-	b := newUI(t, fd).open()
+	u := newUI(t, fd)
+	b := u.open()
 	page := b.get("/approvals").body
-	wantContains(t, page, "Enter your password to see tasks waiting for your approval.")
+	wantContains(t, page, "Enter your password to see tasks waiting for your approval.", `action="/approvals/tasks"`)
 	if strings.Contains(page, "run the tests") {
 		t.Fatal("task text shown before the password")
 	}
-	wantContains(t, b.follow("/approvals", "/approvals/unlock", nil).body, "This needs your login password.")
-	page = b.follow("/approvals", "/approvals/unlock", url.Values{"password": {"pw"}}).body
-	wantContains(t, page, "Task <code>T1</code> from <strong>gpu-box</strong>", "run the tests\n&lt;/pre&gt;&lt;script&gt;",
-		"<summary>Full text</summary>", "SHA-256 <code>abc123</code>")
-	wantContains(t, b.follow("/approvals", "/approvals/task", url.Values{"task_id": {"T1"}, "decision": {"approve"}}).body, "Approved task T1.")
-	wantContains(t, b.follow("/approvals", "/approvals/task", url.Values{"task_id": {"T1"}, "decision": {"deny"}}).body, "Denied task T1.")
+	wantContains(t, b.follow("/approvals", "/approvals/tasks", nil).body, "This needs your login password.")
+	r := b.post("/approvals", "/approvals/tasks", url.Values{"password": {"pw"}})
+	if r.code != http.StatusOK {
+		t.Fatalf("show tasks: %d %s", r.code, r.body)
+	}
+	wantContains(t, r.body, "Task <code>T1</code> from <strong>gpu-box</strong>", "run the tests\n&lt;/pre&gt;&lt;script&gt;",
+		"<summary>Full text</summary>", "SHA-256 <code>abc123</code>", "Link 2: <strong>mac/helper</strong>")
+	if n := u.pipes.Load(); n != 1 {
+		t.Fatalf("%d daemon connections open after showing tasks", n)
+	}
+	if strings.Contains(b.get("/approvals").body, "run the tests") {
+		t.Fatal("task text shown again without the password")
+	}
+
+	decide := url.Values{"task_id": {"T1"}, "decision": {"approve"}}
+	wantContains(t, b.follow("/approvals", "/approvals/task", decide).body, "This needs your login password.")
+	decide.Set("password", "pw")
+	wantContains(t, b.follow("/approvals", "/approvals/task", decide).body, "Approved task T1.")
+	decide.Set("decision", "deny")
+	wantContains(t, b.follow("/approvals", "/approvals/task", decide).body, "Denied task T1.")
 	got := fd.called(ipc.MethodApprovalsDecide)
 	if len(got) != 2 || got[0] != `{"task_id":"T1","approve":true}` || got[1] != `{"task_id":"T1","approve":false}` {
 		t.Fatalf("decide calls %v", got)

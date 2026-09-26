@@ -3,9 +3,10 @@
 <p>Connected to machine <code>{{short .MachineID}}</code>. Choose the name this machine will use for it.</p>
 <form method="post" action="/devices/pair/finish" class="block">
 <input type="hidden" name="csrf" value="{{$csrf}}">
-<input type="hidden" name="pending_id" value="{{.PendingID}}">
-<label>Name <input name="alias" value="{{.Suggested}}" required maxlength="24" autocomplete="off"></label>
-{{template "password" (not $.Unlocked)}}
+<input type="hidden" name="flow" value="{{.Flow}}">
+<input type="hidden" name="machine" value="{{.MachineID}}">
+<label>Name <input name="alias" value="{{.Alias}}" required maxlength="24" autocomplete="off"></label>
+{{template "password"}}
 <button type="submit">Pair</button>
 </form>
 <p class="muted">Pairing lets the two machines see shared sessions and ask for links. You decide each link.</p>
