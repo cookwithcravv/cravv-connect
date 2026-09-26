@@ -49,15 +49,20 @@ func newJoinCmd(env *Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var pending ipc.PendingPeerResult
-			if err := withUnlock(ctx, env, c, func() error {
-				return c.Call(ctx, ipc.MethodJoinStart, ipc.JoinStartParams{Code: code}, &pending)
-			}); err != nil {
-				return err
-			}
-			return finalizePeer(ctx, env, c, pending)
+			return joinNow(ctx, env, c, code)
 		},
 	}
+}
+
+// joinNow joins with a bind code and asks for the other machine's local name.
+func joinNow(ctx context.Context, env *Env, c Caller, code string) error {
+	var pending ipc.PendingPeerResult
+	if err := withUnlock(ctx, env, c, func() error {
+		return c.Call(ctx, ipc.MethodJoinStart, ipc.JoinStartParams{Code: code}, &pending)
+	}); err != nil {
+		return err
+	}
+	return finalizePeer(ctx, env, c, pending)
 }
 
 // pairNow creates a bind code, shows it as a join code (and QR code when qr

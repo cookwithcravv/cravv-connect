@@ -11,6 +11,7 @@ import (
 
 	"github.com/cravv/cravv-connect/internal/config"
 	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cravv/cravv-connect/internal/joincode"
 	"github.com/cravv/cravv-connect/internal/relayaddr"
 	"github.com/spf13/cobra"
 )
@@ -22,6 +23,7 @@ type setupOptions struct {
 	relay, token, name string
 	yes, noAgents      bool
 	pair, reset        bool
+	join               string
 }
 
 func newSetupCmd(env *Env) *cobra.Command {
@@ -46,6 +48,10 @@ func newSetupCmd(env *Env) *cobra.Command {
 	f.BoolVar(&o.noAgents, "no-agents", false, "do not set up agent integrations")
 	f.BoolVar(&o.pair, "pair", false, "pair a device at the end without asking")
 	f.BoolVar(&o.reset, "reset", false, "set this machine up again from the start (asks first)")
+	f.StringVar(&o.join, "join", "", "join the machine that showed this join code (cravv-join:...), on its relay")
+	cmd.MarkFlagsMutuallyExclusive("join", "relay")
+	cmd.MarkFlagsMutuallyExclusive("join", "relay-token")
+	cmd.MarkFlagsMutuallyExclusive("join", "pair")
 	return cmd
 }
 
@@ -69,6 +75,14 @@ func runSetup(ctx context.Context, env *Env, o setupOptions) error {
 		return err
 	}
 	s := &setup{ctx: ctx, env: env, sys: env.setupSystem(), o: o, w: env.Stdout, paths: paths}
+	var jc *joincode.Code
+	if o.join != "" {
+		c, err := setupJoinCode(o.join)
+		if err != nil {
+			return err
+		}
+		jc = &c
+	}
 	cfg, configured, err := s.current()
 	if err != nil {
 		return err
@@ -86,6 +100,9 @@ func runSetup(ctx context.Context, env *Env, o setupOptions) error {
 			return err
 		}
 		configured = false
+	}
+	if jc != nil {
+		return s.joinFlow(*jc, cfg, configured)
 	}
 	return s.hostFlow(cfg, configured)
 }
@@ -237,6 +254,14 @@ func (s *setup) daemonOnline(install, needRelay bool) (ipc.StatusResult, error) 
 	if err != nil || !needRelay {
 		return st, err
 	}
+	return s.waitRelay(st, "If another machine is already on this relay, set this one up with "+
+		"`cravv-connect setup --reset --join <code>` instead (a join code from `cravv-connect pair` there). ")
+}
+
+// waitRelay waits until the daemon is connected to the relay, polling from
+// st; on a timeout the error names the daemon's errors, advice and the logs.
+func (s *setup) waitRelay(st ipc.StatusResult, advice string) (ipc.StatusResult, error) {
+	var err error
 	if !st.RelayConnected {
 		fmt.Fprintln(s.w, "Waiting for the relay connection...")
 	}
@@ -247,9 +272,7 @@ func (s *setup) daemonOnline(install, needRelay bool) (ipc.StatusResult, error) 
 			for _, e := range st.Errors {
 				msg += "; " + terminalSafe(e)
 			}
-			return st, fmt.Errorf("%s. If another machine is already on this relay, set this one up with "+
-				"`cravv-connect setup --reset --join <code>` instead (a join code from `cravv-connect pair` there). Logs: %s",
-				msg, daemonLogHint(s.env))
+			return st, fmt.Errorf("%s. %sLogs: %s", msg, advice, daemonLogHint(s.env))
 		}
 		select {
 		case <-s.ctx.Done():
