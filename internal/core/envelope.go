@@ -16,9 +16,7 @@ type Envelope struct {
 	ID          string          `json:"id"`
 	TS          int64           `json:"ts"` // unix milliseconds
 	FromMachine MachineID       `json:"from_machine"`
-	FromSession string          `json:"from_session,omitempty"`
 	ToMachine   MachineID       `json:"to_machine"`
-	ToSession   string          `json:"to_session,omitempty"`
 	LinkID      string          `json:"link_id,omitempty"` // required on link-scoped kinds (Kind.LinkScoped)
 	Kind        Kind            `json:"kind"`
 	Body        json.RawMessage `json:"body"`

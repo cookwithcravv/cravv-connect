@@ -19,19 +19,30 @@ const DefaultInboxLimit = 50
 // InboxEntry is an inbox item prepared for display. The API layer maps it to
 // ipc.InboxView. Wrapped is the only field agents should read as content.
 type InboxEntry struct {
-	Item    store.InboxItem
-	Alias   string // local alias of the sender (never a peer-chosen name)
-	Trust   string // trust level this machine gives the sender
-	Kind    string // view kind: chat | task | task_update | file
-	FileID  string
-	Path    string // local path of a downloaded file
-	Wrapped string // present.Wrap output
+	Item       store.InboxItem
+	Alias      string // local alias of the sender (never a peer-chosen name)
+	Link       int64  // local number of the link the item arrived on
+	Permission string // what that link lets the sender do here
+	Session    string // the sender's session name, from the link record
+	Kind       string // view kind: chat | task | task_update | file | link
+	FileID     string
+	Path       string // local path of a downloaded file
+	Wrapped    string // present.Wrap output
 }
 
-// InboxService stores delivered items and serves them per session (spec 8.2).
+// InboxSessions reads and moves a shared session's read position.
+// Implemented by *SessionService.
+type InboxSessions interface {
+	Get(ctx context.Context, id string) (store.SharedSession, error)
+	SetCursor(ctx context.Context, id string, cursor int64) error
+}
+
+// InboxService stores delivered items and serves them to the shared session
+// each one is for (v2 spec 10: the inbox is scoped by session and link).
 type InboxService struct {
 	inbox     store.InboxStore
-	sessions  *SessionRegistry
+	sessions  InboxSessions
+	links     LinkLookup
 	peers     store.PeerStore
 	clock     core.Clock
 	renderers *RendererRegistry
@@ -41,10 +52,11 @@ type InboxService struct {
 }
 
 // NewInboxService builds the service with the default renderers.
-func NewInboxService(inbox store.InboxStore, sessions *SessionRegistry, peers store.PeerStore, clock core.Clock) *InboxService {
+func NewInboxService(inbox store.InboxStore, sessions InboxSessions, links LinkLookup, peers store.PeerStore, clock core.Clock) *InboxService {
 	return &InboxService{
 		inbox:     inbox,
 		sessions:  sessions,
+		links:     links,
 		peers:     peers,
 		clock:     clock,
 		renderers: DefaultRenderers(),
@@ -72,36 +84,11 @@ func (s *InboxService) waitChan() <-chan struct{} {
 // Changed returns a channel that is closed at the next Notify.
 func (s *InboxService) Changed() <-chan struct{} { return s.waitChan() }
 
-// OriginallyFor is the note attached to a session message that became machine-wide.
-func OriginallyFor(session string) string {
-	return fmt.Sprintf("(originally for %s)", session)
-}
-
-// Deliver stores an item and wakes waiters. An item addressed to a session
-// that is unknown (never registered or already expired) becomes machine-wide
-// with an "(originally for <session>)" note.
+// Deliver stores an item for exactly one shared session (it.ToSession is
+// its ID) and wakes waiters.
 func (s *InboxService) Deliver(ctx context.Context, it store.InboxItem) (int64, error) {
-	if it.ToSession != "" && !s.sessions.Exists(ctx, it.ToSession) {
-		it.Note = OriginallyFor(it.ToSession)
-		it.ToSession = ""
-	}
-	if it.ReceivedAt.IsZero() {
-		it.ReceivedAt = s.clock.Now()
-	}
-	seq, err := s.inbox.AddItem(ctx, it)
-	if err != nil {
-		return 0, err
-	}
-	s.Notify()
-	return seq, nil
-}
-
-// DeliverToSession stores an item for exactly one shared session
-// (it.ToSession is its ID) and wakes waiters. Unlike Deliver it never turns
-// the item into a machine-wide one.
-func (s *InboxService) DeliverToSession(ctx context.Context, it store.InboxItem) (int64, error) {
 	if it.ToSession == "" {
-		return 0, errors.New("inbox: an item for a shared session needs its ID")
+		return 0, errors.New("inbox: an item needs the shared session it is for")
 	}
 	if it.ReceivedAt.IsZero() {
 		it.ReceivedAt = s.clock.Now()
@@ -119,9 +106,15 @@ func (s *InboxService) Delivered(ctx context.Context, msgID string) (bool, error
 	return s.inbox.HasInboxMsg(ctx, msgID)
 }
 
-// RedirectOrphans makes an expired session's unread items machine-wide.
-func (s *InboxService) RedirectOrphans(ctx context.Context, session string) error {
-	n, err := s.inbox.RedirectOrphans(ctx, session, OriginallyFor(session))
+// LinkClosed implements LinkCloseObserver: when the link's session is away,
+// the items it has not read from that link are dropped (v2 spec 3.4). Their
+// senders learn from link.closed; tasks fail with link_closed on both sides.
+func (s *InboxService) LinkClosed(ctx context.Context, l store.Link) error {
+	sess, err := s.sessions.Get(ctx, l.Session)
+	if err != nil || sess.State != core.SessionAway {
+		return nil
+	}
+	n, err := s.inbox.DeleteSessionItems(ctx, sess.ID, l.ID, sess.Cursor)
 	if err == nil && n > 0 {
 		s.Notify()
 	}
@@ -137,20 +130,23 @@ const MaxInboxPageBytes = 4 << 20
 // inboxItemOverhead is the per-item allowance for fields besides Wrapped.
 const inboxItemOverhead = 512
 
-// Check returns up to limit unread items for the session, and at most
-// MaxInboxPageBytes of them, marks them read and advances the session's
-// cursor past the last one returned. Items that did not fit stay unread for
-// the next call. If ctx is cancelled before the items are marked read
-// (the client stopped waiting), nothing is marked and ctx.Err() is returned.
+// Check returns up to limit unread items for the shared session, and at
+// most MaxInboxPageBytes of them, and advances the session's cursor past
+// the last one returned. Items that did not fit stay unread for the next
+// call. If ctx is cancelled before the cursor moves (the client stopped
+// waiting), nothing is marked and ctx.Err() is returned.
 func (s *InboxService) Check(ctx context.Context, session string, limit int) ([]InboxEntry, error) {
 	if limit <= 0 {
 		limit = DefaultInboxLimit
 	}
 	rec, err := s.sessions.Get(ctx, session)
+	if errors.Is(err, core.ErrNotFound) {
+		return nil, core.ErrNotShared
+	}
 	if err != nil {
 		return nil, err
 	}
-	items, err := s.inbox.ItemsFor(ctx, session, rec.Cursor, limit)
+	items, err := s.inbox.SessionItems(ctx, rec.ID, rec.Cursor, limit)
 	if err != nil || len(items) == 0 {
 		return nil, err
 	}
@@ -165,19 +161,12 @@ func (s *InboxService) Check(ctx context.Context, session string, limit int) ([]
 		budget -= cost
 		out = append(out, e)
 	}
-	seqs := make([]int64, len(out))
-	for i, e := range out {
-		seqs[i] = e.Item.Seq
-	}
-	// Two-phase: the page is built; mark it read only if the caller is still
-	// there to receive it.
+	// Two-phase: the page is built; move the cursor only if the caller is
+	// still there to receive it.
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := s.inbox.MarkRead(ctx, seqs); err != nil {
-		return nil, err
-	}
-	if err := s.sessions.SetCursor(ctx, session, seqs[len(seqs)-1]); err != nil {
+	if err := s.sessions.SetCursor(ctx, rec.ID, out[len(out)-1].Item.Seq); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -228,92 +217,66 @@ func (s *InboxService) Wait(ctx context.Context, session string, timeout time.Du
 	}
 }
 
-// unreadPage is how many items Unread("") scans per store query.
-const unreadPage = 500
-
-// Unread counts unread items per local alias. For a session it counts what
-// that session has not read yet. For session "" it counts machine-wide items
-// that no session has read (hooks in a folder without a session use this).
+// Unread counts the shared session's unread items per local alias.
 func (s *InboxService) Unread(ctx context.Context, session string) (map[string]int, error) {
-	byID := map[core.MachineID]int{}
-	if session != "" {
-		rec, err := s.sessions.Get(ctx, session)
-		if err != nil {
-			return nil, err
-		}
-		_, counts, err := s.inbox.UnreadCount(ctx, session, rec.Cursor)
-		if err != nil {
-			return nil, err
-		}
-		byID = counts
-	} else {
-		var after int64
-		for {
-			items, err := s.inbox.ItemsFor(ctx, "", after, unreadPage)
-			if err != nil {
-				return nil, err
-			}
-			for _, it := range items {
-				if !it.ReadByAny {
-					byID[it.From]++
-				}
-			}
-			if len(items) < unreadPage {
-				break
-			}
-			after = items[len(items)-1].Seq
-		}
+	rec, err := s.sessions.Get(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	_, byID, err := s.inbox.SessionUnread(ctx, rec.ID, rec.Cursor)
+	if err != nil {
+		return nil, err
 	}
 	byAlias := make(map[string]int, len(byID))
 	for id, n := range byID {
-		alias, _ := s.aliasTrust(ctx, id)
-		byAlias[alias] += n
+		byAlias[s.alias(ctx, id)] += n
 	}
 	return byAlias, nil
 }
 
-func (s *InboxService) aliasTrust(ctx context.Context, id core.MachineID) (string, string) {
-	p, err := s.peers.GetPeer(ctx, id)
-	if err != nil {
-		if errors.Is(err, core.ErrNotFound) {
-			return id.Short(), "unpaired"
-		}
-		return id.Short(), "unknown"
+func (s *InboxService) alias(ctx context.Context, id core.MachineID) string {
+	if p, err := s.peers.GetPeer(ctx, id); err == nil {
+		return p.Alias
 	}
-	return p.Alias, p.TrustIn.String()
+	return id.Short()
 }
 
+// entry renders an item. The link record, not the envelope, names the
+// sender's session and says what the link permits.
 func (s *InboxService) entry(ctx context.Context, it store.InboxItem) InboxEntry {
-	alias, trust := s.aliasTrust(ctx, it.From)
+	e := InboxEntry{Item: it, Alias: s.alias(ctx, it.From), Session: it.FromSession}
+	if l, err := s.links.GetLink(ctx, it.From, it.LinkID); err == nil {
+		e.Link, e.Permission, e.Session = l.Num, string(l.PermissionIn), l.RemoteName
+	}
 	r := s.renderers.Render(it)
 	body := r.Text
 	if it.Note != "" {
 		body = it.Note + "\n" + body
 	}
-	return InboxEntry{
-		Item:   it,
-		Alias:  alias,
-		Trust:  trust,
-		Kind:   r.ViewKind,
-		FileID: r.FileID,
-		Path:   r.Path,
-		Wrapped: present.Wrap(present.Item{
-			Alias:   alias,
-			Session: it.FromSession,
-			Trust:   trust,
-			ID:      it.MsgID,
-			Kind:    r.ViewKind,
-			TaskID:  it.TaskID,
-			Body:    body,
-		}),
-	}
+	e.Kind, e.FileID, e.Path = r.ViewKind, r.FileID, r.Path
+	e.Wrapped = present.Wrap(present.Item{
+		Alias:      e.Alias,
+		Session:    e.Session,
+		Link:       e.Link,
+		Permission: e.Permission,
+		ID:         it.MsgID,
+		Kind:       r.ViewKind,
+		TaskID:     it.TaskID,
+		Body:       body,
+	})
+	return e
 }
 
-// NewChatHandler stores incoming chat for core.KindChat. A chat already in the
-// inbox (a redelivery after a crash between the insert and the dedup mark) is
-// not stored again; the store's unique chat index backs this up.
+// NewChatHandler stores incoming chat for core.KindChat behind a LinkGate:
+// the item goes to the link's local session. A chat already in the inbox (a
+// redelivery after a crash between the insert and the dedup mark) is not
+// stored again; the store's unique chat index backs this up.
 func NewChatHandler(inbox *InboxService) Handler {
 	return HandlerFunc(func(ctx context.Context, peer store.Peer, env core.Envelope) error {
+		l, ok := LinkFrom(ctx)
+		if !ok {
+			return errNoLink
+		}
 		body, err := decodeEnvBody[core.ChatBody](env.Body)
 		if err != nil {
 			return err
@@ -329,8 +292,9 @@ func NewChatHandler(inbox *InboxService) Handler {
 		_, err = inbox.Deliver(ctx, store.InboxItem{
 			MsgID:       env.ID,
 			From:        peer.MachineID,
-			FromSession: env.FromSession,
-			ToSession:   env.ToSession,
+			FromSession: l.RemoteName,
+			ToSession:   l.Session,
+			LinkID:      l.ID,
 			Kind:        core.KindChat,
 			Body:        env.Body,
 		})

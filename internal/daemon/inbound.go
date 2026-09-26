@@ -241,7 +241,7 @@ func (in *Inbound) replyStalePrekey(ctx context.Context, peer store.Peer, msgID 
 		return
 	}
 	body := core.StalePrekeyBody{MsgID: msgID, Prekey: cur.Wire()}
-	if _, err := in.sender.SendEnvelope(ctx, peer.MachineID, core.KindControlStalePrekey, "", "", body); err != nil {
+	if _, err := in.sender.SendEnvelope(ctx, peer.MachineID, core.KindControlStalePrekey, "", body); err != nil {
 		in.logger.Warn("stale_prekey reply failed", "peer", peer.Alias, "err", err)
 	}
 }
@@ -268,7 +268,7 @@ func (in *Inbound) flushReceipts(ctx context.Context) {
 	in.receipt = make(map[core.MachineID][]string)
 	in.mu.Unlock()
 	for peer, ids := range batch {
-		if _, err := in.sender.SendEnvelope(ctx, peer, core.KindControlDelivered, "", "", core.DeliveredBody{IDs: ids}); err != nil {
+		if _, err := in.sender.SendEnvelope(ctx, peer, core.KindControlDelivered, "", core.DeliveredBody{IDs: ids}); err != nil {
 			in.logger.Warn("delivered receipt failed", "peer", peer.Short(), "err", err)
 		}
 	}

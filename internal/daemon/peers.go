@@ -32,7 +32,6 @@ type PeerService struct {
 
 	mu          sync.Mutex
 	pendingDeny map[core.MachineID]ed25519.PublicKey // removed peers to deny on next connect
-	observers   []TrustObserver
 	cutoffs     []PeerCutOffObserver
 }
 
@@ -46,13 +45,6 @@ func NewPeerService(peers store.PeerStore, mailboxes MailboxProvider, out Outbox
 		clock:       clock,
 		pendingDeny: make(map[core.MachineID]ed25519.PublicKey),
 	}
-}
-
-// AddTrustObserver registers o to be told whenever a peer's trust is lowered.
-func (s *PeerService) AddTrustObserver(o TrustObserver) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.observers = append(s.observers, o)
 }
 
 // AddCutOffObserver registers o to be told whenever a peer is paused or removed.
@@ -135,16 +127,6 @@ func (s *PeerService) SetTrust(ctx context.Context, alias string, level core.Tru
 	}
 	s.record(audit.Event{Type: audit.EvTrust, Peer: p.MachineID, Alias: p.Alias,
 		Detail: map[string]any{"from": old.String(), "to": level.String()}})
-	if level < old {
-		s.mu.Lock()
-		obs := append([]TrustObserver(nil), s.observers...)
-		s.mu.Unlock()
-		for _, o := range obs {
-			if err := o.TrustLowered(ctx, p); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
@@ -194,7 +176,7 @@ func (s *PeerService) Resume(ctx context.Context, alias string) error {
 	if mb, ok := s.mailboxes.Mailbox(); ok {
 		_ = mb.Allow(ctx, p.IK)
 	}
-	if _, err := s.out.SendEnvelope(ctx, p.MachineID, core.KindControlResumed, "", "", core.EmptyBody{}); err != nil {
+	if _, err := s.out.SendEnvelope(ctx, p.MachineID, core.KindControlResumed, "", core.EmptyBody{}); err != nil {
 		return err
 	}
 	if !p.PausedByPeer {

@@ -38,7 +38,7 @@ func newOutboundFixture(t *testing.T) *outboundFixture {
 	f.mb = newFakeMailbox(nil)
 	f.slot.set(f.mb)
 	f.o = NewOutbound(me, f.peers, f.outbox, f.slot, f.clock, func() bool { return f.killed }, nil)
-	f.gpu = newTestPeer(t, "gpu-box", core.TrustAskFirst)
+	f.gpu = newTestPeer(t, "gpu-box")
 	f.gpu.rec.PairedAt = testEpoch.Add(-time.Hour) // past the pairing grace period
 	mustPut(t, f.peers, f.gpu.rec)
 	return f
@@ -46,7 +46,7 @@ func newOutboundFixture(t *testing.T) *outboundFixture {
 
 func (f *outboundFixture) send(t *testing.T, text string) string {
 	t.Helper()
-	id, err := f.o.SendEnvelope(context.Background(), f.gpu.rec.MachineID, core.KindChat, "claude@proj", "", core.ChatBody{Text: text})
+	id, err := f.o.SendEnvelope(context.Background(), f.gpu.rec.MachineID, core.KindChat, "01JLINK", core.ChatBody{Text: text})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestOutboundSendsSealedFrameAndMarksQueued(t *testing.T) {
 		t.Fatalf("sealed to %s, want %s", fr.Header.PKID, f.gpu.prekey.ID)
 	}
 	var body core.ChatBody
-	if err := json.Unmarshal(env.Body, &body); err != nil || body.Text != "hello" || env.FromSession != "claude@proj" {
+	if err := json.Unmarshal(env.Body, &body); err != nil || body.Text != "hello" || env.LinkID != "01JLINK" {
 		t.Fatalf("envelope = %+v (%v)", env, err)
 	}
 	if st := f.status(t, id).Status; st != store.OutboxQueued {
@@ -150,7 +150,7 @@ func TestStalePrekeyReseal(t *testing.T) {
 		t.Fatalf("resealed frame still uses the old prekey: %v", err)
 	}
 
-	other := newTestPeer(t, "other", core.TrustAskFirst)
+	other := newTestPeer(t, "other")
 	mustPut(t, f.peers, other.rec)
 	if err := f.o.Reseal(ctx, other.rec.MachineID, id); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("reseal by a different peer err = %v, want ErrNotFound", err)
@@ -232,10 +232,10 @@ func TestOutboundPausedPeer(t *testing.T) {
 	p := f.gpu.rec
 	p.Paused = true
 	mustPut(t, f.peers, p)
-	if _, err := f.o.SendEnvelope(ctx, p.MachineID, core.KindChat, "", "", core.ChatBody{Text: "x"}); !errors.Is(err, core.ErrPaused) {
+	if _, err := f.o.SendEnvelope(ctx, p.MachineID, core.KindChat, "", core.ChatBody{Text: "x"}); !errors.Is(err, core.ErrPaused) {
 		t.Fatalf("send to paused peer err = %v, want ErrPaused", err)
 	}
-	if _, err := f.o.SendEnvelope(ctx, p.MachineID, core.KindControlResumed, "", "", core.EmptyBody{}); err != nil {
+	if _, err := f.o.SendEnvelope(ctx, p.MachineID, core.KindControlResumed, "", core.EmptyBody{}); err != nil {
 		t.Fatalf("control kinds must still enqueue: %v", err)
 	}
 }
@@ -285,7 +285,7 @@ func TestOutboundOfflineAndKilled(t *testing.T) {
 	// While killed, envelopes (such as task.update expired) are queued, not
 	// dropped; nothing leaves until resume. SendDirect bypasses the outbox and
 	// is refused.
-	late, err := f.o.SendEnvelope(context.Background(), f.gpu.rec.MachineID, core.KindTaskUpdate, "", "", core.TaskUpdateBody{TaskID: "T", State: core.TaskExpired})
+	late, err := f.o.SendEnvelope(context.Background(), f.gpu.rec.MachineID, core.KindTaskUpdate, "", core.TaskUpdateBody{TaskID: "T", State: core.TaskExpired})
 	if err != nil {
 		t.Fatalf("SendEnvelope while killed err = %v", err)
 	}
@@ -308,7 +308,7 @@ func TestOutboundOfflineAndKilled(t *testing.T) {
 
 func TestOutboundUnknownPeer(t *testing.T) {
 	f := newOutboundFixture(t)
-	if _, err := f.o.SendEnvelope(context.Background(), core.MachineID("nobody"), core.KindChat, "", "", core.ChatBody{}); !errors.Is(err, core.ErrNotFound) {
+	if _, err := f.o.SendEnvelope(context.Background(), core.MachineID("nobody"), core.KindChat, "", core.ChatBody{}); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
@@ -334,10 +334,10 @@ func TestOutboundBadPrekeyBacksOff(t *testing.T) {
 func TestOutboundMarkDeliveredOnlyForSender(t *testing.T) {
 	f := newOutboundFixture(t)
 	ctx := context.Background()
-	other := newTestPeer(t, "other", core.TrustAskFirst)
+	other := newTestPeer(t, "other")
 	mustPut(t, f.peers, other.rec)
 	mine := f.send(t, "to gpu")
-	theirs, err := f.o.SendEnvelope(ctx, other.rec.MachineID, core.KindChat, "", "", core.ChatBody{Text: "to other"})
+	theirs, err := f.o.SendEnvelope(ctx, other.rec.MachineID, core.KindChat, "", core.ChatBody{Text: "to other"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +411,7 @@ func TestOutboundRunWakesOnSend(t *testing.T) {
 func TestOutboundRejectsOversizedEnvelope(t *testing.T) {
 	f := newOutboundFixture(t)
 	big := strings.Repeat("a", core.MaxFrameBytes+1)
-	_, err := f.o.SendEnvelope(context.Background(), f.gpu.rec.MachineID, core.KindChat, "", "", core.ChatBody{Text: big})
+	_, err := f.o.SendEnvelope(context.Background(), f.gpu.rec.MachineID, core.KindChat, "", core.ChatBody{Text: big})
 	if !errors.Is(err, core.ErrTooLarge) {
 		t.Fatalf("SendEnvelope = %v, want ErrTooLarge", err)
 	}
@@ -455,7 +455,7 @@ func TestOutboundControlItemsAreNeverHeld(t *testing.T) {
 	p := f.gpu.rec
 	p.PausedByPeer = true
 	mustPut(t, f.peers, p)
-	id, err := f.o.SendEnvelope(ctx, p.MachineID, core.KindControlResumed, "", "", core.EmptyBody{})
+	id, err := f.o.SendEnvelope(ctx, p.MachineID, core.KindControlResumed, "", core.EmptyBody{})
 	if err != nil {
 		t.Fatal(err)
 	}

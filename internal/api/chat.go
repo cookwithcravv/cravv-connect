@@ -8,11 +8,11 @@ import (
 )
 
 func (h *handlers) registerChat(s *ipc.Server) {
-	s.Register(ipc.MethodChatSend, ipc.Typed(h.chatSend), ipc.GateSession)
+	s.Register(ipc.MethodChatSend, ipc.Typed(h.chatSend), ipc.GateShared)
 }
 
 func (h *handlers) chatSend(ctx context.Context, cs *ipc.ConnState, p ipc.ChatSendParams) (any, error) {
-	if err := required("to", p.To); err != nil {
+	if err := linkNumber(p.Link); err != nil {
 		return nil, err
 	}
 	if err := required("text", p.Text); err != nil {
@@ -21,7 +21,7 @@ func (h *handlers) chatSend(ctx context.Context, cs *ipc.ConnState, p ipc.ChatSe
 	if len(p.Text) > core.MaxTextBytes {
 		return nil, core.ErrTooLarge
 	}
-	id, err := h.p.Chat.Send(ctx, cs.Session(), p.To, p.Text)
+	id, err := h.p.Chat.Send(ctx, cs.Shared(), p.Link, p.Text)
 	if err != nil {
 		return nil, err
 	}

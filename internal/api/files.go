@@ -7,19 +7,19 @@ import (
 )
 
 func (h *handlers) registerFiles(s *ipc.Server) {
-	s.Register(ipc.MethodFileSend, ipc.Typed(h.fileSend), ipc.GateSession)
+	s.Register(ipc.MethodFileSend, ipc.Typed(h.fileSend), ipc.GateShared)
 	s.Register(ipc.MethodFilesList, ipc.Typed(h.filesList), ipc.GateNone)
 	s.Register(ipc.MethodFilesAccept, ipc.Typed(h.filesAccept), ipc.GateUnlock)
 }
 
 func (h *handlers) fileSend(ctx context.Context, cs *ipc.ConnState, p ipc.FileSendParams) (any, error) {
-	if err := required("to", p.To); err != nil {
+	if err := linkNumber(p.Link); err != nil {
 		return nil, err
 	}
 	if err := required("path", p.Path); err != nil {
 		return nil, err
 	}
-	ref, err := h.p.Files.Send(ctx, p.To, cs.ProjectDir(), p.Path)
+	ref, err := h.p.Files.Send(ctx, cs.Shared(), p.Link, cs.ProjectDir(), p.Path)
 	if err != nil {
 		return nil, err
 	}

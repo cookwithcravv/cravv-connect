@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -78,11 +79,11 @@ func (f fSessions) Disconnect(_ context.Context, name string) error {
 
 type fChat struct{ *world }
 
-func (f fChat) Send(_ context.Context, from, to, text string) (string, error) {
+func (f fChat) Send(_ context.Context, session string, link int64, text string) (string, error) {
 	f.mu.Lock()
-	f.lastSession = from
+	f.lastSession = session
 	f.mu.Unlock()
-	f.record("chat " + to + " " + text)
+	f.record(fmt.Sprintf("chat %d %s", link, text))
 	return "MSG1", nil
 }
 
@@ -109,10 +110,11 @@ type fTasks struct{ *world }
 func task(id string, st core.TaskState) store.Task {
 	return store.Task{ID: id, Direction: store.TaskInbound, Peer: "gpumachineid00000000", State: st, Instructions: "do it"}
 }
-func (f fTasks) Create(_ context.Context, session, dir, to, instr string, paths []string) (string, error) {
+func (f fTasks) Create(_ context.Context, session, dir string, link int64, instr string, paths []string) (string, error) {
 	f.mu.Lock()
 	f.lastSession, f.lastProject = session, dir
 	f.mu.Unlock()
+	f.record(fmt.Sprintf("task %d %s", link, instr))
 	return "T1", nil
 }
 func (f fTasks) Get(_ context.Context, _, id string) (store.Task, error) {
@@ -171,8 +173,8 @@ func (f fTasks) Decide(_ context.Context, id string, approve, unlocked bool) err
 
 type fFiles struct{ *world }
 
-func (f fFiles) Send(_ context.Context, to, dir, path string) (core.FileRef, error) {
-	f.record("file " + to + " " + dir + " " + path)
+func (f fFiles) Send(_ context.Context, session string, link int64, dir, path string) (core.FileRef, error) {
+	f.record(fmt.Sprintf("file %s %d %s %s", session, link, dir, path))
 	return core.FileRef{FileID: "F1", Name: "a.txt", Size: 3}, nil
 }
 func (f fFiles) Accept(_ context.Context, id string, unlocked bool) error {

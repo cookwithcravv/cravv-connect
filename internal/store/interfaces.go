@@ -84,34 +84,25 @@ type OutboxStore interface {
 	RequeueStale(ctx context.Context, now time.Time) (int, error)
 }
 
+// InboxItem is one item delivered to a shared session over a link.
 type InboxItem struct {
 	Seq         int64 // assigned by store (autoincrement)
 	MsgID       string
 	From        core.MachineID
-	FromSession string
-	ToSession   string // "" = machine-wide
-	LinkID      string // the link the item arrived on ("" for v1 items)
+	FromSession string // the sender's session name (display only)
+	ToSession   string // the local shared session ID the item is for
+	LinkID      string // the link the item arrived on
 	Kind        core.Kind
 	Body        json.RawMessage
 	TaskID      string
-	Note        string // e.g. "(originally for claude@x)"
+	Note        string
 	ReceivedAt  time.Time
-	ReadByAny   bool
 }
 
 type InboxStore interface {
 	// AddItem stores it and returns its seq. A chat whose (MsgID, ToSession) is
 	// already stored is not stored again; the existing seq is returned.
 	AddItem(ctx context.Context, it InboxItem) (int64, error)
-	// Visible to session: seq > after AND (ToSession=="" OR ToSession==session); ascending; limit
-	ItemsFor(ctx context.Context, session string, after int64, limit int) ([]InboxItem, error)
-	MarkRead(ctx context.Context, seqs []int64) error
-	// cursor for a brand new session: max(seq) of items that are both older than `since` AND ReadByAny; 0 if none
-	InitialCursor(ctx context.Context, since time.Time) (int64, error)
-	// Re-inserts every item with ToSession=session as a new machine-wide item
-	// (new seq, ReadByAny=false, Note=note) and deletes the originals, atomically.
-	RedirectOrphans(ctx context.Context, session string, note string) (int, error)
-	UnreadCount(ctx context.Context, session string, after int64) (int, map[core.MachineID]int, error)
 	PurgeInboxBefore(ctx context.Context, t time.Time) (int, error) // ReceivedAt < t
 	// HasInboxMsg reports whether any item carries msgID (handlers use it to
 	// finish a delivery that failed after their own store write).

@@ -32,7 +32,7 @@ type Directory interface {
 
 // SessionInbox stores an item for exactly one shared session. Implemented by *InboxService.
 type SessionInbox interface {
-	DeliverToSession(ctx context.Context, it store.InboxItem) (int64, error)
+	Deliver(ctx context.Context, it store.InboxItem) (int64, error)
 }
 
 // UnknownLinkReplier answers traffic on a link this side does not have open.
@@ -163,7 +163,7 @@ func (s *LinkService) Connect(ctx context.Context, sessionID, target string, pro
 		LinkID: l.ID, FromSession: core.SessionRef{ID: sess.ID, Name: sess.Name, Purpose: sess.Purpose},
 		ToSessionID: remote.SessionID, ProposedPermission: proposed, Note: note,
 	}
-	if _, err := s.d.Sender.SendEnvelope(ctx, peer.MachineID, core.KindLinkRequest, "", "", body); err != nil {
+	if _, err := s.d.Sender.SendEnvelope(ctx, peer.MachineID, core.KindLinkRequest, "", body); err != nil {
 		_, _ = s.d.Links.UpdateLink(ctx, l.Peer, l.ID, func(x *store.Link) error {
 			x.State, x.Reason, x.ExpiresAt, x.UpdatedAt = store.LinkClosed, "not sent: "+err.Error(), time.Time{}, now
 			return nil
@@ -236,7 +236,7 @@ func (s *LinkService) HandleRequest(ctx context.Context, peer store.Peer, env co
 
 // reject answers a request that is not stored.
 func (s *LinkService) reject(ctx context.Context, peer store.Peer, linkID, reason string) error {
-	_, err := s.d.Sender.SendEnvelope(ctx, peer.MachineID, core.KindLinkRejected, "", "", core.LinkRejectedBody{LinkID: linkID, Reason: reason})
+	_, err := s.d.Sender.SendEnvelope(ctx, peer.MachineID, core.KindLinkRejected, "", core.LinkRejectedBody{LinkID: linkID, Reason: reason})
 	return err
 }
 
@@ -287,7 +287,7 @@ func (s *LinkService) Decide(ctx context.Context, num int64, accept bool, perm c
 	body := core.LinkAcceptedBody{
 		LinkID: l.ID, ToSession: core.SessionRef{ID: sess.ID, Name: sess.Name, Purpose: sess.Purpose}, GrantedPermission: perm,
 	}
-	if _, err := s.d.Sender.SendEnvelope(ctx, l.Peer, core.KindLinkAccepted, "", "", body); err != nil {
+	if _, err := s.d.Sender.SendEnvelope(ctx, l.Peer, core.KindLinkAccepted, "", body); err != nil {
 		return l, err
 	}
 	s.recordLink(ctx, audit.EvLinkAccept, l, map[string]any{"permission": string(perm), "authority": auth.String()})
@@ -675,10 +675,10 @@ func (s *LinkService) closeLink(ctx context.Context, l store.Link, spec closeSpe
 	var errs []error
 	switch {
 	case spec.reject != "":
-		_, err := s.d.Sender.SendEnvelope(ctx, l.Peer, core.KindLinkRejected, "", "", core.LinkRejectedBody{LinkID: l.ID, Reason: spec.reject})
+		_, err := s.d.Sender.SendEnvelope(ctx, l.Peer, core.KindLinkRejected, "", core.LinkRejectedBody{LinkID: l.ID, Reason: spec.reject})
 		errs = append(errs, err)
 	case spec.wire != "":
-		_, err := s.d.Sender.SendEnvelope(ctx, l.Peer, core.KindLinkClosed, "", "", core.LinkClosedBody{LinkID: l.ID, Reason: spec.wire})
+		_, err := s.d.Sender.SendEnvelope(ctx, l.Peer, core.KindLinkClosed, "", core.LinkClosedBody{LinkID: l.ID, Reason: spec.wire})
 		errs = append(errs, err)
 	}
 	ev := audit.EvLinkClose
@@ -732,7 +732,7 @@ func (s *LinkService) sendState(ctx context.Context, l store.Link, state string)
 		}
 	}
 	body := core.LinkStateBody{LinkID: l.ID, State: state, PermissionIn: l.PermissionIn}
-	if _, err := s.d.Sender.SendEnvelope(ctx, l.Peer, core.KindLinkState, "", "", body); err != nil {
+	if _, err := s.d.Sender.SendEnvelope(ctx, l.Peer, core.KindLinkState, "", body); err != nil {
 		s.d.Log.Warn("link.state not queued", "link", l.Num, "err", err)
 	}
 }
@@ -747,7 +747,7 @@ func (s *LinkService) tell(ctx context.Context, l store.Link, msgID string, kind
 	if msgID == "" {
 		msgID = core.NewIDAt(s.d.Clock)
 	}
-	if _, err := s.d.Inbox.DeliverToSession(ctx, store.InboxItem{
+	if _, err := s.d.Inbox.Deliver(ctx, store.InboxItem{
 		MsgID: msgID, From: l.Peer, FromSession: l.RemoteName, ToSession: l.Session, LinkID: l.ID, Kind: kind, Body: body,
 	}); err != nil {
 		s.d.Log.Warn("link notice not stored", "link", l.Num, "err", err)

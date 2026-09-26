@@ -317,66 +317,6 @@ func TestFilesListAndAccept(t *testing.T) {
 	}
 }
 
-func TestAgentSendRegistersCLISession(t *testing.T) {
-	fd := newFakeDaemon(t)
-	fd.handle(ipc.MethodChatSend, ipc.GateSession, func(cs *ipc.ConnState, _ json.RawMessage) (any, error) {
-		if cs.Session() != "cli@glow-v2" {
-			t.Errorf("session %q", cs.Session())
-		}
-		return ipc.IDResult{ID: "M1"}, nil
-	})
-	fd.start()
-	r := fd.runStdin(nil, "hello from stdin\n", "send", "gpu-box/codex@train", "-")
-	if r.code != 0 || r.stdout != "{\n  \"id\": \"M1\"\n}\n" {
-		t.Fatalf("%d %q %q", r.code, r.stdout, r.stderr)
-	}
-	var reg ipc.SessionRegisterParams
-	json.Unmarshal([]byte(fd.params(ipc.MethodSessionRegister)), &reg)
-	if reg.Agent != "cli" || reg.ProjectDir != "/work/glow-v2" || reg.PID == 0 {
-		t.Fatalf("register %+v", reg)
-	}
-	if fd.params(ipc.MethodChatSend) != `{"to":"gpu-box/codex@train","text":"hello from stdin"}` {
-		t.Fatal(fd.params(ipc.MethodChatSend))
-	}
-}
-
-func TestAgentErrorsAreJSON(t *testing.T) {
-	fd := newFakeDaemon(t)
-	fd.handle(ipc.MethodTaskClaim, ipc.GateSession, func(*ipc.ConnState, json.RawMessage) (any, error) {
-		return nil, core.ErrAlreadyClaimed
-	})
-	fd.start()
-	r := fd.run(nil, "task", "claim", "T1")
-	if r.code != 1 || r.stderr != "" || r.stdout != "{\n  \"error\": \"task already claimed\",\n  \"kind\": \"already_claimed\"\n}\n" {
-		t.Fatalf("%d %q %q", r.code, r.stdout, r.stderr)
-	}
-	fd2 := newFakeDaemon(t)
-	r = fd2.run(nil, "inbox")
-	if r.code != 1 || !strings.Contains(r.stdout, `"kind": "internal"`) || !strings.Contains(r.stdout, "daemon not running") {
-		t.Fatalf("down: %q", r.stdout)
-	}
-}
-
-func TestAgentTaskCommands(t *testing.T) {
-	fd := newFakeDaemon(t)
-	fd.reply(ipc.MethodTaskCreate, ipc.GateSession, ipc.TaskCreateResult{TaskID: "T1"})
-	fd.reply(ipc.MethodTaskComplete, ipc.GateSession, ipc.TaskView{TaskID: "T1", State: "done"})
-	fd.reply(ipc.MethodInboxWait, ipc.GateSession, ipc.InboxResult{Items: []ipc.InboxView{}})
-	fd.start()
-	if r := fd.run(nil, "task", "create", "gpu-box", "train it", "--file", "a.txt", "--file", "b.txt"); r.code != 0 {
-		t.Fatalf("%s", r.stdout)
-	}
-	if fd.params(ipc.MethodTaskCreate) != `{"to":"gpu-box","instructions":"train it","file_paths":["a.txt","b.txt"]}` {
-		t.Fatal(fd.params(ipc.MethodTaskCreate))
-	}
-	if r := fd.run(nil, "task", "complete", "T1", "all good"); r.code != 0 || !strings.Contains(r.stdout, `"state": "done"`) {
-		t.Fatalf("%s", r.stdout)
-	}
-	if r := fd.run(nil, "wait", "--timeout", "7"); r.code != 0 || fd.params(ipc.MethodInboxWait) != `{"timeout_s":7}` {
-		t.Fatalf("%s %s", r.stdout, fd.params(ipc.MethodInboxWait))
-	}
-}
-
 type mapSettings map[string]string
 
 func (m mapSettings) GetSetting(_ context.Context, k string) (string, bool, error) {

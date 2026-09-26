@@ -69,6 +69,17 @@ func (h *harness) session(t *testing.T) *ipc.Client {
 	return c
 }
 
+// shared opens a registered connection that shared the session "lead"
+// (the fake binds it as S<n>).
+func (h *harness) shared(t *testing.T) *ipc.Client {
+	t.Helper()
+	c := h.session(t)
+	if err := c.Call(context.Background(), ipc.MethodSessionShare, ipc.SessionShareParams{Name: "lead"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
 func unlock(t *testing.T, c *ipc.Client) {
 	t.Helper()
 	if err := c.Call(context.Background(), ipc.MethodAuthUnlock, ipc.UnlockParams{Password: "hunter2"}, nil); err != nil {
@@ -84,17 +95,17 @@ func TestEveryMethodRegisteredWithGate(t *testing.T) {
 	want := map[string]ipc.Gate{
 		ipc.MethodSessionRegister: ipc.GateNone,
 		ipc.MethodStatus:          ipc.GateAllowWhenKilled,
-		ipc.MethodChatSend:        ipc.GateSession,
-		ipc.MethodInboxCheck:      ipc.GateSession,
-		ipc.MethodInboxWait:       ipc.GateSession,
-		ipc.MethodTaskCreate:      ipc.GateSession,
-		ipc.MethodTaskGet:         ipc.GateSession,
-		ipc.MethodTaskClaim:       ipc.GateSession,
-		ipc.MethodTaskUpdate:      ipc.GateSession,
-		ipc.MethodTaskComplete:    ipc.GateSession,
-		ipc.MethodTaskFail:        ipc.GateSession,
-		ipc.MethodTaskCancel:      ipc.GateSession,
-		ipc.MethodFileSend:        ipc.GateSession,
+		ipc.MethodChatSend:        ipc.GateShared,
+		ipc.MethodInboxCheck:      ipc.GateShared,
+		ipc.MethodInboxWait:       ipc.GateShared,
+		ipc.MethodTaskCreate:      ipc.GateShared,
+		ipc.MethodTaskGet:         ipc.GateShared,
+		ipc.MethodTaskClaim:       ipc.GateShared,
+		ipc.MethodTaskUpdate:      ipc.GateShared,
+		ipc.MethodTaskComplete:    ipc.GateShared,
+		ipc.MethodTaskFail:        ipc.GateShared,
+		ipc.MethodTaskCancel:      ipc.GateShared,
+		ipc.MethodFileSend:        ipc.GateShared,
 		ipc.MethodPeerList:        ipc.GateAllowWhenKilled,
 		ipc.MethodPeerPause:       ipc.GateNone,
 		ipc.MethodPeerResume:      ipc.GateNone,
@@ -161,21 +172,24 @@ func TestSessionRegisterValidation(t *testing.T) {
 
 func TestChatSend(t *testing.T) {
 	h := newHarness(t)
-	c := h.session(t)
+	if err := h.session(t).Call(bg, ipc.MethodChatSend, ipc.ChatSendParams{Link: 1, Text: "hi"}, nil); !errors.Is(err, core.ErrNotShared) {
+		t.Fatalf("chat from a connection that has not shared: %v", err)
+	}
+	c := h.shared(t)
 	var r ipc.IDResult
-	if err := c.Call(bg, ipc.MethodChatSend, ipc.ChatSendParams{To: "gpu-box", Text: "hi"}, &r); err != nil || r.ID != "MSG1" {
+	if err := c.Call(bg, ipc.MethodChatSend, ipc.ChatSendParams{Link: 3, Text: "hi"}, &r); err != nil || r.ID != "MSG1" {
 		t.Fatalf("%v %+v", err, r)
 	}
-	if h.w.lastSession != "claude@proj" {
-		t.Fatalf("session not passed: %q", h.w.lastSession)
+	if h.w.lastSession != "S1" || h.w.lastCall() != "chat 3 hi" {
+		t.Fatalf("session or link not passed: %q %q", h.w.lastSession, h.w.lastCall())
 	}
 	cases := []struct {
 		p    ipc.ChatSendParams
 		want error
 	}{
 		{ipc.ChatSendParams{Text: "hi"}, ipc.ErrBadRequest},
-		{ipc.ChatSendParams{To: "gpu-box"}, ipc.ErrBadRequest},
-		{ipc.ChatSendParams{To: "gpu-box", Text: strings.Repeat("a", core.MaxTextBytes+1)}, core.ErrTooLarge},
+		{ipc.ChatSendParams{Link: 3}, ipc.ErrBadRequest},
+		{ipc.ChatSendParams{Link: 3, Text: strings.Repeat("a", core.MaxTextBytes+1)}, core.ErrTooLarge},
 	}
 	for _, tc := range cases {
 		if err := c.Call(bg, ipc.MethodChatSend, tc.p, nil); !errors.Is(err, tc.want) {
@@ -190,7 +204,7 @@ func TestInboxCheckPassesSessionAndLimit(t *testing.T) {
 		{Seq: 1, ID: "M1", From: "gpu-box", Kind: "chat", Wrapped: `<remote_message from="gpu-box">hi</remote_message>`},
 		{Seq: 2, ID: "M2", From: "gpu-box", Kind: "task", TaskID: "T7", Wrapped: `<remote_message from="gpu-box">do</remote_message>`},
 	}
-	c := h.session(t)
+	c := h.shared(t)
 	var r ipc.InboxResult
 	if err := c.Call(bg, ipc.MethodInboxCheck, ipc.InboxCheckParams{}, &r); err != nil {
 		t.Fatal(err)
@@ -198,7 +212,7 @@ func TestInboxCheckPassesSessionAndLimit(t *testing.T) {
 	if len(r.Items) != 2 || r.Items[1].TaskID != "T7" || r.Items[0].Wrapped != h.w.inbox[0].Wrapped {
 		t.Fatalf("items %+v", r.Items)
 	}
-	if h.w.lastSession != "claude@proj" {
+	if h.w.lastSession != "S1" {
 		t.Fatalf("session %q", h.w.lastSession)
 	}
 	if err := c.Call(bg, ipc.MethodInboxCheck, ipc.InboxCheckParams{Limit: 1}, &r); err != nil || len(r.Items) != 1 {
@@ -219,7 +233,7 @@ func TestInboxWaitClampsTimeout(t *testing.T) {
 		}
 	}
 	h := newHarness(t)
-	c := h.session(t)
+	c := h.shared(t)
 	var r ipc.InboxResult
 	if err := c.Call(bg, ipc.MethodInboxWait, ipc.InboxWaitParams{TimeoutS: 120}, &r); err != nil {
 		t.Fatal(err)
@@ -301,7 +315,7 @@ func TestTrustRaiseNeedsUnlockLowerDoesNot(t *testing.T) {
 
 func TestKillSwitchBlocksAllButAllowed(t *testing.T) {
 	h := newHarness(t)
-	c := h.session(t)
+	c := h.shared(t)
 	if err := c.Call(bg, ipc.MethodKill, nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +323,7 @@ func TestKillSwitchBlocksAllButAllowed(t *testing.T) {
 	if err := c.Call(bg, ipc.MethodKill, nil, nil); err != nil {
 		t.Fatalf("second kill: %v", err)
 	}
-	if err := c.Call(bg, ipc.MethodChatSend, ipc.ChatSendParams{To: "gpu-box", Text: "x"}, nil); !errors.Is(err, core.ErrKilled) {
+	if err := c.Call(bg, ipc.MethodChatSend, ipc.ChatSendParams{Link: 1, Text: "x"}, nil); !errors.Is(err, core.ErrKilled) {
 		t.Fatalf("chat while killed: %v", err)
 	}
 	if err := c.Call(bg, ipc.MethodPeerPause, ipc.AliasParams{Alias: "gpu-box"}, nil); !errors.Is(err, core.ErrKilled) {
@@ -335,7 +349,7 @@ func TestKillSwitchBlocksAllButAllowed(t *testing.T) {
 	if err := c.Call(bg, ipc.MethodResume, nil, nil); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	if err := c.Call(bg, ipc.MethodChatSend, ipc.ChatSendParams{To: "gpu-box", Text: "x"}, nil); err != nil {
+	if err := c.Call(bg, ipc.MethodChatSend, ipc.ChatSendParams{Link: 1, Text: "x"}, nil); err != nil {
 		t.Fatalf("chat after resume: %v", err)
 	}
 }
@@ -356,15 +370,18 @@ func TestDisconnectEndsSession(t *testing.T) {
 
 func TestTaskMethods(t *testing.T) {
 	h := newHarness(t)
-	c := h.session(t)
+	c := h.shared(t)
 	var cr ipc.TaskCreateResult
-	if err := c.Call(bg, ipc.MethodTaskCreate, ipc.TaskCreateParams{To: "gpu-box", Instructions: "go"}, &cr); err != nil || cr.TaskID != "T1" {
+	if err := c.Call(bg, ipc.MethodTaskCreate, ipc.TaskCreateParams{Link: 2, Instructions: "go"}, &cr); err != nil || cr.TaskID != "T1" {
 		t.Fatalf("create: %v", err)
 	}
-	if h.w.lastSession != "claude@proj" || h.w.lastProject != "/work/proj" {
-		t.Fatalf("create got %q %q", h.w.lastSession, h.w.lastProject)
+	if h.w.lastSession != "S1" || h.w.lastProject != "/work/proj" || h.w.lastCall() != "task 2 go" {
+		t.Fatalf("create got %q %q %q", h.w.lastSession, h.w.lastProject, h.w.lastCall())
 	}
-	if err := c.Call(bg, ipc.MethodTaskCreate, ipc.TaskCreateParams{To: "gpu-box", Instructions: strings.Repeat("x", core.MaxTextBytes+1)}, nil); !errors.Is(err, core.ErrTooLarge) {
+	if err := c.Call(bg, ipc.MethodTaskCreate, ipc.TaskCreateParams{Instructions: "go"}, nil); !errors.Is(err, ipc.ErrBadRequest) {
+		t.Fatalf("no link: %v", err)
+	}
+	if err := c.Call(bg, ipc.MethodTaskCreate, ipc.TaskCreateParams{Link: 2, Instructions: strings.Repeat("x", core.MaxTextBytes+1)}, nil); !errors.Is(err, core.ErrTooLarge) {
 		t.Fatalf("oversize: %v", err)
 	}
 	var tv ipc.TaskView
@@ -412,12 +429,12 @@ func TestApprovalsPreviewAndDecide(t *testing.T) {
 
 func TestFilesAndControl(t *testing.T) {
 	h := newHarness(t)
-	c := h.session(t)
+	c := h.shared(t)
 	var fr ipc.FileSendResult
-	if err := c.Call(bg, ipc.MethodFileSend, ipc.FileSendParams{To: "gpu-box", Path: "a.txt"}, &fr); err != nil || fr.FileID != "F1" {
+	if err := c.Call(bg, ipc.MethodFileSend, ipc.FileSendParams{Link: 4, Path: "a.txt"}, &fr); err != nil || fr.FileID != "F1" {
 		t.Fatalf("file.send: %v", err)
 	}
-	if h.w.lastCall() != "file gpu-box /work/proj a.txt" {
+	if h.w.lastCall() != "file S1 4 /work/proj a.txt" {
 		t.Fatalf("file.send args %q", h.w.lastCall())
 	}
 	h.w.files["F2"] = store.FileRecord{FileID: "F2", Direction: store.TaskInbound, Peer: gpuID, Name: "x.bin", State: store.FileHeld, Size: 9}
@@ -469,15 +486,15 @@ func TestHookCounts(t *testing.T) {
 // must come back with kind "killed" and never reach the ports.
 func TestKillGateRefusesSends(t *testing.T) {
 	h := newHarness(t)
-	c := h.session(t)
+	c := h.shared(t)
 	if err := c.Call(bg, ipc.MethodKill, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	before := h.w.lastCall()
 	sends := map[string]any{
-		ipc.MethodChatSend:   ipc.ChatSendParams{To: "gpu-box", Text: "x"},
-		ipc.MethodTaskCreate: ipc.TaskCreateParams{To: "gpu-box", Instructions: "go"},
-		ipc.MethodFileSend:   ipc.FileSendParams{To: "gpu-box", Path: "a.txt"},
+		ipc.MethodChatSend:   ipc.ChatSendParams{Link: 1, Text: "x"},
+		ipc.MethodTaskCreate: ipc.TaskCreateParams{Link: 1, Instructions: "go"},
+		ipc.MethodFileSend:   ipc.FileSendParams{Link: 1, Path: "a.txt"},
 	}
 	for m, params := range sends {
 		err := c.Call(bg, m, params, nil)

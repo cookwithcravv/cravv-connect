@@ -205,11 +205,10 @@ func (a *recordingAudit) last() audit.Event {
 }
 
 type sentEnvelope struct {
-	To          core.MachineID
-	Kind        core.Kind
-	FromSession string
-	ToSession   string
-	Body        json.RawMessage
+	To     core.MachineID
+	Kind   core.Kind
+	LinkID string
+	Body   json.RawMessage
 }
 
 // recordingSender is an EnvelopeSender and OutboxControl that records instead of sending.
@@ -224,7 +223,7 @@ type recordingSender struct {
 	forgot   []core.MachineID
 }
 
-func (r *recordingSender) SendEnvelope(_ context.Context, to core.MachineID, kind core.Kind, fromSession, toSession string, body any) (string, error) {
+func (r *recordingSender) SendEnvelope(_ context.Context, to core.MachineID, kind core.Kind, linkID string, body any) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.err != nil {
@@ -235,7 +234,7 @@ func (r *recordingSender) SendEnvelope(_ context.Context, to core.MachineID, kin
 		return "", err
 	}
 	r.log.add("envelope %s %s", kind, to.Short())
-	r.envs = append(r.envs, sentEnvelope{To: to, Kind: kind, FromSession: fromSession, ToSession: toSession, Body: b})
+	r.envs = append(r.envs, sentEnvelope{To: to, Kind: kind, LinkID: linkID, Body: b})
 	return core.NewID(), nil
 }
 
@@ -298,7 +297,7 @@ type testPeer struct {
 	rec    store.Peer
 }
 
-func newTestPeer(t *testing.T, alias string, trust core.TrustLevel) testPeer {
+func newTestPeer(t *testing.T, alias string) testPeer {
 	t.Helper()
 	id, err := keys.GenerateIdentity()
 	if err != nil {
@@ -312,7 +311,6 @@ func newTestPeer(t *testing.T, alias string, trust core.TrustLevel) testPeer {
 		MachineID: id.MachineID(),
 		IK:        id.Public(),
 		Alias:     alias,
-		TrustIn:   trust,
 		Prekey:    pk.Signed(id).Wire(),
 		RelayURL:  "https://relay.test",
 		PairedAt:  testEpoch,

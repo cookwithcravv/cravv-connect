@@ -9,23 +9,25 @@ import (
 	"github.com/cravv/cravv-connect/internal/store"
 )
 
-// Human-only actions (spec 7.2) refuse unless the caller says the password
-// unlock happened, so no API adapter can forget the gate.
+// Human-only actions (spec 7.2, v2 spec 10) refuse unless the caller says a
+// human decided, so no API adapter can forget the gate.
 func TestHumanOnlyActionsNeedUnlock(t *testing.T) {
 	ctx := context.Background()
 	e := d2FileSvc(t, 0)
-	ask, _ := d2Peer(t, e.te.st, "mac", core.TrustAskFirst)
-	held := e.te.incoming(t, ask, "", "held work")
-	if err := e.te.tasks.Decide(ctx, held, true, false); !errors.Is(err, core.ErrAuthRequired) {
-		t.Fatalf("Decide without unlock err = %v", err)
+	askLink := d2Link(t, e.te.st, e.te.peer, e.te.session, "asker", core.PermTasksAsk, core.PermMessages)
+	held := core.NewID()
+	if err := e.te.handle(t, d2Env(t, e.te.peer, core.KindTaskCreate, askLink.ID, core.TaskCreateBody{TaskID: held, Instructions: "held work"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.te.tasks.Decide(ctx, held, true, AuthNone); !errors.Is(err, core.ErrAuthRequired) {
+		t.Fatalf("Decide without a human err = %v", err)
 	}
 	if tk := e.te.state(t, held); tk.State != core.TaskAwaitingApproval {
 		t.Fatalf("task decided without unlock: %s", tk.State)
 	}
 
-	chatOnly, _ := d2Peer(t, e.te.st, "stranger", core.TrustChatOnly)
 	body := e.blobs.put(t, "a.txt", []byte("a"))
-	e.offer(t, chatOnly, body)
+	e.hold(t, body.FileID, body)
 	if err := e.files.Accept(ctx, body.FileID, false); !errors.Is(err, core.ErrAuthRequired) {
 		t.Fatalf("Accept without unlock err = %v", err)
 	}

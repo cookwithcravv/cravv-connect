@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/cravv/cravv-connect/internal/audit"
@@ -21,15 +20,19 @@ type PeerResolver interface {
 	Resolve(ctx context.Context, addr string) (store.Peer, string, error)
 }
 
-// FileSender uploads a local file to a peer. Implemented by *FileService.
+// FileSender uploads a local file over a link. Implemented by *FileService.
 type FileSender interface {
-	SendFile(ctx context.Context, to core.MachineID, projectDir, path, taskID string) (core.FileRef, error)
+	SendFile(ctx context.Context, l store.Link, projectDir, path, taskID string) (core.FileRef, error)
 }
 
-// CLIClaimMaxAge is how long a task claimed by a CLIAgent session may stay
-// claimed or running before it fails as abandoned. CLI sessions are
-// reclaimable for core.InboxRetention, so nothing else would end such a claim.
-const CLIClaimMaxAge = 7 * 24 * time.Hour
+// ActiveLinks returns a session's active link by number (core.ErrLinkClosed
+// when it is not active). Implemented by *LinkService.
+type ActiveLinks interface {
+	Active(ctx context.Context, sessionID string, num int64) (store.Link, error)
+}
+
+// ReasonLinkClosed is the failure reason of a task whose link closed.
+const ReasonLinkClosed = "link_closed"
 
 // ApprovalPreviewChars is how much of a held task the approval list shows.
 const ApprovalPreviewChars = 500
@@ -45,19 +48,21 @@ type Approval struct {
 
 // TaskDeps are the TaskService collaborators.
 type TaskDeps struct {
-	Tasks    store.TaskStore
-	Peers    store.PeerStore
-	Resolver PeerResolver
-	Inbox    *InboxService
-	Sender   EnvelopeSender
-	Policy   TrustPolicy
-	Files    FileSender
-	Desktop  DesktopNotifier
-	Clock    core.Clock
-	Audit    audit.Logger
+	Tasks   store.TaskStore
+	Peers   store.PeerStore
+	Links   ActiveLinks
+	Lookup  LinkLookup
+	Inbox   *InboxService
+	Sender  EnvelopeSender
+	Policy  PermissionPolicy
+	Files   FileSender
+	Desktop DesktopNotifier
+	Clock   core.Clock
+	Audit   audit.Logger
 }
 
-// TaskService runs the task state machine on both sides (spec 7.1, 8.2).
+// TaskService runs the task state machine on both sides of a link. A task
+// belongs to one link and to the link's local session on each side.
 type TaskService struct{ d TaskDeps }
 
 // NewTaskService builds a TaskService.
@@ -72,46 +77,48 @@ var (
 	activeInbound  = []core.TaskState{core.TaskAwaitingApproval, core.TaskQueued, core.TaskClaimed, core.TaskRunning}
 	claimedStates  = []core.TaskState{core.TaskClaimed, core.TaskRunning}
 	pendingStates  = []core.TaskState{core.TaskAwaitingApproval, core.TaskQueued}
-	activeOutbound = []core.TaskState{core.TaskSent, core.TaskAwaitingApproval, core.TaskQueued, core.TaskClaimed, core.TaskRunning}
+	activeOutbound = []core.TaskState{core.TaskSent, core.TaskAwaitingApproval, core.TaskQueued, core.TaskSeen, core.TaskClaimed, core.TaskRunning}
 )
 
 // mirrorRank orders sender-side states so a late update never moves a task backwards.
 var mirrorRank = map[core.TaskState]int{
-	core.TaskSent: 0, core.TaskAwaitingApproval: 1, core.TaskQueued: 2, core.TaskClaimed: 3, core.TaskRunning: 4,
-	core.TaskDone: 5, core.TaskFailed: 5, core.TaskCancelled: 5, core.TaskRejected: 5, core.TaskExpired: 5,
+	core.TaskSent: 0, core.TaskAwaitingApproval: 1, core.TaskQueued: 2, core.TaskSeen: 3, core.TaskClaimed: 4, core.TaskRunning: 5,
+	core.TaskDone: 6, core.TaskFailed: 6, core.TaskCancelled: 6, core.TaskRejected: 6, core.TaskExpired: 6,
 }
 
-// Create sends a task to "alias" or "alias/session" and records its sender-side mirror.
-func (s *TaskService) Create(ctx context.Context, session, projectDir, to, instructions string, filePaths []string) (string, error) {
+// Create sends a task over the session's active link num and records its
+// sender-side mirror. A link on which the peer allows messages only refuses
+// it at once (core.ErrNotPermitted).
+func (s *TaskService) Create(ctx context.Context, session, projectDir string, link int64, instructions string, filePaths []string) (string, error) {
 	if instructions == "" {
 		return "", errors.New("instructions are empty")
 	}
 	if len(instructions) > core.MaxTextBytes {
 		return "", fmt.Errorf("instructions: %w", core.ErrTooLarge)
 	}
-	peer, toSession, err := s.d.Resolver.Resolve(ctx, to)
+	l, err := s.d.Links.Active(ctx, session, link)
 	if err != nil {
 		return "", err
 	}
-	if peer.Paused {
-		return "", core.ErrPaused
+	if l.PermissionOut == core.PermMessages {
+		return "", fmt.Errorf("link %d allows messages only: %w", link, core.ErrNotPermitted)
 	}
 	taskID := core.NewID()
-	files, err := s.sendFiles(ctx, peer.MachineID, projectDir, taskID, filePaths)
+	files, err := s.sendFiles(ctx, l, projectDir, taskID, filePaths)
 	if err != nil {
 		return "", err
 	}
 	now := s.d.Clock.Now()
 	t := store.Task{
-		ID: taskID, Direction: store.TaskOutbound, Peer: peer.MachineID,
-		FromSession: session, ToSession: toSession, Instructions: instructions,
+		ID: taskID, Direction: store.TaskOutbound, Peer: l.Peer, LinkID: l.ID,
+		FromSession: session, ToSession: l.RemoteName, Instructions: instructions,
 		State: core.TaskSent, Files: files, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.d.Tasks.PutTask(ctx, t); err != nil {
 		return "", err
 	}
 	body := core.TaskCreateBody{TaskID: taskID, Instructions: instructions, Files: files}
-	if _, err := s.d.Sender.SendEnvelope(ctx, peer.MachineID, core.KindTaskCreate, session, toSession, body); err != nil {
+	if _, err := s.d.Sender.SendEnvelope(ctx, l.Peer, core.KindTaskCreate, l.ID, body); err != nil {
 		_, _ = s.d.Tasks.Transition(ctx, taskID, []core.TaskState{core.TaskSent}, func(t *store.Task) error {
 			t.State = core.TaskFailed
 			t.Notes = append(t.Notes, store.TaskNote{At: now, Text: "not sent: " + err.Error()})
@@ -123,7 +130,7 @@ func (s *TaskService) Create(ctx context.Context, session, projectDir, to, instr
 	return taskID, nil
 }
 
-func (s *TaskService) sendFiles(ctx context.Context, to core.MachineID, projectDir, taskID string, paths []string) ([]core.FileRef, error) {
+func (s *TaskService) sendFiles(ctx context.Context, l store.Link, projectDir, taskID string, paths []string) ([]core.FileRef, error) {
 	if len(paths) == 0 {
 		return nil, nil
 	}
@@ -132,7 +139,7 @@ func (s *TaskService) sendFiles(ctx context.Context, to core.MachineID, projectD
 	}
 	refs := make([]core.FileRef, 0, len(paths))
 	for _, p := range paths {
-		ref, err := s.d.Files.SendFile(ctx, to, projectDir, p, taskID)
+		ref, err := s.d.Files.SendFile(ctx, l, projectDir, p, taskID)
 		if err != nil {
 			return refs, fmt.Errorf("attach %s: %w", p, err)
 		}
@@ -141,20 +148,27 @@ func (s *TaskService) sendFiles(ctx context.Context, to core.MachineID, projectD
 	return refs, nil
 }
 
-// HandleCreate applies the trust policy to an incoming task.create. Behind a PolicyGate
-// its own decision must match the gate's.
+// HandleCreate applies the link's permission to an incoming task.create.
+// Behind a LinkGate its own decision must match the gate's.
 func (s *TaskService) HandleCreate(ctx context.Context, peer store.Peer, env core.Envelope) error {
-	decision := s.d.Policy.Decide(peer.TrustIn, core.KindTaskCreate)
-	return s.handleCreate(ctx, peer, env, decision)
+	l, ok := LinkFrom(ctx)
+	if !ok {
+		return errNoLink
+	}
+	return s.handleCreate(ctx, peer, l, env, s.d.Policy.Decide(l.PermissionIn, core.KindTaskCreate))
 }
 
-// RejectCreate records an incoming task.create as rejected and tells the sender. It is
-// the PolicyGate's OnReject for task.create.
+// RejectCreate records an incoming task.create as rejected and tells the
+// sender. It is the LinkGate's OnReject for task.create.
 func (s *TaskService) RejectCreate(ctx context.Context, peer store.Peer, env core.Envelope) error {
-	return s.handleCreate(ctx, peer, env, DecisionReject)
+	l, ok := LinkFrom(ctx)
+	if !ok {
+		return errNoLink
+	}
+	return s.handleCreate(ctx, peer, l, env, DecisionReject)
 }
 
-func (s *TaskService) handleCreate(ctx context.Context, peer store.Peer, env core.Envelope, decision Decision) error {
+func (s *TaskService) handleCreate(ctx context.Context, peer store.Peer, l store.Link, env core.Envelope, decision Decision) error {
 	body, err := decodeEnvBody[core.TaskCreateBody](env.Body)
 	if err != nil {
 		return err
@@ -169,14 +183,14 @@ func (s *TaskService) handleCreate(ctx context.Context, peer store.Peer, env cor
 		return fmt.Errorf("task %s: %w", body.TaskID, core.ErrTooLarge)
 	}
 	if cur, err := s.d.Tasks.GetTask(ctx, body.TaskID); err == nil {
-		return Retryable(s.redeliverCreate(ctx, cur, peer, env.ID))
+		return Retryable(s.redeliverCreate(ctx, cur, l, env.ID))
 	} else if !errors.Is(err, core.ErrNotFound) {
 		return Retryable(err)
 	}
 	now := s.d.Clock.Now()
 	t := store.Task{
-		ID: body.TaskID, Direction: store.TaskInbound, Peer: peer.MachineID,
-		FromSession: env.FromSession, ToSession: env.ToSession, Instructions: body.Instructions,
+		ID: body.TaskID, Direction: store.TaskInbound, Peer: peer.MachineID, LinkID: l.ID,
+		FromSession: l.RemoteName, ToSession: l.Session, Instructions: body.Instructions,
 		Files: body.Files, CreatedAt: now, UpdatedAt: now,
 	}
 	switch decision {
@@ -214,8 +228,8 @@ func (s *TaskService) handleCreate(ctx context.Context, peer store.Peer, env cor
 // a redelivery of the message that created a queued task and the earlier
 // attempt failed after storing the task, the inbox item is written now.
 // Anything else (a duplicate, or an ID naming another task) is ignored.
-func (s *TaskService) redeliverCreate(ctx context.Context, cur store.Task, peer store.Peer, msgID string) error {
-	if cur.Direction != store.TaskInbound || cur.Peer != peer.MachineID || cur.State != core.TaskQueued {
+func (s *TaskService) redeliverCreate(ctx context.Context, cur store.Task, l store.Link, msgID string) error {
+	if cur.Direction != store.TaskInbound || cur.Peer != l.Peer || cur.LinkID != l.ID || cur.State != core.TaskQueued {
 		return nil
 	}
 	done, err := s.d.Inbox.Delivered(ctx, msgID)
@@ -231,32 +245,35 @@ func (s *TaskService) deliverTask(ctx context.Context, t store.Task, msgID strin
 		return err
 	}
 	_, err = s.d.Inbox.Deliver(ctx, store.InboxItem{
-		MsgID: msgID, From: t.Peer, FromSession: t.FromSession, ToSession: t.ToSession,
+		MsgID: msgID, From: t.Peer, FromSession: t.FromSession, ToSession: t.ToSession, LinkID: t.LinkID,
 		Kind: core.KindTaskCreate, Body: body, TaskID: t.ID,
 	})
 	return err
 }
 
-// sendUpdate reports an inbound task's state to its sender. It is best
-// effort: the outbox persists it, and it only fails when the peer is gone.
+// sendUpdate reports an inbound task's state to its sender over the task's
+// link. It is best effort: the outbox persists it, and after the link
+// closed the sender fails the task on its own side.
 func (s *TaskService) sendUpdate(ctx context.Context, t store.Task, body core.TaskUpdateBody) {
-	_, _ = s.d.Sender.SendEnvelope(ctx, t.Peer, core.KindTaskUpdate, t.ClaimedBy, t.FromSession, body)
+	_, _ = s.d.Sender.SendEnvelope(ctx, t.Peer, core.KindTaskUpdate, t.LinkID, body)
 }
 
-func (s *TaskService) inboundTask(ctx context.Context, id string) (store.Task, error) {
+// inboundTask returns an inbound task of the session; any other task looks missing.
+func (s *TaskService) inboundTask(ctx context.Context, session, id string) (store.Task, error) {
 	t, err := s.d.Tasks.GetTask(ctx, id)
 	if err != nil {
 		return t, err
 	}
-	if t.Direction != store.TaskInbound {
-		return t, core.ErrNotFound
+	if t.Direction != store.TaskInbound || t.ToSession != session {
+		return store.Task{}, core.ErrNotFound
 	}
 	return t, nil
 }
 
-// Claim atomically gives a queued task to one session.
+// Claim gives a queued task to the session it was sent to. Only that
+// session sees it, but claiming stays atomic and explicit.
 func (s *TaskService) Claim(ctx context.Context, session, id string) (store.Task, error) {
-	if _, err := s.inboundTask(ctx, id); err != nil {
+	if _, err := s.inboundTask(ctx, session, id); err != nil {
 		return store.Task{}, err
 	}
 	now := s.d.Clock.Now()
@@ -264,9 +281,6 @@ func (s *TaskService) Claim(ctx context.Context, session, id string) (store.Task
 		t.State = core.TaskClaimed
 		t.ClaimedBy = session
 		t.ExpiresAt = time.Time{}
-		if isCLISession(session) {
-			t.ExpiresAt = now.Add(CLIClaimMaxAge)
-		}
 		t.UpdatedAt = now
 		return nil
 	})
@@ -291,7 +305,7 @@ func (s *TaskService) Claim(ctx context.Context, session, id string) (store.Task
 }
 
 func (s *TaskService) claimerTransition(ctx context.Context, session, id string, mutate func(t *store.Task)) (store.Task, error) {
-	if _, err := s.inboundTask(ctx, id); err != nil {
+	if _, err := s.inboundTask(ctx, session, id); err != nil {
 		return store.Task{}, err
 	}
 	now := s.d.Clock.Now()
@@ -338,7 +352,18 @@ func (s *TaskService) Complete(ctx context.Context, session, projectDir, id, res
 	if err != nil {
 		return t, err
 	}
-	files, ferr := s.sendFiles(ctx, t.Peer, projectDir, id, filePaths)
+	var files []core.FileRef
+	var ferr error
+	if len(filePaths) > 0 {
+		var l store.Link
+		if l, ferr = s.d.Lookup.GetLink(ctx, t.Peer, t.LinkID); ferr == nil {
+			if l.State != store.LinkActive {
+				ferr = fmt.Errorf("link %d: %w", l.Num, core.ErrLinkClosed)
+			} else {
+				files, ferr = s.sendFiles(ctx, l, projectDir, id, filePaths)
+			}
+		}
+	}
 	if len(files) > 0 {
 		t, err = s.d.Tasks.Transition(ctx, id, []core.TaskState{core.TaskDone}, func(t *store.Task) error {
 			t.ResultFiles = files
@@ -391,12 +416,16 @@ func (s *TaskService) Cancel(ctx context.Context, session, id string) (store.Tas
 	if err != nil {
 		return t, err
 	}
-	_, err = s.d.Sender.SendEnvelope(ctx, t.Peer, core.KindTaskCancel, session, t.ToSession, core.TaskCancelBody{TaskID: id})
+	_, err = s.d.Sender.SendEnvelope(ctx, t.Peer, core.KindTaskCancel, t.LinkID, core.TaskCancelBody{TaskID: id})
 	return t, err
 }
 
-// HandleCancel cancels an inbound task when its sender asks and tells the claimer.
+// HandleCancel cancels an inbound task when its sender asks and tells the session.
 func (s *TaskService) HandleCancel(ctx context.Context, peer store.Peer, env core.Envelope) error {
+	l, ok := LinkFrom(ctx)
+	if !ok {
+		return errNoLink
+	}
 	body, err := decodeEnvBody[core.TaskCancelBody](env.Body)
 	if err != nil {
 		return err
@@ -411,8 +440,8 @@ func (s *TaskService) HandleCancel(ctx context.Context, peer store.Peer, env cor
 	if err != nil {
 		return Retryable(err)
 	}
-	if cur.Direction != store.TaskInbound || cur.Peer != peer.MachineID {
-		return nil // a peer may only cancel its own tasks
+	if cur.Direction != store.TaskInbound || cur.Peer != peer.MachineID || cur.LinkID != l.ID {
+		return nil // a peer may only cancel its own tasks, on their own link
 	}
 	now := s.d.Clock.Now()
 	t, err := s.d.Tasks.Transition(ctx, body.TaskID, activeInbound, func(t *store.Task) error {
@@ -442,7 +471,7 @@ func (s *TaskService) HandleCancel(ctx context.Context, peer store.Peer, env cor
 		return err
 	}
 	_, err = s.d.Inbox.Deliver(ctx, store.InboxItem{
-		MsgID: env.ID, From: peer.MachineID, FromSession: env.FromSession, ToSession: t.ClaimedBy,
+		MsgID: env.ID, From: peer.MachineID, FromSession: l.RemoteName, ToSession: t.ToSession, LinkID: t.LinkID,
 		Kind: core.KindTaskUpdate, Body: notice, TaskID: t.ID,
 	})
 	return Retryable(err)
@@ -450,6 +479,10 @@ func (s *TaskService) HandleCancel(ctx context.Context, peer store.Peer, env cor
 
 // HandleUpdate updates the sender-side mirror and tells the creating session.
 func (s *TaskService) HandleUpdate(ctx context.Context, peer store.Peer, env core.Envelope) error {
+	l, ok := LinkFrom(ctx)
+	if !ok {
+		return errNoLink
+	}
 	body, err := decodeEnvBody[core.TaskUpdateBody](env.Body)
 	if err != nil {
 		return err
@@ -470,8 +503,8 @@ func (s *TaskService) HandleUpdate(ctx context.Context, peer store.Peer, env cor
 	if err != nil {
 		return Retryable(err)
 	}
-	if cur.Direction != store.TaskOutbound || cur.Peer != peer.MachineID {
-		return nil // only the task's receiver may update it
+	if cur.Direction != store.TaskOutbound || cur.Peer != peer.MachineID || cur.LinkID != l.ID {
+		return nil // only the task's receiver may update it, on the task's link
 	}
 	// A redelivery after an attempt that stored the update but failed to tell
 	// the session: the inbox item is the last step, so its presence means done.
@@ -495,7 +528,7 @@ func (s *TaskService) HandleUpdate(ctx context.Context, peer store.Peer, env cor
 			t.ResultFiles = body.Files
 		}
 		if body.State == core.TaskClaimed || body.State == core.TaskRunning {
-			t.ClaimedBy = env.FromSession
+			t.ClaimedBy = l.RemoteName
 		}
 		t.UpdatedAt = now
 		return nil
@@ -515,16 +548,16 @@ func (s *TaskService) HandleUpdate(ctx context.Context, peer store.Peer, env cor
 		return Retryable(err)
 	}
 	_, err = s.d.Inbox.Deliver(ctx, store.InboxItem{
-		MsgID: env.ID, From: peer.MachineID, FromSession: env.FromSession, ToSession: t.FromSession,
+		MsgID: env.ID, From: peer.MachineID, FromSession: l.RemoteName, ToSession: t.FromSession, LinkID: t.LinkID,
 		Kind: core.KindTaskUpdate, Body: env.Body, TaskID: t.ID,
 	})
 	return Retryable(err)
 }
 
-// Get returns a task a session may see: an inbound task a human did not hold
-// or reject, or an outbound task the session created. Held (awaiting_approval)
-// and rejected inbound tasks look like they do not exist, so agents never read
-// instructions no human approved.
+// Get returns a task the session may see: an inbound task sent to it that a
+// human did not hold or reject, or an outbound task it created. Every other
+// task, including another session's, looks like it does not exist, so
+// agents never read instructions no human approved or another session's work.
 func (s *TaskService) Get(ctx context.Context, session, id string) (store.Task, error) {
 	t, err := s.d.Tasks.GetTask(ctx, id)
 	if err != nil {
@@ -533,7 +566,7 @@ func (s *TaskService) Get(ctx context.Context, session, id string) (store.Task, 
 	if t.Direction == store.TaskOutbound && t.FromSession != session {
 		return store.Task{}, core.ErrNotFound
 	}
-	if t.Direction == store.TaskInbound && (t.State == core.TaskAwaitingApproval || t.State == core.TaskRejected) {
+	if t.Direction == store.TaskInbound && (t.ToSession != session || t.State == core.TaskAwaitingApproval || t.State == core.TaskRejected) {
 		return store.Task{}, core.ErrNotFound
 	}
 	return t, nil
@@ -564,19 +597,22 @@ func (s *TaskService) PendingApprovals(ctx context.Context) (int, error) {
 	return len(ts), err
 }
 
-// Decide approves (queued, delivered to sessions) or denies (rejected) a held task.
-// It is a human-only action: unlocked must be true (the IPC layer sets it after
-// auth.unlock), otherwise it fails with core.ErrAuthRequired.
-func (s *TaskService) Decide(ctx context.Context, id string, approve, unlocked bool) error {
-	if !unlocked {
+// Decide approves (queued, delivered to the session) or denies (rejected) a
+// held task. Approving is a human decision: it needs AuthChat (Phase 2) or
+// AuthPassword (the CLI), otherwise core.ErrAuthRequired. Denying needs none.
+func (s *TaskService) Decide(ctx context.Context, id string, approve bool, auth Authority) error {
+	if approve && auth < AuthChat {
 		return core.ErrAuthRequired
 	}
-	cur, err := s.inboundTask(ctx, id)
+	cur, err := s.d.Tasks.GetTask(ctx, id)
 	if err != nil {
 		return err
 	}
+	if cur.Direction != store.TaskInbound {
+		return core.ErrNotFound
+	}
 	if approve {
-		if err := s.checkPeerForApproval(ctx, cur.Peer); err != nil {
+		if err := s.checkLinkForApproval(ctx, cur); err != nil {
 			return err
 		}
 	}
@@ -608,18 +644,15 @@ func (s *TaskService) Decide(ctx context.Context, id string, approve, unlocked b
 	return s.deliverTask(ctx, t, t.ID)
 }
 
-// checkPeerForApproval refuses an approval when the peer is no longer paired,
-// is paused by us, or its trust level no longer allows tasks.
-func (s *TaskService) checkPeerForApproval(ctx context.Context, id core.MachineID) error {
-	p, err := s.d.Peers.GetPeer(ctx, id)
-	if err != nil {
-		return fmt.Errorf("peer %s: %w", id.Short(), err)
+// checkLinkForApproval refuses an approval when the task's link is no
+// longer active or no longer allows tasks.
+func (s *TaskService) checkLinkForApproval(ctx context.Context, t store.Task) error {
+	l, err := s.d.Lookup.GetLink(ctx, t.Peer, t.LinkID)
+	if err != nil || l.State != store.LinkActive {
+		return fmt.Errorf("task %s: %w", t.ID, core.ErrLinkClosed)
 	}
-	if p.Paused {
-		return fmt.Errorf("%s: %w", p.Alias, core.ErrPaused)
-	}
-	if s.d.Policy.Decide(p.TrustIn, core.KindTaskCreate) == DecisionReject {
-		return fmt.Errorf("%s is %s: %w", p.Alias, p.TrustIn, core.ErrNotPermitted)
+	if s.d.Policy.Decide(l.PermissionIn, core.KindTaskCreate) == DecisionReject {
+		return fmt.Errorf("link %d allows %s: %w", l.Num, l.PermissionIn, core.ErrNotPermitted)
 	}
 	return nil
 }
@@ -678,31 +711,6 @@ func (s *TaskService) ExpireDue(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// AbandonSession fails the tasks an expired session had claimed.
-func (s *TaskService) AbandonSession(ctx context.Context, name string) error {
-	return s.failClaimed(ctx, store.TaskFilter{Direction: store.TaskInbound, States: claimedStates, ClaimedBy: name}, "abandoned")
-}
-
-// AbandonStaleCLIClaims fails tasks a CLIAgent session claimed more than
-// CLIClaimMaxAge ago ("abandoned") and tells their senders.
-func (s *TaskService) AbandonStaleCLIClaims(ctx context.Context) (int, error) {
-	ts, err := s.d.Tasks.ListTasks(ctx, store.TaskFilter{Direction: store.TaskInbound, States: claimedStates, ExpiredBefore: s.d.Clock.Now()})
-	if err != nil {
-		return 0, err
-	}
-	stale := ts[:0]
-	for _, t := range ts {
-		if isCLISession(t.ClaimedBy) {
-			stale = append(stale, t)
-		}
-	}
-	return s.failTasks(ctx, stale, "abandoned")
-}
-
-// isCLISession reports whether a session name belongs to the --json CLI
-// (sessions are named <agent>@<dir>).
-func isCLISession(name string) bool { return strings.HasPrefix(name, CLIAgent+"@") }
-
 // FailActive fails every claimed or running inbound task (kill switch).
 func (s *TaskService) FailActive(ctx context.Context, reason string) error {
 	return s.failClaimed(ctx, store.TaskFilter{Direction: store.TaskInbound, States: claimedStates}, reason)
@@ -719,10 +727,17 @@ func (s *TaskService) failClaimed(ctx context.Context, f store.TaskFilter, reaso
 
 // failTasks fails the listed tasks that are still claimed or running and tells their senders.
 func (s *TaskService) failTasks(ctx context.Context, ts []store.Task, reason string) (int, error) {
+	failed, err := s.failTasksFrom(ctx, ts, claimedStates, reason, true)
+	return len(failed), err
+}
+
+// failTasksFrom fails the listed tasks still in one of from and returns
+// them; tell sends the update to the peer (inbound tasks only).
+func (s *TaskService) failTasksFrom(ctx context.Context, ts []store.Task, from []core.TaskState, reason string, tell bool) ([]store.Task, error) {
 	now := s.d.Clock.Now()
-	n := 0
+	var failed []store.Task
 	for _, cand := range ts {
-		t, err := s.d.Tasks.Transition(ctx, cand.ID, claimedStates, func(t *store.Task) error {
+		t, err := s.d.Tasks.Transition(ctx, cand.ID, from, func(t *store.Task) error {
 			t.State = core.TaskFailed
 			t.ExpiresAt = time.Time{}
 			t.Notes = append(t.Notes, store.TaskNote{At: now, Text: reason})
@@ -733,21 +748,51 @@ func (s *TaskService) failTasks(ctx context.Context, ts []store.Task, reason str
 			continue
 		}
 		if err != nil {
-			return n, err
+			return failed, err
 		}
-		s.sendUpdate(ctx, t, core.TaskUpdateBody{TaskID: t.ID, State: core.TaskFailed, Note: reason})
-		n++
+		if tell {
+			s.sendUpdate(ctx, t, core.TaskUpdateBody{TaskID: t.ID, State: core.TaskFailed, Note: reason})
+		}
+		failed = append(failed, t)
 	}
-	return n, nil
+	return failed, nil
 }
 
-// RecheckPeer re-applies the trust policy to a peer's pending tasks after its
-// trust level changed: a peer lowered to chat-only has them rejected.
-func (s *TaskService) RecheckPeer(ctx context.Context, peer core.MachineID, level core.TrustLevel) error {
-	if s.d.Policy.Decide(level, core.KindTaskCreate) != DecisionReject {
+// LinkClosed implements LinkCloseObserver: every unfinished task on the link
+// fails with link_closed on this side. The sender of an inbound task is told
+// (best effort: it also fails the task itself when its side of the link closes).
+func (s *TaskService) LinkClosed(ctx context.Context, l store.Link) error {
+	in, err := s.d.Tasks.ListTasks(ctx, store.TaskFilter{Direction: store.TaskInbound, States: activeInbound, LinkID: l.ID, Peer: l.Peer})
+	if err != nil {
+		return err
+	}
+	if _, err := s.failTasksFrom(ctx, in, activeInbound, ReasonLinkClosed, true); err != nil {
+		return err
+	}
+	out, err := s.d.Tasks.ListTasks(ctx, store.TaskFilter{Direction: store.TaskOutbound, States: activeOutbound, LinkID: l.ID, Peer: l.Peer})
+	if err != nil {
+		return err
+	}
+	failed, err := s.failTasksFrom(ctx, out, activeOutbound, ReasonLinkClosed, false)
+	var errs []error
+	for _, t := range failed { // the session that sent it is waiting for an update
+		body, _ := json.Marshal(core.TaskUpdateBody{TaskID: t.ID, State: core.TaskFailed, Note: ReasonLinkClosed})
+		_, derr := s.d.Inbox.Deliver(ctx, store.InboxItem{
+			MsgID: core.NewIDAt(s.d.Clock), From: t.Peer, FromSession: l.RemoteName, ToSession: t.FromSession,
+			LinkID: t.LinkID, Kind: core.KindTaskUpdate, Body: body, TaskID: t.ID,
+		})
+		errs = append(errs, derr)
+	}
+	return errors.Join(append(errs, err)...)
+}
+
+// LinkLowered implements LinkLowerObserver: when a link drops to messages,
+// its tasks still waiting (for approval or a claim) are rejected.
+func (s *TaskService) LinkLowered(ctx context.Context, l store.Link) error {
+	if s.d.Policy.Decide(l.PermissionIn, core.KindTaskCreate) != DecisionReject {
 		return nil
 	}
-	ts, err := s.d.Tasks.ListTasks(ctx, store.TaskFilter{Direction: store.TaskInbound, States: pendingStates, Peer: peer})
+	ts, err := s.d.Tasks.ListTasks(ctx, store.TaskFilter{Direction: store.TaskInbound, States: pendingStates, LinkID: l.ID, Peer: l.Peer})
 	if err != nil {
 		return err
 	}
@@ -767,12 +812,6 @@ func (s *TaskService) RecheckPeer(ctx context.Context, peer core.MachineID, leve
 		s.sendUpdate(ctx, t, core.TaskUpdateBody{TaskID: t.ID, State: core.TaskRejected, Note: "not permitted"})
 	}
 	return nil
-}
-
-// TrustLowered implements TrustObserver: PeerService calls it after lowering
-// a peer's trust, with the peer record already carrying the new level.
-func (s *TaskService) TrustLowered(ctx context.Context, peer store.Peer) error {
-	return s.RecheckPeer(ctx, peer.MachineID, peer.TrustIn)
 }
 
 // hasNoteFrom reports whether t already has a note from message msgID.

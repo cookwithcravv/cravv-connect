@@ -17,9 +17,10 @@ type MailboxProvider interface {
 	Mailbox() (transport.Mailbox, bool)
 }
 
-// EnvelopeSender enqueues an envelope for reliable delivery. Implemented by *Outbound.
+// EnvelopeSender enqueues an envelope for reliable delivery. linkID is
+// required for link-scoped kinds and "" otherwise. Implemented by *Outbound.
 type EnvelopeSender interface {
-	SendEnvelope(ctx context.Context, to core.MachineID, kind core.Kind, fromSession, toSession string, body any) (string, error)
+	SendEnvelope(ctx context.Context, to core.MachineID, kind core.Kind, linkID string, body any) (string, error)
 }
 
 // OutboxControl is what PeerService needs from the outbound pipeline. Implemented by *Outbound.
@@ -41,11 +42,6 @@ type PrekeySource interface {
 // PrekeyProvider guarantees a current prekey exists. Implemented by *PrekeyManager.
 type PrekeyProvider interface {
 	EnsureCurrent(ctx context.Context) (keys.SignedPrekey, error)
-}
-
-// TrustObserver is told when a peer's incoming trust is lowered (TaskService re-checks pending tasks).
-type TrustObserver interface {
-	TrustLowered(ctx context.Context, peer store.Peer) error
 }
 
 // PeerCutOffObserver is told when we pause or unpair a peer (or it unpairs

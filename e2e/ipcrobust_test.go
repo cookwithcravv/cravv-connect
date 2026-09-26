@@ -16,13 +16,13 @@ import (
 // several byte-budgeted pages, with none lost and the IPC stream intact.
 func TestLargeChatsArriveInPages(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{ATrustsB: core.TrustAutonomous, BTrustsA: core.TrustAutonomous})
-	sa, _ := a.Session("claude")
-	sb, _ := b.Session("codex")
+	_, a, b := NewPair(t, PairOptions{})
+	l := LinkUp(t, a, b, "messages")
+	sb := l.B.C
 	const n = 20 // 20 x 256 KiB of wrapped text cannot fit one 4 MiB page
 	want := map[string]bool{}
 	for range n {
-		want[sendChat(t, sa, "bob", strings.Repeat("<", core.MaxTextBytes))] = true
+		want[sendChat(t, l.A.C, l.ANum, strings.Repeat("<", core.MaxTextBytes))] = true
 	}
 	pages := 0
 	Eventually(t, 3*wait, "all large chats at bob", func() bool {
@@ -50,9 +50,10 @@ func TestLargeChatsArriveInPages(t *testing.T) {
 // A cancelled inbox.wait does not swallow the next message.
 func TestCancelledWaitKeepsMessage(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{ATrustsB: core.TrustAutonomous, BTrustsA: core.TrustAutonomous})
-	sa, _ := a.Session("claude")
-	sb, _ := b.Session("codex")
+	_, a, b := NewPair(t, PairOptions{})
+	l := LinkUp(t, a, b, "messages")
+	sb := l.B.C
+	Inbox(t, sb) // read the link request notice
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
@@ -65,6 +66,6 @@ func TestCancelledWaitKeepsMessage(t *testing.T) {
 	}
 	// A round trip on the same connection: the server reads $/cancel before it.
 	Call(t, sb, ipc.MethodStatus, nil, nil)
-	id := sendChat(t, sa, "bob", "do not lose me")
+	id := sendChat(t, l.A.C, l.ANum, "do not lose me")
 	WaitItem(t, sb, wait, "chat after a cancelled wait", isChat(id))
 }

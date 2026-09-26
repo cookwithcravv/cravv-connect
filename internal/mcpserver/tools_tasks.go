@@ -14,16 +14,16 @@ type taskIDIn struct {
 type createTaskTool struct{}
 
 type createTaskIn struct {
-	To           string   `json:"to" jsonschema:"peer alias, or alias/session"`
+	Link         int64    `json:"link" jsonschema:"link number (see the link attribute on received items)"`
 	Instructions string   `json:"instructions" jsonschema:"what to do and how, up to 64 KB"`
 	FilePaths    []string `json:"file_paths,omitempty" jsonschema:"files from this project to attach"`
 }
 
 func (createTaskTool) Register(s *mcp.Server, c Caller) {
-	addTool(s, "create_task", "Ask a paired machine's agent to do a task. Returns task_id. Depending on the trust the other machine gives you, the task may wait for its human's approval or be rejected.",
+	addTool(s, "create_task", "Ask the session at the other end of a link to do a task. Returns task_id. Depending on the permission the other side gave the link, the task may wait for its human's approval or be rejected.",
 		func(ctx context.Context, in createTaskIn) (string, error) {
 			return callJSON[ipc.TaskCreateResult](ctx, c, ipc.MethodTaskCreate,
-				ipc.TaskCreateParams{To: in.To, Instructions: in.Instructions, FilePaths: in.FilePaths})
+				ipc.TaskCreateParams{Link: in.Link, Instructions: in.Instructions, FilePaths: in.FilePaths})
 		})
 }
 

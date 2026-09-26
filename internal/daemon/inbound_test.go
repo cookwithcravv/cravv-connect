@@ -59,7 +59,7 @@ func newInboundFixture(t *testing.T) *inboundFixture {
 	}))
 	f.dedup = newMemDedup()
 	f.in = NewInbound(me, f.peers, f.dedup, f.prekeys, f.registry, f.sender, f.clock, f.killed.Load, nil)
-	f.gpu = newTestPeer(t, "gpu-box", core.TrustAskFirst)
+	f.gpu = newTestPeer(t, "gpu-box")
 	mustPut(t, f.peers, f.gpu.rec)
 	return f
 }
@@ -175,7 +175,7 @@ func TestInboundDrops(t *testing.T) {
 		build func(t *testing.T, f *inboundFixture) transport.Delivery
 	}{
 		{"unknown sender", func(t *testing.T, f *inboundFixture) transport.Delivery {
-			stranger := newTestPeer(t, "stranger", core.TrustAskFirst)
+			stranger := newTestPeer(t, "stranger")
 			id, raw := f.frameFrom(t, stranger, testEpoch, f.myPK)
 			return transport.Delivery{Seq: 1, From: stranger.id.Public(), ID: id, Frame: raw}
 		}},
@@ -197,7 +197,7 @@ func TestInboundDrops(t *testing.T) {
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
 		}},
 		{"signed by another key", func(t *testing.T, f *inboundFixture) transport.Delivery {
-			impostor := newTestPeer(t, "impostor", core.TrustAskFirst)
+			impostor := newTestPeer(t, "impostor")
 			id, raw := f.frameFrom(t, impostor, testEpoch, f.myPK)
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
 		}},

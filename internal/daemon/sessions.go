@@ -7,57 +7,31 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/store"
 )
 
-// SessionRegistry names agent sessions, tracks which are connected, and
-// reclaims or expires disconnected sessions (spec 8.1).
+// SessionRegistry names IPC attachments: every connection that registers
+// (an agent's MCP server, a CLI run) gets a name, <agent>@<dir>. An
+// attachment carries no link traffic; a chat shares a session for that
+// (SessionService). A disconnected attachment keeps its name for
+// core.ReclaimGrace.
 type SessionRegistry struct {
-	mu        sync.Mutex
-	sessions  store.SessionStore
-	inbox     store.InboxStore
-	clock     core.Clock
-	onExpired []func(ctx context.Context, rec store.SessionRecord)
+	mu       sync.Mutex
+	sessions store.SessionStore
+	clock    core.Clock
 }
 
-// CLIAgent is the agent name the `--json` CLI registers with. Each CLI
-// invocation is a short-lived session, so a disconnected cli session stays
-// reclaimable (same name, cursor and claimed tasks) for core.InboxRetention
-// instead of core.ReclaimGrace. Its claimed tasks are not abandoned when the
-// session expires; they fail as abandoned CLIClaimMaxAge after the claim.
-const CLIAgent = "cli"
-
-// graceFor is how long a disconnected session of this agent stays reclaimable.
-func graceFor(agent string) time.Duration {
-	if agent == CLIAgent {
-		return core.InboxRetention
-	}
-	return core.ReclaimGrace
+// NewSessionRegistry builds a registry over the session store.
+func NewSessionRegistry(sessions store.SessionStore, clock core.Clock) *SessionRegistry {
+	return &SessionRegistry{sessions: sessions, clock: clock}
 }
 
-// NewSessionRegistry builds a registry over the session and inbox stores.
-func NewSessionRegistry(sessions store.SessionStore, inbox store.InboxStore, clock core.Clock) *SessionRegistry {
-	return &SessionRegistry{sessions: sessions, inbox: inbox, clock: clock}
-}
-
-// OnExpired adds a callback run (in registration order) when a disconnected
-// session outlives its grace, before the session is deleted. Callbacks must
-// not call back into the registry.
-func (r *SessionRegistry) OnExpired(fn func(ctx context.Context, rec store.SessionRecord)) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.onExpired = append(r.onExpired, fn)
-}
-
-// Register returns the session name for a new connection. A disconnected
-// session with the same agent and project folder that was last seen within
-// its grace (core.ReclaimGrace; core.InboxRetention for CLIAgent) is
-// reclaimed with its name and cursor. Otherwise a new
-// session named <agent>@<basename> (plus -2, -3, ...) is created whose
-// cursor starts at InitialCursor(now - core.NewSessionBacklog).
+// Register returns the name for a new connection. A disconnected
+// attachment with the same agent and project folder that was last seen
+// within core.ReclaimGrace is reclaimed with its name. Otherwise a new one
+// named <agent>@<basename> (plus -2, -3, ...) is created.
 func (r *SessionRegistry) Register(ctx context.Context, agent, projectDir string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -75,7 +49,7 @@ func (r *SessionRegistry) Register(ctx context.Context, agent, projectDir string
 		if s.Connected || s.Agent != agent || s.ProjectDir != projectDir {
 			continue
 		}
-		if now.Sub(s.LastSeen) > graceFor(s.Agent) {
+		if now.Sub(s.LastSeen) > core.ReclaimGrace {
 			continue
 		}
 		if reclaim == nil || s.LastSeen.After(reclaim.LastSeen) {
@@ -99,11 +73,7 @@ func (r *SessionRegistry) Register(ctx context.Context, agent, projectDir string
 	for n := 2; taken[name]; n++ {
 		name = fmt.Sprintf("%s-%d", base, n)
 	}
-	cursor, err := r.inbox.InitialCursor(ctx, now.Add(-core.NewSessionBacklog))
-	if err != nil {
-		return "", err
-	}
-	rec := store.SessionRecord{Name: name, Agent: agent, ProjectDir: projectDir, Cursor: cursor, LastSeen: now, Connected: true}
+	rec := store.SessionRecord{Name: name, Agent: agent, ProjectDir: projectDir, LastSeen: now, Connected: true}
 	if err := r.sessions.PutSession(ctx, rec); err != nil {
 		return "", err
 	}
@@ -161,11 +131,8 @@ func (r *SessionRegistry) sweepLocked(ctx context.Context) error {
 	}
 	now := r.clock.Now()
 	for _, s := range all {
-		if s.Connected || now.Sub(s.LastSeen) <= graceFor(s.Agent) {
+		if s.Connected || now.Sub(s.LastSeen) <= core.ReclaimGrace {
 			continue
-		}
-		for _, fn := range r.onExpired {
-			fn(ctx, s)
 		}
 		if err := r.sessions.DeleteSession(ctx, s.Name); err != nil {
 			return err
@@ -195,29 +162,9 @@ func (r *SessionRegistry) Connected(ctx context.Context, name string) bool {
 	return err == nil && s.Connected
 }
 
-// ForProjectDir returns a connected session registered for projectDir.
-// Hooks use it to count unread items for their cwd.
-func (r *SessionRegistry) ForProjectDir(ctx context.Context, projectDir string) (string, bool) {
-	all, err := r.sessions.ListSessions(ctx)
-	if err != nil {
-		return "", false
-	}
-	for _, s := range all {
-		if s.Connected && s.ProjectDir == projectDir {
-			return s.Name, true
-		}
-	}
-	return "", false
-}
-
 // List returns every known session.
 func (r *SessionRegistry) List(ctx context.Context) ([]store.SessionRecord, error) {
 	return r.sessions.ListSessions(ctx)
-}
-
-// SetCursor stores a session's read position.
-func (r *SessionRegistry) SetCursor(ctx context.Context, name string, cursor int64) error {
-	return r.sessions.SetCursor(ctx, name, cursor)
 }
 
 // SessionBaseName is "<agent>@<basename(projectDir)>", each part lowercased

@@ -37,7 +37,7 @@ func newControlFixture(t *testing.T) *controlFixture {
 	f.out = NewOutbound(me, f.peers, f.obox, slot, clock, nil, nil)
 	f.svc = NewPeerService(f.peers, slot, f.out, f.audit, clock)
 	RegisterControlHandlers(f.reg, f.peers, f.svc, f.out)
-	f.gpu = newTestPeer(t, "gpu-box", core.TrustAskFirst)
+	f.gpu = newTestPeer(t, "gpu-box")
 	mustPut(t, f.peers, f.gpu.rec)
 	return f
 }
@@ -57,7 +57,7 @@ func (f *controlFixture) handle(t *testing.T, kind core.Kind, body any) error {
 
 func (f *controlFixture) sendTo(t *testing.T, to core.MachineID) string {
 	t.Helper()
-	id, err := f.out.SendEnvelope(context.Background(), to, core.KindChat, "", "", core.ChatBody{Text: "x"})
+	id, err := f.out.SendEnvelope(context.Background(), to, core.KindChat, "", core.ChatBody{Text: "x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestPrekeyHandler(t *testing.T) {
 func TestStalePrekeyHandler(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := context.Background()
-	other := newTestPeer(t, "other", core.TrustAskFirst)
+	other := newTestPeer(t, "other")
 	mustPut(t, f.peers, other.rec)
 	mine := f.sendTo(t, f.gpu.rec.MachineID)
 	theirs := f.sendTo(t, other.rec.MachineID)

@@ -205,11 +205,15 @@ func TestNewWiresHandlersAndResetsSessions(t *testing.T) {
 	}
 	for _, k := range []core.Kind{core.KindChat, core.KindTaskCreate, core.KindTaskUpdate, core.KindTaskCancel,
 		core.KindFileOffer, core.KindControlPrekey, core.KindControlStalePrekey, core.KindControlDelivered,
-		core.KindControlPaused, core.KindControlResumed, core.KindControlUnpaired, core.KindControlRelayMoved} {
+		core.KindControlPaused, core.KindControlResumed, core.KindControlUnpaired, core.KindControlRelayMoved,
+		core.KindControlUnsupported, core.KindSessionsList, core.KindSessionsListed, core.KindLinkRequest,
+		core.KindLinkAccepted, core.KindLinkRejected, core.KindLinkClosed, core.KindLinkState,
+		core.KindPresencePing, core.KindPresencePong} {
 		if _, ok := d.svc.Load().registry.Lookup(k); !ok {
 			t.Errorf("no handler for %s", k)
 		}
 	}
+	shared := d2Share(t, d.Shared(), "lead")
 	id := d.Identity().MachineID()
 	d.Close()
 
@@ -224,13 +228,17 @@ func TestNewWiresHandlersAndResetsSessions(t *testing.T) {
 	if again, _ := d2.Sessions().Register(ctx, "claude", "/w/proj"); again != name {
 		t.Fatalf("reclaim after restart got %q, want %q", again, name)
 	}
+	// No connection survives a restart: the shared session is away, not closed.
+	if s, err := d2.Shared().Get(ctx, shared.ID); err != nil || s.State != core.SessionAway {
+		t.Fatalf("shared session after restart = %+v, %v", s, err)
+	}
 }
 
 func TestLifecycleSyncAndReconnect(t *testing.T) {
 	ctx := context.Background()
 	relay := &d2Relay{}
 	d := d2NewDaemon(t, t.TempDir(), relay)
-	peer := newTestPeer(t, "gpu-box", core.TrustAutonomous)
+	peer := newTestPeer(t, "gpu-box")
 	mustPut(t, d.store, peer.rec)
 	if err := d.Settings().SetSetting(ctx, SettingRelayAdminToken, "admin-secret"); err != nil {
 		t.Fatal(err)
@@ -264,18 +272,20 @@ func TestKillBlocksOutboundAndPersists(t *testing.T) {
 	dir := t.TempDir()
 	relay := &d2Relay{}
 	d := d2NewDaemon(t, dir, relay)
-	peer := newTestPeer(t, "gpu-box", core.TrustAutonomous)
+	peer := newTestPeer(t, "gpu-box")
 	mustPut(t, d.store, peer.rec)
 	stop := d2Run(t, d)
 	d2Eventually(t, "connection", func() bool { _, ok := d.Mailbox(); return ok })
 
 	// A claimed inbound task is failed with "killed" when the switch flips.
+	session := d2Share(t, d.Shared(), "lead")
+	link := d2Link(t, d.store, peer.rec, session, "trainer", core.PermTasksAuto, core.PermMessages)
 	taskID := core.NewID()
-	env := d2Env(t, peer.rec, core.KindTaskCreate, "codex@x", "", core.TaskCreateBody{TaskID: taskID, Instructions: "work"})
-	if err := d.Tasks().HandleCreate(ctx, peer.rec, env); err != nil {
+	env := d2Env(t, peer.rec, core.KindTaskCreate, link.ID, core.TaskCreateBody{TaskID: taskID, Instructions: "work"})
+	if err := d.Tasks().HandleCreate(withLink(ctx, link), peer.rec, env); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Tasks().Claim(ctx, "claude@proj", taskID); err != nil {
+	if _, err := d.Tasks().Claim(ctx, session.ID, taskID); err != nil {
 		t.Fatal(err)
 	}
 	d2Eventually(t, "claimed update sent", func() bool { return relay.box(0).sendCount() >= 1 })
@@ -288,17 +298,20 @@ func TestKillBlocksOutboundAndPersists(t *testing.T) {
 		t.Fatal("mailbox still available after kill")
 	}
 	d2Eventually(t, "relay disconnect", relay.box(0).closed)
-	if tk, _ := d.store.GetTask(ctx, taskID); tk.State != core.TaskFailed {
-		t.Fatalf("claimed task state after kill = %s", tk.State)
+	if tk, _ := d.store.GetTask(ctx, taskID); tk.State != core.TaskFailed || tk.Notes[len(tk.Notes)-1].Text != "killed" {
+		t.Fatalf("claimed task after kill = %+v", tk)
 	}
-	// The failed(killed) update went out before the disconnect.
-	if got := relay.box(0).sendCount(); got != sent+1 {
-		t.Fatalf("sends at kill %d->%d, want the failed(killed) update flushed", sent, got)
+	if l, _ := d.store.GetLink(ctx, peer.rec.MachineID, link.ID); l.State != store.LinkClosed || l.Reason != core.CloseKilled {
+		t.Fatalf("link after kill = %+v", l)
 	}
-	sent++
+	// The failed(killed) update and link.closed(killed) went out before the disconnect.
+	if got := relay.box(0).sendCount(); got != sent+2 {
+		t.Fatalf("sends at kill %d->%d, want the failed(killed) update and link.closed flushed", sent, got)
+	}
+	sent += 2
 	// Envelopes are still queued while killed (the IPC layer refuses agent sends);
 	// nothing leaves until resume.
-	if _, err := d.Outbound().SendEnvelope(ctx, peer.rec.MachineID, core.KindChat, "", "", core.ChatBody{Text: "x"}); err != nil {
+	if _, err := d.Outbound().SendEnvelope(ctx, peer.rec.MachineID, core.KindChat, "", core.ChatBody{Text: "x"}); err != nil {
 		t.Fatalf("enqueue while killed err = %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -375,7 +388,7 @@ func TestResetIdentity(t *testing.T) {
 	dir := t.TempDir()
 	relay := &d2Relay{}
 	d := d2NewDaemon(t, dir, relay)
-	peer := newTestPeer(t, "gpu-box", core.TrustAutonomous)
+	peer := newTestPeer(t, "gpu-box")
 	mustPut(t, d.store, peer.rec)
 	stop := d2Run(t, d)
 	d2Eventually(t, "connection", func() bool { _, ok := d.Mailbox(); return ok })
@@ -413,7 +426,7 @@ func TestResetIdentity(t *testing.T) {
 	}
 }
 
-func TestMaintainSweepsSessionsAndExpiresTasks(t *testing.T) {
+func TestMaintainExpiresTasksAndClosesAbandonedSessions(t *testing.T) {
 	ctx := context.Background()
 	opts := d2Options(t.TempDir(), &d2Relay{})
 	clock := core.NewFakeClock(d2Epoch)
@@ -423,94 +436,65 @@ func TestMaintainSweepsSessionsAndExpiresTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	peer := newTestPeer(t, "gpu-box", core.TrustAutonomous)
+	peer := newTestPeer(t, "gpu-box")
 	mustPut(t, d.store, peer.rec)
-	name, _ := d.Sessions().Register(ctx, "claude", "/w/proj")
+	sh, err := d.Shared().Share(ctx, 1, ShareRequest{Agent: "claude", ProjectDir: "/w/proj", Name: "lead"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := d2Link(t, d.store, peer.rec, sh.Session, "trainer", core.PermTasksAuto, core.PermMessages)
 	queued := core.NewID()
 	claimed := core.NewID()
 	for _, id := range []string{queued, claimed} {
-		env := d2Env(t, peer.rec, core.KindTaskCreate, "", "", core.TaskCreateBody{TaskID: id, Instructions: "x"})
-		if err := d.Tasks().HandleCreate(ctx, peer.rec, env); err != nil {
+		env := d2Env(t, peer.rec, core.KindTaskCreate, link.ID, core.TaskCreateBody{TaskID: id, Instructions: "x"})
+		if err := d.Tasks().HandleCreate(withLink(ctx, link), peer.rec, env); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := d.Tasks().Claim(ctx, name, claimed); err != nil {
+	if _, err := d.Tasks().Claim(ctx, sh.Session.ID, claimed); err != nil {
 		t.Fatal(err)
 	}
-	d.Sessions().Disconnect(ctx, name)
+	// The chat's connection ends: the session is away and keeps its link.
+	if err := d.Shared().Detach(ctx, sh.Session.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(core.AwayGrace - time.Minute)
+	if err := d.Maintain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := d.store.GetLink(ctx, peer.rec.MachineID, link.ID); l.State != store.LinkActive {
+		t.Fatalf("link closed inside the away grace: %+v", l)
+	}
+	// Past the grace the session closes, its link closes, its claimed task fails.
+	clock.Advance(2 * time.Minute)
+	if err := d.Maintain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := d.Shared().Get(ctx, sh.Session.ID); s.State != core.SessionClosed {
+		t.Fatalf("session after the away grace = %s", s.State)
+	}
+	c, _ := d.store.GetTask(ctx, claimed)
+	if c.State != core.TaskFailed || c.Notes[len(c.Notes)-1].Text != ReasonLinkClosed {
+		t.Fatalf("claimed task %s %+v", c.State, c.Notes)
+	}
+	q, _ := d.store.GetTask(ctx, queued)
+	if q.State != core.TaskFailed {
+		t.Fatalf("queued task %s", q.State)
+	}
+	// Unclaimed tasks on a live link still expire after a day.
+	sh2, _ := d.Shared().Share(ctx, 2, ShareRequest{Agent: "claude", ProjectDir: "/w/proj", Name: "second"})
+	link2 := d2Link(t, d.store, peer.rec, sh2.Session, "trainer", core.PermTasksAuto, core.PermMessages)
+	later := core.NewID()
+	env := d2Env(t, peer.rec, core.KindTaskCreate, link2.ID, core.TaskCreateBody{TaskID: later, Instructions: "x"})
+	if err := d.Tasks().HandleCreate(withLink(ctx, link2), peer.rec, env); err != nil {
+		t.Fatal(err)
+	}
 	clock.Advance(core.UnclaimedExpiry + time.Minute)
 	if err := d.Maintain(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if d.Sessions().Exists(ctx, name) {
-		t.Fatal("expired session not swept")
-	}
-	q, _ := d.store.GetTask(ctx, queued)
-	c, _ := d.store.GetTask(ctx, claimed)
-	if q.State != core.TaskExpired || c.State != core.TaskFailed || c.Notes[len(c.Notes)-1].Text != "abandoned" {
-		t.Fatalf("queued %s, claimed %s %+v", q.State, c.State, c.Notes)
-	}
-}
-
-func TestCLITaskSurvivesSessionExpiry(t *testing.T) {
-	ctx := context.Background()
-	opts := d2Options(t.TempDir(), &d2Relay{})
-	clock := core.NewFakeClock(d2Epoch)
-	opts.Clock = clock
-	d, err := New(opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.Close()
-	peer := newTestPeer(t, "gpu-box", core.TrustAutonomous)
-	mustPut(t, d.store, peer.rec)
-	taskID := core.NewID()
-	env := d2Env(t, peer.rec, core.KindTaskCreate, "", "", core.TaskCreateBody{TaskID: taskID, Instructions: "x"})
-	if err := d.Tasks().HandleCreate(ctx, peer.rec, env); err != nil {
-		t.Fatal(err)
-	}
-
-	// `cravv-connect task claim --json`: one short CLI session.
-	claimer, _ := d.Sessions().Register(ctx, CLIAgent, "/w/proj")
-	if _, err := d.Tasks().Claim(ctx, claimer, taskID); err != nil {
-		t.Fatal(err)
-	}
-	d.Sessions().Disconnect(ctx, claimer)
-	clock.Advance(time.Hour)
-	if err := d.Maintain(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if tk, _ := d.store.GetTask(ctx, taskID); tk.State != core.TaskClaimed || tk.ClaimedBy != claimer {
-		t.Fatalf("cli task after an hour = %s by %q", tk.State, tk.ClaimedBy)
-	}
-
-	// `cravv-connect task update --json` an hour later reclaims the name.
-	next, _ := d.Sessions().Register(ctx, CLIAgent, "/w/proj")
-	if next != claimer {
-		t.Fatalf("second cli invocation got %q, want %q", next, claimer)
-	}
-	if _, err := d.Tasks().Update(ctx, next, taskID, "halfway"); err != nil {
-		t.Fatal(err)
-	}
-	d.Sessions().Disconnect(ctx, next)
-
-	// Days later a new cli@proj invocation can still finish it...
-	clock.Advance(CLIClaimMaxAge - 2*time.Hour)
-	if err := d.Maintain(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if tk, _ := d.store.GetTask(ctx, taskID); tk.State != core.TaskRunning {
-		t.Fatalf("cli task abandoned early: %s", tk.State)
-	}
-	// ...but a cli claim does not last forever: after CLIClaimMaxAge it is
-	// failed as abandoned and the sender is told.
-	clock.Advance(2 * time.Hour)
-	if err := d.Maintain(ctx); err != nil {
-		t.Fatal(err)
-	}
-	tk, _ := d.store.GetTask(ctx, taskID)
-	if tk.State != core.TaskFailed || tk.Notes[len(tk.Notes)-1].Text != "abandoned" {
-		t.Fatalf("cli task after CLIClaimMaxAge = %s %+v", tk.State, tk.Notes)
+	if tk, _ := d.store.GetTask(ctx, later); tk.State != core.TaskExpired {
+		t.Fatalf("unclaimed task after a day = %s", tk.State)
 	}
 }
 
@@ -518,26 +502,29 @@ func TestSendToPausedPeers(t *testing.T) {
 	ctx := context.Background()
 	relay := &d2Relay{}
 	d := d2NewDaemon(t, t.TempDir(), relay)
-	away := newTestPeer(t, "away", core.TrustAutonomous)
+	away := newTestPeer(t, "away")
 	away.rec.PausedByPeer = true
 	mustPut(t, d.store, away.rec)
-	muted := newTestPeer(t, "muted", core.TrustAutonomous)
+	muted := newTestPeer(t, "muted")
 	muted.rec.Paused = true
 	mustPut(t, d.store, muted.rec)
 	d2Run(t, d)
 	d2Eventually(t, "connection", func() bool { _, ok := d.Mailbox(); return ok })
 	base := relay.box(0).sendCount()
 
-	if _, err := d.Outbound().SendEnvelope(ctx, muted.rec.MachineID, core.KindChat, "", "", core.ChatBody{Text: "x"}); !errors.Is(err, core.ErrPaused) {
+	if _, err := d.Outbound().SendEnvelope(ctx, muted.rec.MachineID, core.KindChat, "", core.ChatBody{Text: "x"}); !errors.Is(err, core.ErrPaused) {
 		t.Fatalf("send to a peer we paused err = %v", err)
 	}
-	if _, err := d.Tasks().Create(ctx, "claude@proj", "/w", "muted", "x", nil); !errors.Is(err, core.ErrPaused) {
+	session := d2Share(t, d.Shared(), "lead")
+	mutedLink := d2Link(t, d.store, muted.rec, session, "m", core.PermMessages, core.PermTasksAuto)
+	awayLink := d2Link(t, d.store, away.rec, session, "a", core.PermMessages, core.PermTasksAuto)
+	if _, err := d.Tasks().Create(ctx, session.ID, "/w", mutedLink.Num, "x", nil); !errors.Is(err, core.ErrPaused) {
 		t.Fatalf("task to a peer we paused err = %v", err)
 	}
-	if _, err := d.Outbound().SendEnvelope(ctx, away.rec.MachineID, core.KindChat, "", "", core.ChatBody{Text: "hi"}); err != nil {
+	if _, err := d.Outbound().SendEnvelope(ctx, away.rec.MachineID, core.KindChat, "", core.ChatBody{Text: "hi"}); err != nil {
 		t.Fatalf("send to a peer that paused us: %v", err)
 	}
-	if _, err := d.Tasks().Create(ctx, "claude@proj", "/w", "away", "later", nil); err != nil {
+	if _, err := d.Tasks().Create(ctx, session.ID, "/w", awayLink.Num, "later", nil); err != nil {
 		t.Fatalf("task to a peer that paused us: %v", err)
 	}
 	if _, held, _ := d.store.CountOutbox(ctx); held != 2 {
@@ -553,7 +540,7 @@ func TestSendToPausedPeers(t *testing.T) {
 	if !ok {
 		t.Fatal("no control.resumed handler")
 	}
-	resumed := d2Env(t, away.rec, core.KindControlResumed, "", "", core.EmptyBody{})
+	resumed := d2Env(t, away.rec, core.KindControlResumed, "", core.EmptyBody{})
 	if err := h.Handle(ctx, mustGetPeer(t, d.store, away.rec.MachineID), resumed); err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +554,7 @@ func TestRetryableInboundFailureReconnectsForRedelivery(t *testing.T) {
 	ctx := context.Background()
 	relay := &d2Relay{}
 	d := d2NewDaemon(t, t.TempDir(), relay)
-	peer := newTestPeer(t, "gpu-box", core.TrustAutonomous)
+	peer := newTestPeer(t, "gpu-box")
 	mustPut(t, d.store, peer.rec)
 	var mu sync.Mutex
 	calls := 0
@@ -665,7 +652,7 @@ func TestKillWhileConnectingClosesTheMailbox(t *testing.T) {
 			t.Error(err)
 		}
 	}
-	peer := newTestPeer(t, "gpu-box", core.TrustAutonomous)
+	peer := newTestPeer(t, "gpu-box")
 	mustPut(t, d.store, peer.rec)
 	d2Run(t, d)
 	d2Eventually(t, "first dial", func() bool { return relay.dials() >= 1 })
@@ -758,7 +745,7 @@ func TestKillFlushWindowIsClosed(t *testing.T) {
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(relay.release) }) }
 	d := d2NewDaemon(t, t.TempDir(), relay)
-	peer := newTestPeer(t, "gpu-box", core.TrustAutonomous)
+	peer := newTestPeer(t, "gpu-box")
 	mustPut(t, d.store, peer.rec)
 	var mu sync.Mutex
 	handled := 0
@@ -777,7 +764,7 @@ func TestKillFlushWindowIsClosed(t *testing.T) {
 	}
 
 	relay.gate.Store(true)
-	if _, err := d.Outbound().SendEnvelope(ctx, peer.rec.MachineID, core.KindChat, "", "", core.ChatBody{Text: "slow"}); err != nil {
+	if _, err := d.Outbound().SendEnvelope(ctx, peer.rec.MachineID, core.KindChat, "", core.ChatBody{Text: "slow"}); err != nil {
 		t.Fatal(err)
 	}
 	<-relay.entered // the send loop is stuck in Send, so the kill flush waits

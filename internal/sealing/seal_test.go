@@ -62,8 +62,7 @@ func resign(fr Frame, id *keys.Identity) Frame {
 func TestSealOpenRoundTrip(t *testing.T) {
 	f := newFixture(t)
 	env := f.chat(t, f.alice, f.bob, "hello bob")
-	env.FromSession = "claude@proj"
-	env.ToSession = "codex@gpu"
+	env.LinkID = "01JLINK"
 	fr, err := Seal(f.alice, f.bobSigned, env)
 	if err != nil {
 		t.Fatal(err)

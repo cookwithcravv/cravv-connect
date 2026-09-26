@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,13 +30,13 @@ func d2Store(t *testing.T) *sqlite.DB {
 	return db
 }
 
-func d2Peer(t *testing.T, st store.PeerStore, alias string, trust core.TrustLevel) (store.Peer, *keys.Identity) {
+func d2Peer(t *testing.T, st store.PeerStore, alias string) (store.Peer, *keys.Identity) {
 	t.Helper()
 	id, err := keys.GenerateIdentity()
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := store.Peer{MachineID: id.MachineID(), IK: id.Public(), Alias: alias, TrustIn: trust, PairedAt: d2Epoch}
+	p := store.Peer{MachineID: id.MachineID(), IK: id.Public(), Alias: alias, PairedAt: d2Epoch}
 	if err := st.PutPeer(context.Background(), p); err != nil {
 		t.Fatalf("put peer: %v", err)
 	}
@@ -43,12 +44,11 @@ func d2Peer(t *testing.T, st store.PeerStore, alias string, trust core.TrustLeve
 }
 
 type d2Sent struct {
-	ID          string
-	To          core.MachineID
-	Kind        core.Kind
-	FromSession string
-	ToSession   string
-	Body        json.RawMessage
+	ID     string
+	To     core.MachineID
+	Kind   core.Kind
+	LinkID string
+	Body   json.RawMessage
 }
 
 // d2Sender records envelopes instead of sending them.
@@ -58,7 +58,7 @@ type d2Sender struct {
 	err  error
 }
 
-func (s *d2Sender) SendEnvelope(ctx context.Context, to core.MachineID, kind core.Kind, fromSession, toSession string, body any) (string, error) {
+func (s *d2Sender) SendEnvelope(ctx context.Context, to core.MachineID, kind core.Kind, linkID string, body any) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.err != nil {
@@ -69,7 +69,7 @@ func (s *d2Sender) SendEnvelope(ctx context.Context, to core.MachineID, kind cor
 		return "", err
 	}
 	id := core.NewID()
-	s.sent = append(s.sent, d2Sent{ID: id, To: to, Kind: kind, FromSession: fromSession, ToSession: toSession, Body: b})
+	s.sent = append(s.sent, d2Sent{ID: id, To: to, Kind: kind, LinkID: linkID, Body: b})
 	return id, nil
 }
 
@@ -116,19 +116,72 @@ func (d *d2Desktop) all() []string {
 	return append([]string(nil), d.texts...)
 }
 
-func d2Env(t *testing.T, from store.Peer, kind core.Kind, fromSession, toSession string, body any) core.Envelope {
+// d2Env builds an envelope from peer on link linkID.
+func d2Env(t *testing.T, from store.Peer, kind core.Kind, linkID string, body any) core.Envelope {
 	t.Helper()
 	env, err := core.NewEnvelope(core.NewFakeClock(d2Epoch), from.MachineID, "local", kind, body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	env.FromSession, env.ToSession = fromSession, toSession
+	env.LinkID = linkID
 	return env
 }
 
-// d2Inbox wires a SessionRegistry and InboxService over one store.
-func d2Inbox(t *testing.T, st *sqlite.DB, clock core.Clock) (*SessionRegistry, *InboxService) {
+// d2Inbox wires a SessionService and InboxService over one store.
+func d2Inbox(t *testing.T, st *sqlite.DB, clock core.Clock) (*SessionService, *InboxService) {
 	t.Helper()
-	reg := NewSessionRegistry(st, st, clock)
-	return reg, NewInboxService(st, reg, st, clock)
+	shared := NewSessionService(st, clock)
+	return shared, NewInboxService(st, shared, st, st, clock)
+}
+
+// d2Conn numbers the connections d2Share binds sessions to.
+var d2Conn atomic.Uint64
+
+// d2Share shares a session called name.
+func d2Share(t *testing.T, shared *SessionService, name string) store.SharedSession {
+	t.Helper()
+	sh, err := shared.Share(context.Background(), d2Conn.Add(1), ShareRequest{Agent: "claude", ProjectDir: "/w/" + name, Name: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sh.Session
+}
+
+// d2Link stores an active link between the local session and a session
+// called remote on peer: the peer may do permIn here, this side may do
+// permOut there.
+func d2Link(t *testing.T, st store.LinkStore, peer store.Peer, session store.SharedSession, remote string, permIn, permOut core.Permission) store.Link {
+	t.Helper()
+	l, err := st.InsertLink(context.Background(), store.Link{
+		Peer: peer.MachineID, ID: core.NewID(), Direction: store.LinkInbound, Session: session.ID,
+		RemoteSession: core.NewID(), RemoteName: remote, PermissionIn: permIn, PermissionOut: permOut,
+		State: store.LinkActive, CreatedAt: d2Epoch, UpdatedAt: d2Epoch,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
+}
+
+// d2Replies records what a LinkGate refused.
+type d2Replies struct {
+	mu                   sync.Mutex
+	unknown, unsupported []string
+}
+
+func (r *d2Replies) UnknownLink(_ context.Context, _ store.Peer, id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.unknown = append(r.unknown, id)
+}
+
+func (r *d2Replies) Unsupported(_ context.Context, p store.Peer) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.unsupported = append(r.unsupported, p.Alias)
+}
+
+// d2Gated wraps inner (and onReject) in the LinkGate the daemon registers.
+func d2Gated(st *sqlite.DB, shared *SessionService, replies GateReplier, inner, onReject Handler) Handler {
+	return LinkGate{Links: st, Sessions: shared, Replies: replies, Inner: inner, OnReject: onReject}
 }

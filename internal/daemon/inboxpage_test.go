@@ -14,10 +14,8 @@ import (
 
 func TestCheckPagesByBytes(t *testing.T) {
 	ctx := context.Background()
-	st := d2Store(t)
-	reg, inbox := d2Inbox(t, st, core.NewFakeClock(d2Epoch))
-	peer, _ := d2Peer(t, st, "gpu-box", core.TrustAutonomous)
-	name, _ := reg.Register(ctx, "claude", "/w/p")
+	e := newInboxEnv(t)
+	inbox, peer, name, link := e.inbox, e.peer, e.session.ID, e.link
 	// Each chat wraps to 256 KiB ('<' becomes "&lt;"), so 20 of them (5 MiB)
 	// cannot fit one 4 MiB page.
 	const n = 20
@@ -26,7 +24,7 @@ func TestCheckPagesByBytes(t *testing.T) {
 		id := core.NewID()
 		want[id] = true
 		body, _ := json.Marshal(core.ChatBody{Text: strings.Repeat("<", core.MaxTextBytes)})
-		if _, err := inbox.Deliver(ctx, store.InboxItem{MsgID: id, From: peer.MachineID, Kind: core.KindChat, Body: body}); err != nil {
+		if _, err := inbox.Deliver(ctx, store.InboxItem{MsgID: id, From: peer.MachineID, ToSession: name, LinkID: link.ID, Kind: core.KindChat, Body: body}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -59,12 +57,10 @@ func TestCheckPagesByBytes(t *testing.T) {
 
 func TestCheckWithCancelledContextMarksNothing(t *testing.T) {
 	ctx := context.Background()
-	st := d2Store(t)
-	reg, inbox := d2Inbox(t, st, core.NewFakeClock(d2Epoch))
-	peer, _ := d2Peer(t, st, "gpu-box", core.TrustAutonomous)
-	name, _ := reg.Register(ctx, "claude", "/w/p")
+	e := newInboxEnv(t)
+	inbox, peer, name, link := e.inbox, e.peer, e.session.ID, e.link
 	body, _ := json.Marshal(core.ChatBody{Text: "keep me"})
-	inbox.Deliver(ctx, store.InboxItem{MsgID: core.NewID(), From: peer.MachineID, Kind: core.KindChat, Body: body})
+	inbox.Deliver(ctx, store.InboxItem{MsgID: core.NewID(), From: peer.MachineID, ToSession: name, LinkID: link.ID, Kind: core.KindChat, Body: body})
 
 	cctx, cancel := context.WithCancel(ctx)
 	cancel()
@@ -82,10 +78,8 @@ func TestCheckWithCancelledContextMarksNothing(t *testing.T) {
 
 func TestWaitCancelledThenDeliverKeepsItem(t *testing.T) {
 	ctx := context.Background()
-	st := d2Store(t)
-	reg, inbox := d2Inbox(t, st, core.NewFakeClock(d2Epoch))
-	peer, _ := d2Peer(t, st, "gpu-box", core.TrustAutonomous)
-	name, _ := reg.Register(ctx, "claude", "/w/p")
+	e := newInboxEnv(t)
+	inbox, peer, name, link := e.inbox, e.peer, e.session.ID, e.link
 	wctx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() {
@@ -98,7 +92,7 @@ func TestWaitCancelledThenDeliverKeepsItem(t *testing.T) {
 		t.Fatalf("Wait err = %v", err)
 	}
 	body, _ := json.Marshal(core.ChatBody{Text: "after cancel"})
-	inbox.Deliver(ctx, store.InboxItem{MsgID: core.NewID(), From: peer.MachineID, Kind: core.KindChat, Body: body})
+	inbox.Deliver(ctx, store.InboxItem{MsgID: core.NewID(), From: peer.MachineID, ToSession: name, LinkID: link.ID, Kind: core.KindChat, Body: body})
 	if items, err := inbox.Check(ctx, name, 10); err != nil || len(items) != 1 {
 		t.Fatalf("items = %d, err %v", len(items), err)
 	}

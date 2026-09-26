@@ -9,7 +9,7 @@ import (
 
 func TestInboundTaskViewWrapsPeerText(t *testing.T) {
 	h := newHarness(t)
-	c := h.session(t)
+	c := h.shared(t)
 	var tv ipc.TaskView
 	if err := c.Call(bg, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: "IN"}, &tv); err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestInboundTaskViewWrapsPeerText(t *testing.T) {
 
 func TestOutboundTaskViewWrapsPeerResultAndNotes(t *testing.T) {
 	h := newHarness(t)
-	c := h.session(t)
+	c := h.shared(t)
 	var tv ipc.TaskView
 	if err := c.Call(bg, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: "OUT"}, &tv); err != nil {
 		t.Fatal(err)

@@ -38,19 +38,19 @@ func (a sessions) Disconnect(ctx context.Context, name string) error {
 	return a.d.Sessions().Disconnect(ctx, name)
 }
 
-// chat resolves "alias" or "alias/session" and hands the envelope to the
-// outbound queue, which refuses peers paused by this machine (core.ErrPaused)
-// and holds messages for peers that paused us. The outbound queue accepts
-// envelopes while the kill switch is on; the IPC kill gate refuses chat.send
-// before it gets here.
+// chat sends on an active link of the shared session (core.ErrLinkClosed
+// at once otherwise) through the outbound queue, which refuses peers paused
+// by this machine (core.ErrPaused). The outbound queue accepts envelopes
+// while the kill switch is on; the IPC kill gate refuses chat.send before it
+// gets here.
 type chat struct{ d *daemon.Daemon }
 
-func (a chat) Send(ctx context.Context, fromSession, to, text string) (string, error) {
-	p, toSession, err := a.d.Peers().Resolve(ctx, to)
+func (a chat) Send(ctx context.Context, sessionID string, link int64, text string) (string, error) {
+	l, err := a.d.Links().Active(ctx, sessionID, link)
 	if err != nil {
 		return "", err
 	}
-	return a.d.Outbound().SendEnvelope(ctx, p.MachineID, core.KindChat, fromSession, toSession, core.ChatBody{Text: text})
+	return a.d.Outbound().SendEnvelope(ctx, l.Peer, core.KindChat, l.ID, core.ChatBody{Text: text})
 }
 
 type inbox struct{ d *daemon.Daemon }
@@ -58,7 +58,7 @@ type inbox struct{ d *daemon.Daemon }
 // inboxView maps a rendered daemon entry to its wire view.
 func inboxView(e daemon.InboxEntry) ipc.InboxView {
 	return ipc.InboxView{
-		Seq: e.Item.Seq, ID: e.Item.MsgID, From: e.Alias, Session: present.CleanAttr(e.Item.FromSession), Kind: e.Kind,
+		Seq: e.Item.Seq, ID: e.Item.MsgID, From: e.Alias, Session: present.CleanAttr(e.Session), Link: e.Link, Kind: e.Kind,
 		TaskID: e.Item.TaskID, FileID: e.FileID, Path: e.Path, Wrapped: e.Wrapped, At: e.Item.ReceivedAt,
 	}
 }
@@ -83,8 +83,8 @@ func (a inbox) Wait(ctx context.Context, session string, timeout time.Duration) 
 
 type tasks struct{ d *daemon.Daemon }
 
-func (a tasks) Create(ctx context.Context, session, dir, to, instr string, paths []string) (string, error) {
-	return a.d.Tasks().Create(ctx, session, dir, to, instr, paths)
+func (a tasks) Create(ctx context.Context, session, dir string, link int64, instr string, paths []string) (string, error) {
+	return a.d.Tasks().Create(ctx, session, dir, link, instr, paths)
 }
 func (a tasks) Get(ctx context.Context, session, id string) (store.Task, error) {
 	return a.d.Tasks().Get(ctx, session, id)
@@ -116,17 +116,17 @@ func (a tasks) Approvals(ctx context.Context) ([]store.Task, error) {
 	return out, nil
 }
 func (a tasks) Decide(ctx context.Context, id string, approve, unlocked bool) error {
-	return a.d.Tasks().Decide(ctx, id, approve, unlocked)
+	return a.d.Tasks().Decide(ctx, id, approve, authority(unlocked))
 }
 
 type files struct{ d *daemon.Daemon }
 
-func (a files) Send(ctx context.Context, to, dir, path string) (core.FileRef, error) {
-	p, _, err := a.d.Peers().Resolve(ctx, to)
+func (a files) Send(ctx context.Context, sessionID string, link int64, dir, path string) (core.FileRef, error) {
+	l, err := a.d.Links().Active(ctx, sessionID, link)
 	if err != nil {
 		return core.FileRef{}, err
 	}
-	return a.d.Files().SendFile(ctx, p.MachineID, dir, path, "")
+	return a.d.Files().SendFile(ctx, l, dir, path, "")
 }
 func (a files) Accept(ctx context.Context, id string, unlocked bool) error {
 	return a.d.Files().Accept(ctx, id, unlocked)
@@ -237,13 +237,15 @@ func (a auditReader) Read(_ context.Context, limit int) ([]audit.Event, error) {
 
 type hook struct{ d *daemon.Daemon }
 
-// Counts uses the read position of the connected session registered in cwd;
-// with no session there, it counts machine-wide items no session has read.
+// Counts uses the read position of the open shared session in cwd; with no
+// session there, it reports only approvals.
 func (a hook) Counts(ctx context.Context, cwd string) (map[string]int, int, error) {
-	session, _ := a.d.Sessions().ForProjectDir(ctx, cwd)
-	unread, err := a.d.Inbox().Unread(ctx, session)
-	if err != nil {
-		return nil, 0, err
+	unread := map[string]int{}
+	if s, ok := a.d.Shared().ForProjectDir(ctx, cwd); ok {
+		var err error
+		if unread, err = a.d.Inbox().Unread(ctx, s.ID); err != nil {
+			return nil, 0, err
+		}
 	}
 	approvals, err := a.d.Tasks().PendingApprovals(ctx)
 	if err != nil {

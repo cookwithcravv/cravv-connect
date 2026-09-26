@@ -15,7 +15,7 @@ import (
 func TestOutboundDropsQueuedControlItems(t *testing.T) {
 	f := newOutboundFixture(t)
 	ctx := context.Background()
-	ctl, err := f.o.SendEnvelope(ctx, f.gpu.rec.MachineID, core.KindControlDelivered, "", "", core.DeliveredBody{IDs: []string{"X"}})
+	ctl, err := f.o.SendEnvelope(ctx, f.gpu.rec.MachineID, core.KindControlDelivered, "", core.DeliveredBody{IDs: []string{"X"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,25 +1,22 @@
 package e2e
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/cravv/cravv-connect/internal/audit"
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/ipc"
 	"github.com/cravv/cravv-connect/internal/keys"
-	"github.com/cravv/cravv-connect/internal/mcpserver"
 	"github.com/cravv/cravv-connect/internal/sealing"
 	"github.com/cravv/cravv-connect/internal/store"
 	"github.com/cravv/cravv-connect/internal/transport"
@@ -31,10 +28,11 @@ func isChat(id string) func(ipc.InboxView) bool {
 	return func(it ipc.InboxView) bool { return it.Kind == "chat" && it.ID == id }
 }
 
-func sendChat(t *testing.T, c *ipc.Client, to, text string) string {
+// sendChat sends text on link number link of the chat shared on c.
+func sendChat(t *testing.T, c *ipc.Client, link int64, text string) string {
 	t.Helper()
 	var r ipc.IDResult
-	Call(t, c, ipc.MethodChatSend, ipc.ChatSendParams{To: to, Text: text}, &r)
+	Call(t, c, ipc.MethodChatSend, ipc.ChatSendParams{Link: link, Text: text}, &r)
 	return r.ID
 }
 
@@ -113,27 +111,27 @@ func TestPairingNeedsPasswordAndRegistersWithInvite(t *testing.T) {
 	}
 }
 
-// Criterion 2: chat both ways, wrapped as untrusted content with local aliases.
+// Criterion 2: chat both ways over a link, wrapped as untrusted content with
+// the local alias, the peer's session name, the link number and permission.
 func TestChatBothWays(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{ATrustsB: core.TrustAutonomous, BTrustsA: core.TrustAskFirst})
-	sa, _ := a.Session("claude")
-	sb, nameB := b.Session("codex")
-	if nameB != "codex@proj" {
-		t.Fatalf("session name %q, want codex@proj", nameB)
-	}
+	_, a, b := NewPair(t, PairOptions{})
+	l := LinkUp(t, a, b, "messages")
 
-	id := sendChat(t, sa, "bob", "hello from alice <b>&</b>")
-	got, _ := WaitItem(t, sb, wait, "chat at bob", isChat(id))
-	for _, want := range []string{`from="alice"`, `trust="ask-first"`, `session="claude@proj"`, "hello from alice &lt;b&gt;&amp;&lt;/b&gt;"} {
+	id := sendChat(t, l.A.C, l.ANum, "hello from alice <b>&</b>")
+	got, _ := WaitItem(t, l.B.C, wait, "chat at bob", isChat(id))
+	for _, want := range []string{`from="alice"`, `session="lead"`, fmt.Sprintf(`link="%d"`, l.BNum), `permission="messages"`, "hello from alice &lt;b&gt;&amp;&lt;/b&gt;"} {
 		if !strings.Contains(got.Wrapped, want) {
 			t.Errorf("wrapped %q lacks %q", got.Wrapped, want)
 		}
 	}
+	if got.Session != "lead" || got.Link != l.BNum {
+		t.Fatalf("view %+v", got)
+	}
 
-	back := sendChat(t, sb, "alice", "hi alice")
-	reply, _ := WaitItem(t, sa, wait, "reply at alice", isChat(back))
-	if !strings.Contains(reply.Wrapped, `from="bob"`) || !strings.Contains(reply.Wrapped, `trust="autonomous"`) {
+	back := sendChat(t, l.B.C, l.BNum, "hi alice")
+	reply, _ := WaitItem(t, l.A.C, wait, "reply at alice", isChat(back))
+	if !strings.Contains(reply.Wrapped, `from="bob"`) || !strings.Contains(reply.Wrapped, `session="trainer"`) {
 		t.Fatalf("reply wrapped %q", reply.Wrapped)
 	}
 
@@ -148,60 +146,61 @@ func TestChatBothWays(t *testing.T) {
 	}
 }
 
-// Addressing alias/session reaches only that session.
-func TestSessionTargetedChat(t *testing.T) {
+// v2 success criterion 2: traffic on one link is never visible to another
+// session, on either machine.
+func TestCrossSessionIsolation(t *testing.T) {
 	t.Parallel()
 	_, a, b := NewPair(t, PairOptions{})
-	sa, _ := a.Session("claude")
-	s1, n1 := b.Session("claude")
-	s2, n2 := b.Session("claude")
-	if n1 != "claude@proj" || n2 != "claude@proj-2" {
-		t.Fatalf("session names %q, %q", n1, n2)
-	}
+	l := LinkUp(t, a, b, "tasks-auto")
+	other := b.Share("codex", "other", "private")
 
-	targeted := sendChat(t, sa, "bob/claude@proj-2", "only for the second session")
-	everyone := sendChat(t, sa, "bob", "for every session")
-
-	WaitItem(t, s2, wait, "targeted chat in claude@proj-2", isChat(targeted))
-	_, seen := WaitItem(t, s1, wait, "machine-wide chat in claude@proj", isChat(everyone))
-	for _, it := range seen {
-		if it.ID == targeted {
-			t.Fatal("message for claude@proj-2 reached claude@proj")
-		}
+	chat := sendChat(t, l.A.C, l.ANum, "only for trainer")
+	var created ipc.TaskCreateResult
+	Call(t, l.A.C, ipc.MethodTaskCreate, ipc.TaskCreateParams{Link: l.ANum, Instructions: "only for trainer too"}, &created)
+	WaitItem(t, l.B.C, wait, "task at trainer", func(it ipc.InboxView) bool { return it.TaskID == created.TaskID })
+	if items := Inbox(t, other.C); len(items) != 0 {
+		t.Fatalf("another session saw %+v", items)
 	}
+	wantKind(t, TryCall(other.C, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, nil), ipc.KindNotFound)
+	wantKind(t, TryCall(other.C, ipc.MethodTaskClaim, ipc.TaskIDParams{TaskID: created.TaskID}, nil), ipc.KindNotFound)
+	wantKind(t, TryCall(other.C, ipc.MethodChatSend, ipc.ChatSendParams{Link: l.BNum, Text: "hijack"}, nil), ipc.KindNotFound)
+	var mine ipc.LinksResult
+	Call(t, other.C, ipc.MethodLinks, nil, &mine)
+	if len(mine.Links) != 0 {
+		t.Fatalf("another session lists %+v", mine.Links)
+	}
+	_ = chat
 }
 
-// Criterion 2: an autonomous peer's task runs create, claim, update,
-// complete, and the sender sees the result through inbox.wait.
-func TestAutonomousTaskLifecycle(t *testing.T) {
+// Criterion 2: a task on a tasks-auto link runs create, claim, update,
+// complete, and the sender sees every state (including seen-less queued)
+// and the result through inbox.wait.
+func TestTaskOverTasksAutoLink(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{BTrustsA: core.TrustAutonomous})
-	sa, _ := a.Session("claude")
-	worker, workerName := b.Session("codex")
-	other, _ := b.Session("codex")
+	_, a, b := NewPair(t, PairOptions{})
+	l := LinkUp(t, a, b, "tasks-auto")
 
 	var created ipc.TaskCreateResult
-	Call(t, sa, ipc.MethodTaskCreate, ipc.TaskCreateParams{To: "bob", Instructions: "count the lines in README"}, &created)
+	Call(t, l.A.C, ipc.MethodTaskCreate, ipc.TaskCreateParams{Link: l.ANum, Instructions: "count the lines in README"}, &created)
 
-	item, _ := WaitItem(t, worker, wait, "task at bob", func(it ipc.InboxView) bool {
+	item, _ := WaitItem(t, l.B.C, wait, "task at bob", func(it ipc.InboxView) bool {
 		return it.Kind == "task" && it.TaskID == created.TaskID
 	})
-	if !strings.Contains(item.Wrapped, `kind="task"`) || !strings.Contains(item.Wrapped, "count the lines in README") {
+	if !strings.Contains(item.Wrapped, `kind="task"`) || !strings.Contains(item.Wrapped, "count the lines in README") ||
+		!strings.Contains(item.Wrapped, `permission="tasks-auto"`) {
 		t.Fatalf("task item wrapped %q", item.Wrapped)
 	}
 
 	var tv ipc.TaskView
-	Call(t, worker, ipc.MethodTaskClaim, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
-	if tv.State != "claimed" || tv.ClaimedBy != workerName {
+	Call(t, l.B.C, ipc.MethodTaskClaim, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
+	if tv.State != "claimed" {
 		t.Fatalf("after claim: %+v", tv)
 	}
-	wantKind(t, TryCall(other, ipc.MethodTaskClaim, ipc.TaskIDParams{TaskID: created.TaskID}, nil), ipc.KindAlreadyClaimed)
-
-	Call(t, worker, ipc.MethodTaskUpdate, ipc.TaskUpdateParams{TaskID: created.TaskID, Note: "halfway"}, &tv)
+	Call(t, l.B.C, ipc.MethodTaskUpdate, ipc.TaskUpdateParams{TaskID: created.TaskID, Note: "halfway"}, &tv)
 	if tv.State != "running" {
 		t.Fatalf("after update: state %q", tv.State)
 	}
-	Call(t, worker, ipc.MethodTaskComplete, ipc.TaskCompleteParams{TaskID: created.TaskID, Result: "42 lines"}, &tv)
+	Call(t, l.B.C, ipc.MethodTaskComplete, ipc.TaskCompleteParams{TaskID: created.TaskID, Result: "42 lines"}, &tv)
 	if tv.State != "done" {
 		t.Fatalf("after complete: state %q", tv.State)
 	}
@@ -211,7 +210,7 @@ func TestAutonomousTaskLifecycle(t *testing.T) {
 	deadline := time.Now().Add(wait)
 	for result == nil && time.Now().Before(deadline) {
 		var r ipc.InboxResult
-		Call(t, sa, ipc.MethodInboxWait, ipc.InboxWaitParams{TimeoutS: 5}, &r)
+		Call(t, l.A.C, ipc.MethodInboxWait, ipc.InboxWaitParams{TimeoutS: 5}, &r)
 		for _, it := range r.Items {
 			if it.Kind == "task_update" && it.TaskID == created.TaskID && strings.Contains(it.Wrapped, "42 lines") {
 				v := it
@@ -223,38 +222,39 @@ func TestAutonomousTaskLifecycle(t *testing.T) {
 		t.Fatal("sender never saw the result through inbox.wait")
 	}
 	var sv ipc.TaskView
-	Call(t, sa, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, &sv)
+	Call(t, l.A.C, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, &sv)
 	// The result is peer text: only the wrapped view carries it.
 	if sv.State != "done" || sv.Result != "" || !strings.Contains(sv.Wrapped, "Result:\n42 lines") ||
-		!strings.Contains(sv.Wrapped, `<remote_message from="bob"`) || sv.Direction != "out" {
+		!strings.Contains(sv.Wrapped, `<remote_message from="bob" session="trainer"`) || sv.Direction != "out" || sv.ClaimedBy != "trainer" {
 		t.Fatalf("sender view %+v", sv)
 	}
 }
 
-// Criteria 3 and 4: an ask-first task waits for approval, which needs the password.
-func TestAskFirstTaskNeedsApproval(t *testing.T) {
+// v2 spec 3.4: a task on a tasks-ask link waits for the receiving human
+// (password in Phase 1); a tasks-auto link queues it at once.
+func TestTasksAskNeedsApprovalTasksAutoDoesNot(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{BTrustsA: core.TrustAskFirst})
-	sa, _ := a.Session("claude")
-	sb, _ := b.Session("codex")
+	_, a, b := NewPair(t, PairOptions{})
+	l := LinkUp(t, a, b, "tasks-ask")
 
 	var created ipc.TaskCreateResult
-	Call(t, sa, ipc.MethodTaskCreate, ipc.TaskCreateParams{To: "bob", Instructions: "delete the build cache"}, &created)
-
+	Call(t, l.A.C, ipc.MethodTaskCreate, ipc.TaskCreateParams{Link: l.ANum, Instructions: "delete the build cache"}, &created)
 	Eventually(t, wait, "sender sees awaiting_approval", func() bool {
 		var tv ipc.TaskView
-		Call(t, sa, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
+		Call(t, l.A.C, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
 		return tv.State == "awaiting_approval"
 	})
 	if n := b.Status().PendingApprovals; n != 1 {
 		t.Fatalf("bob pending approvals = %d, want 1", n)
 	}
 	// The agent cannot claim it, list approvals, or approve it.
-	wantKind(t, TryCall(sb, ipc.MethodTaskClaim, ipc.TaskIDParams{TaskID: created.TaskID}, nil), ipc.KindBadTransition)
-	wantKind(t, TryCall(sb, ipc.MethodApprovalsList, nil, nil), ipc.KindAuthRequired)
-	wantKind(t, TryCall(sb, ipc.MethodApprovalsDecide, ipc.ApprovalsDecideParams{TaskID: created.TaskID, Approve: true}, nil), ipc.KindAuthRequired)
-	if items := Inbox(t, sb); len(items) != 0 {
-		t.Fatalf("held task reached the session: %+v", items)
+	wantKind(t, TryCall(l.B.C, ipc.MethodTaskClaim, ipc.TaskIDParams{TaskID: created.TaskID}, nil), ipc.KindBadTransition)
+	wantKind(t, TryCall(l.B.C, ipc.MethodApprovalsList, nil, nil), ipc.KindAuthRequired)
+	wantKind(t, TryCall(l.B.C, ipc.MethodApprovalsDecide, ipc.ApprovalsDecideParams{TaskID: created.TaskID, Approve: true}, nil), ipc.KindAuthRequired)
+	for _, it := range Inbox(t, l.B.C) {
+		if it.TaskID == created.TaskID {
+			t.Fatalf("held task reached the session: %+v", it)
+		}
 	}
 
 	human := b.Unlocked()
@@ -268,57 +268,58 @@ func TestAskFirstTaskNeedsApproval(t *testing.T) {
 		t.Fatalf("approval hash %s", list.Tasks[0].SHA256)
 	}
 	Call(t, human, ipc.MethodApprovalsDecide, ipc.ApprovalsDecideParams{TaskID: created.TaskID, Approve: true}, nil)
-
-	WaitItem(t, sb, wait, "approved task delivered", func(it ipc.InboxView) bool {
+	WaitItem(t, l.B.C, wait, "approved task delivered", func(it ipc.InboxView) bool {
 		return it.Kind == "task" && it.TaskID == created.TaskID
 	})
 	var tv ipc.TaskView
-	Call(t, sb, ipc.MethodTaskClaim, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
-	if tv.State != "claimed" {
-		t.Fatalf("claim after approval: %+v", tv)
-	}
+	Call(t, l.B.C, ipc.MethodTaskClaim, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
 	Eventually(t, wait, "sender sees claimed", func() bool {
-		Call(t, sa, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
+		Call(t, l.A.C, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
 		return tv.State == "claimed"
 	})
-}
 
-// Criterion 3: a chat-only peer's task is always rejected.
-func TestChatOnlyTaskRejected(t *testing.T) {
-	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{BTrustsA: core.TrustChatOnly})
-	sa, _ := a.Session("claude")
-	sb, _ := b.Session("codex")
-
-	var created ipc.TaskCreateResult
-	Call(t, sa, ipc.MethodTaskCreate, ipc.TaskCreateParams{To: "bob", Instructions: "run rm -rf"}, &created)
-	upd, _ := WaitItem(t, sa, wait, "rejection at sender", func(it ipc.InboxView) bool {
-		return it.Kind == "task_update" && it.TaskID == created.TaskID
-	})
-	if !strings.Contains(upd.Wrapped, "state: rejected") || !strings.Contains(upd.Wrapped, "not permitted") {
-		t.Fatalf("update wrapped %q", upd.Wrapped)
-	}
-	var tv ipc.TaskView
-	Call(t, sa, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
-	if tv.State != "rejected" {
-		t.Fatalf("sender state %q, want rejected", tv.State)
-	}
+	// The same peer on a tasks-auto link needs no approval.
+	auto := LinkChats(t, a, b, a.Share("codex", "lead-2", "private"), b.Share("codex", "worker", "all-peers"), "tasks-auto")
+	var quick ipc.TaskCreateResult
+	Call(t, auto.A.C, ipc.MethodTaskCreate, ipc.TaskCreateParams{Link: auto.ANum, Instructions: "quick"}, &quick)
+	WaitItem(t, auto.B.C, wait, "tasks-auto task delivered", func(it ipc.InboxView) bool { return it.TaskID == quick.TaskID })
 	if n := b.Status().PendingApprovals; n != 0 {
-		t.Fatalf("pending approvals %d, want 0", n)
+		t.Fatalf("pending approvals %d after a tasks-auto task", n)
 	}
-	if items := Inbox(t, sb); len(items) != 0 {
-		t.Fatalf("rejected task reached bob's session: %+v", items)
-	}
-	wantKind(t, TryCall(sb, ipc.MethodTaskClaim, ipc.TaskIDParams{TaskID: created.TaskID}, nil), ipc.KindBadTransition)
 }
 
-// Criterion 2 and spec 7.4: files arrive intact under files/<alias>/, secrets
-// never leave, and a chat-only peer's file waits for a password-gated accept.
+// Lowering a link (restrict) needs no password and reaches the peer: the
+// peer can no longer create tasks there. Raising back needs the password.
+func TestRestrictLowersAndRaisingNeedsPassword(t *testing.T) {
+	t.Parallel()
+	_, a, b := NewPair(t, PairOptions{})
+	l := LinkUp(t, a, b, "tasks-auto")
+	var v ipc.LinkView
+	Call(t, l.B.C, ipc.MethodLinkRestrict, ipc.LinkPermissionParams{Link: l.BNum, Permission: "messages"}, &v)
+	if v.PermissionIn != "messages" {
+		t.Fatalf("restricted link %+v", v)
+	}
+	a.WaitLink(wait, "alice learns the lower permission", func(x ipc.LinkView) bool {
+		return x.Link == l.ANum && x.PermissionOut == "messages"
+	})
+	wantKind(t, TryCall(l.A.C, ipc.MethodTaskCreate, ipc.TaskCreateParams{Link: l.ANum, Instructions: "x"}, nil), ipc.KindNotPermitted)
+	id := sendChat(t, l.A.C, l.ANum, "chat still works")
+	WaitItem(t, l.B.C, wait, "chat after restrict", isChat(id))
+
+	wantKind(t, TryCall(l.B.C, ipc.MethodLinkRestrict, ipc.LinkPermissionParams{Link: l.BNum, Permission: "tasks-auto"}, nil), ipc.KindAuthRequired)
+	wantKind(t, TryCall(b.Conn(), ipc.MethodLinkPermit, ipc.LinkPermissionParams{Link: l.BNum, Permission: "tasks-auto"}, nil), ipc.KindAuthRequired)
+	Call(t, b.Unlocked(), ipc.MethodLinkPermit, ipc.LinkPermissionParams{Link: l.BNum, Permission: "tasks-auto"}, nil)
+	a.WaitLink(wait, "alice learns the raise", func(x ipc.LinkView) bool {
+		return x.Link == l.ANum && x.PermissionOut == "tasks-auto"
+	})
+}
+
+// Criterion 2 and spec 7.4: files arrive intact under files/<alias>/ over a
+// messages link, and secrets never leave.
 func TestFileTransfer(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{BTrustsA: core.TrustAskFirst})
-	sa, _ := a.Session("claude")
-	sb, _ := b.Session("codex")
+	_, a, b := NewPair(t, PairOptions{})
+	l := LinkUp(t, a, b, "messages")
 
 	data := make([]byte, 3*core.FileChunkBytes+12345)
 	if _, err := rand.Read(data); err != nil {
@@ -329,14 +330,14 @@ func TestFileTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sent ipc.FileSendResult
-	Call(t, sa, ipc.MethodFileSend, ipc.FileSendParams{To: "bob", Path: "model.bin"}, &sent)
+	Call(t, l.A.C, ipc.MethodFileSend, ipc.FileSendParams{Link: l.ANum, Path: "model.bin"}, &sent)
 
-	item, _ := WaitItem(t, sb, 60*time.Second, "file at bob", func(it ipc.InboxView) bool {
+	item, _ := WaitItem(t, l.B.C, 60*time.Second, "file at bob", func(it ipc.InboxView) bool {
 		return it.Kind == "file" && it.FileID == sent.FileID && it.Path != ""
 	})
 	wantDir := filepath.Join(b.Paths.Files, "alice") + string(filepath.Separator)
-	if !strings.HasPrefix(item.Path, wantDir) || !strings.HasSuffix(item.Path, "-model.bin") {
-		t.Fatalf("saved at %q, want %s<msgid>-model.bin", item.Path, wantDir)
+	if !strings.HasPrefix(item.Path, wantDir) || !strings.HasSuffix(item.Path, "-model.bin") || item.Link != l.BNum {
+		t.Fatalf("saved at %q (link %d), want %s<msgid>-model.bin", item.Path, item.Link, wantDir)
 	}
 	got, err := os.ReadFile(item.Path)
 	if err != nil {
@@ -362,74 +363,50 @@ func TestFileTransfer(t *testing.T) {
 		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		wantKind(t, TryCall(sa, ipc.MethodFileSend, ipc.FileSendParams{To: "bob", Path: name}, nil), ipc.KindPathRefused)
+		wantKind(t, TryCall(l.A.C, ipc.MethodFileSend, ipc.FileSendParams{Link: l.ANum, Path: name}, nil), ipc.KindPathRefused)
 	}
-
-	// Chat-only: the file is held until a human accepts it with the password.
-	Call(t, b.Conn(), ipc.MethodPeerTrust, ipc.PeerTrustParams{Alias: "alice", Level: "chat-only"}, nil)
-	small := filepath.Join(a.Proj, "notes.txt")
-	if err := os.WriteFile(small, []byte("held until accepted"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var held ipc.FileSendResult
-	Call(t, sa, ipc.MethodFileSend, ipc.FileSendParams{To: "bob", Path: small}, &held)
-	WaitItem(t, sb, wait, "held file notice", func(it ipc.InboxView) bool {
-		return it.Kind == "file" && it.FileID == held.FileID && strings.Contains(it.Wrapped, "held")
-	})
-	wantKind(t, TryCall(b.Conn(), ipc.MethodFilesAccept, ipc.FileIDParams{FileID: held.FileID}, nil), ipc.KindAuthRequired)
-	Call(t, b.Unlocked(), ipc.MethodFilesAccept, ipc.FileIDParams{FileID: held.FileID}, nil)
-	Eventually(t, wait, "accepted file downloaded", func() bool {
-		var fl ipc.FilesListResult
-		Call(t, b.Conn(), ipc.MethodFilesList, nil, &fl)
-		for _, f := range fl.Files {
-			if f.FileID == held.FileID && f.State == "done" {
-				body, err := os.ReadFile(f.Path)
-				return err == nil && string(body) == "held until accepted"
-			}
-		}
-		return false
-	})
 }
 
-// Criterion 5: pause blocks the pauser's sends, holds the paused side's
-// messages, and delivers them after resume.
-func TestPauseAndResume(t *testing.T) {
+// Criterion 5 and v2 spec 3.4: a pause by either side closes every link with
+// the machine at once; sends fail with link_closed; after resume the
+// sessions link again.
+func TestPauseClosesLinksAndResumeAllowsNewOnes(t *testing.T) {
 	t.Parallel()
 	_, a, b := NewPair(t, PairOptions{})
-	sa, _ := a.Session("claude")
-	sb, _ := b.Session("codex")
+	l := LinkUp(t, a, b, "messages")
 
-	Call(t, sb, ipc.MethodPeerPause, ipc.AliasParams{Alias: "alice"}, nil)
-	wantKind(t, TryCall(sb, ipc.MethodChatSend, ipc.ChatSendParams{To: "alice", Text: "x"}, nil), ipc.KindPaused)
+	Call(t, l.B.C, ipc.MethodPeerPause, ipc.AliasParams{Alias: "alice"}, nil)
+	if v := b.Link(l.BNum); v.State != "closed" || v.Reason != core.ClosePaused {
+		t.Fatalf("bob's link after his pause: %+v", v)
+	}
+	a.WaitLink(wait, "alice's link closes", func(v ipc.LinkView) bool {
+		return v.Link == l.ANum && v.State == "closed" && v.Reason == core.ClosePaused
+	})
 	Eventually(t, wait, "alice learns she is paused", func() bool {
 		p, _ := a.PeerView("bob")
 		return p.PausedByPeer && !p.Online
 	})
-
-	id := sendChat(t, sa, "bob", "sent while paused")
-	Eventually(t, wait, "message held at alice", func() bool { return a.Status().OutboxHeld >= 1 })
-	if items := Inbox(t, sb); len(items) != 0 {
-		t.Fatalf("paused peer's message delivered: %+v", items)
-	}
+	wantKind(t, TryCall(l.A.C, ipc.MethodChatSend, ipc.ChatSendParams{Link: l.ANum, Text: "x"}, nil), ipc.KindLinkClosed)
+	wantKind(t, TryCall(l.B.C, ipc.MethodChatSend, ipc.ChatSendParams{Link: l.BNum, Text: "x"}, nil), ipc.KindLinkClosed)
+	wantKind(t, TryCall(l.A.C, ipc.MethodLinkConnect, ipc.LinkConnectParams{Target: "bob/trainer", Permission: "messages"}, nil), ipc.KindPausedByPeer)
 
 	Call(t, b.Conn(), ipc.MethodPeerResume, ipc.AliasParams{Alias: "alice"}, nil)
-	WaitItem(t, sb, wait, "held message after resume", isChat(id))
 	Eventually(t, wait, "alice sees bob again", func() bool {
 		p, _ := a.PeerView("bob")
 		return !p.PausedByPeer
 	})
-	back := sendChat(t, sb, "alice", "resumed")
-	WaitItem(t, sa, wait, "chat after resume", isChat(back))
+	again := LinkChats(t, a, b, l.A, l.B, "messages")
+	id := sendChat(t, again.B.C, again.BNum, "resumed")
+	WaitItem(t, again.A.C, wait, "chat on the new link", isChat(id))
 }
 
-// Criterion 5: unpair removes the peer on both sides.
+// Criterion 5: unpair removes the peer on both sides and closes the links.
 func TestUnpair(t *testing.T) {
 	t.Parallel()
 	_, a, b := NewPair(t, PairOptions{})
-	sa, _ := a.Session("claude")
-	sb, _ := b.Session("codex")
+	l := LinkUp(t, a, b, "messages")
 
-	Call(t, sa, ipc.MethodPeerUnpair, ipc.AliasParams{Alias: "bob"}, nil)
+	Call(t, l.A.C, ipc.MethodPeerUnpair, ipc.AliasParams{Alias: "bob"}, nil)
 	if _, ok := a.PeerView("bob"); ok {
 		t.Fatal("alice still lists bob")
 	}
@@ -437,38 +414,51 @@ func TestUnpair(t *testing.T) {
 		_, ok := b.PeerView("alice")
 		return !ok
 	})
-	wantKind(t, TryCall(sa, ipc.MethodChatSend, ipc.ChatSendParams{To: "bob", Text: "x"}, nil), ipc.KindNotFound)
-	wantKind(t, TryCall(sb, ipc.MethodChatSend, ipc.ChatSendParams{To: "alice", Text: "x"}, nil), ipc.KindNotFound)
+	if v := a.Link(l.ANum); v.State != "closed" || v.Reason != core.CloseUnpaired {
+		t.Fatalf("alice's link after unpair: %+v", v)
+	}
+	b.WaitLink(wait, "bob's link closes", func(v ipc.LinkView) bool { return v.Link == l.BNum && v.State == "closed" })
+	wantKind(t, TryCall(l.A.C, ipc.MethodChatSend, ipc.ChatSendParams{Link: l.ANum, Text: "x"}, nil), ipc.KindLinkClosed)
+	wantKind(t, TryCall(l.B.C, ipc.MethodChatSend, ipc.ChatSendParams{Link: l.BNum, Text: "x"}, nil), ipc.KindLinkClosed)
 }
 
 // Criterion 5 and spec 10: the kill switch stops everything but status and
-// resume, survives a restart, fails claimed tasks, and resume needs the password.
+// resume, survives a restart, fails claimed tasks, closes every link, and
+// resume needs the password.
 func TestKillSwitch(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{BTrustsA: core.TrustAutonomous})
-	sa, _ := a.Session("claude")
-	sb, _ := b.Session("codex")
+	_, a, b := NewPair(t, PairOptions{})
+	l := LinkUp(t, a, b, "tasks-auto")
 
 	var created ipc.TaskCreateResult
-	Call(t, sa, ipc.MethodTaskCreate, ipc.TaskCreateParams{To: "bob", Instructions: "long job"}, &created)
-	WaitItem(t, sb, wait, "task at bob", func(it ipc.InboxView) bool { return it.TaskID == created.TaskID })
-	Call(t, sb, ipc.MethodTaskClaim, ipc.TaskIDParams{TaskID: created.TaskID}, nil)
+	Call(t, l.A.C, ipc.MethodTaskCreate, ipc.TaskCreateParams{Link: l.ANum, Instructions: "long job"}, &created)
+	WaitItem(t, l.B.C, wait, "task at bob", func(it ipc.InboxView) bool { return it.TaskID == created.TaskID })
+	Call(t, l.B.C, ipc.MethodTaskClaim, ipc.TaskIDParams{TaskID: created.TaskID}, nil)
 
-	Call(t, sb, ipc.MethodKill, nil, nil) // an agent may pull it: no password
+	Call(t, l.B.C, ipc.MethodKill, nil, nil) // an agent may pull it: no password
 	for _, m := range []struct {
 		method string
 		params any
 	}{
-		{ipc.MethodChatSend, ipc.ChatSendParams{To: "alice", Text: "x"}},
+		{ipc.MethodChatSend, ipc.ChatSendParams{Link: l.BNum, Text: "x"}},
 		{ipc.MethodInboxCheck, ipc.InboxCheckParams{}},
 		{ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}},
 		{ipc.MethodPeerPause, ipc.AliasParams{Alias: "alice"}},
 	} {
-		wantKind(t, TryCall(sb, m.method, m.params, nil), ipc.KindKilled)
+		wantKind(t, TryCall(l.B.C, m.method, m.params, nil), ipc.KindKilled)
 	}
 	if st := b.Status(); !st.Killed || st.RelayConnected {
 		t.Fatalf("status while killed: killed=%v relay=%v", st.Killed, st.RelayConnected)
 	}
+	a.WaitLink(wait, "alice's link closed by the kill", func(v ipc.LinkView) bool {
+		return v.Link == l.ANum && v.State == "closed" && v.Reason == core.CloseKilled
+	})
+	Eventually(t, wait, "sender sees failed(killed)", func() bool {
+		var tv ipc.TaskView
+		Call(t, l.A.C, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
+		// The peer's note is peer text: it arrives only inside the wrapper.
+		return tv.State == "failed" && strings.Contains(tv.Wrapped, " killed\n") && len(tv.Notes) == 0
+	})
 
 	b.Restart()
 	if !b.Status().Killed {
@@ -478,15 +468,10 @@ func TestKillSwitch(t *testing.T) {
 	Call(t, b.Unlocked(), ipc.MethodResume, nil, nil)
 	b.WaitOnline()
 
-	Eventually(t, wait, "sender sees failed(killed)", func() bool {
-		var tv ipc.TaskView
-		Call(t, sa, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
-		// The peer's note is peer text: it arrives only inside the wrapper.
-		return tv.State == "failed" && strings.Contains(tv.Wrapped, " killed\n") && len(tv.Notes) == 0
-	})
-	sb2, _ := b.Session("codex")
-	id := sendChat(t, sa, "bob", "after resume")
-	WaitItem(t, sb2, wait, "chat after resume", isChat(id))
+	sb2 := b.Reattach("claude", l.B)
+	again := LinkChats(t, a, b, l.A, sb2, "messages")
+	id := sendChat(t, again.A.C, again.ANum, "after resume")
+	WaitItem(t, sb2.C, wait, "chat after resume", isChat(id))
 }
 
 // Spec 11: with the relay down, sends stay in the outbox; after the relay
@@ -494,12 +479,11 @@ func TestKillSwitch(t *testing.T) {
 func TestRelayOfflineThenRestart(t *testing.T) {
 	t.Parallel()
 	r, a, b := NewPair(t, PairOptions{})
-	sa, _ := a.Session("claude")
-	sb, _ := b.Session("codex")
+	l := LinkUp(t, a, b, "messages")
 
 	r.Stop()
 	Eventually(t, wait, "alice notices the relay is gone", func() bool { return !a.Status().RelayConnected })
-	id := sendChat(t, sa, "bob", "queued while offline")
+	id := sendChat(t, l.A.C, l.ANum, "queued while offline")
 	if st := a.Status(); st.OutboxPending < 1 {
 		t.Fatalf("outbox pending = %d while offline, want >= 1", st.OutboxPending)
 	}
@@ -507,7 +491,7 @@ func TestRelayOfflineThenRestart(t *testing.T) {
 	r.Start()
 	a.WaitOnline()
 	b.WaitOnline()
-	WaitItem(t, sb, wait, "message after relay restart", isChat(id))
+	WaitItem(t, l.B.C, wait, "message after relay restart", isChat(id))
 
 	outbox := a.Daemon.Settings().(store.OutboxStore)
 	Eventually(t, wait, "delivered receipt clears alice's outbox", func() bool {
@@ -516,16 +500,19 @@ func TestRelayOfflineThenRestart(t *testing.T) {
 	})
 }
 
-// Review Focus 3: the relay may deliver the same id twice (a resend after a
-// lost sent reply); the receiver shows it once.
+// Review Focus 3 (v1): the relay may deliver the same id twice (a resend
+// after a lost sent reply); the receiver shows it once.
 func TestDuplicateDeliveryShownOnce(t *testing.T) {
 	t.Parallel()
 	_, a, b := NewPair(t, PairOptions{})
-	sa, _ := a.Session("claude")
-	sb, _ := b.Session("codex")
+	l := LinkUp(t, a, b, "messages")
 	ctx := context.Background()
 
 	bob, _, err := a.Daemon.Peers().Resolve(ctx, "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	link, err := a.Daemon.Links().Get(ctx, l.ANum)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,6 +520,7 @@ func TestDuplicateDeliveryShownOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	env.LinkID = link.ID
 	frame, err := sealing.Seal(a.Daemon.Identity(), keys.SignedPrekeyFromWire(bob.Prekey), env)
 	if err != nil {
 		t.Fatal(err)
@@ -553,8 +541,8 @@ func TestDuplicateDeliveryShownOnce(t *testing.T) {
 	}
 	// The relay delivers in seq order, so once this later message is in,
 	// both copies have been processed.
-	after := sendChat(t, sa, "bob", "after the duplicates")
-	_, seen := WaitItem(t, sb, wait, "later message", isChat(after))
+	after := sendChat(t, l.A.C, l.ANum, "after the duplicates")
+	_, seen := WaitItem(t, l.B.C, wait, "later message", isChat(after))
 	count := 0
 	for _, it := range seen {
 		if it.ID == env.ID {
@@ -566,17 +554,26 @@ func TestDuplicateDeliveryShownOnce(t *testing.T) {
 	}
 }
 
-// Review Focus 1: bob rotates his prekey and purges the old private key
-// while alice cannot learn the new one (bob has paused her, so the broadcast
-// skips her). Alice then seals to the deleted prekey; bob answers with
-// control.stale_prekey, alice re-seals, and the message arrives exactly once.
+// Review Focus 1 (v1): bob rotates his prekey and purges the old private
+// key while alice cannot learn the new one (bob has paused her, so the
+// broadcast skips her). Alice's link request, held while paused, is then
+// sealed to the deleted prekey; bob answers with control.stale_prekey, alice
+// re-seals, and the request arrives exactly once.
 func TestStalePrekeyResend(t *testing.T) {
 	t.Parallel()
 	clock := core.NewFakeClock(time.Now())
 	_, a, b := NewPairWithClock(t, PairOptions{}, clock)
-	sa, _ := a.Session("claude")
-	sb, _ := b.Session("codex")
+	lead := a.Share("claude", "lead", "private")
+	b.Share("claude", "trainer", "all-peers")
 	ctx := context.Background()
+	trainer, err := b.Daemon.Shared().List(ctx, core.SessionOpen)
+	if err != nil || len(trainer) != 1 {
+		t.Fatalf("bob's sessions %+v, %v", trainer, err)
+	}
+	leadRec, err := a.Daemon.Shared().List(ctx, core.SessionOpen)
+	if err != nil || len(leadRec) != 1 {
+		t.Fatalf("alice's sessions %+v, %v", leadRec, err)
+	}
 
 	bobAtAlice := func() core.SignedPrekeyWire {
 		p, _, err := a.Daemon.Peers().Resolve(ctx, "bob")
@@ -587,7 +584,7 @@ func TestStalePrekeyResend(t *testing.T) {
 	}
 	old := bobAtAlice().ID
 
-	Call(t, sb, ipc.MethodPeerPause, ipc.AliasParams{Alias: "alice"}, nil)
+	Call(t, b.Conn(), ipc.MethodPeerPause, ipc.AliasParams{Alias: "alice"}, nil)
 	Eventually(t, wait, "alice learns she is paused", func() bool {
 		p, _ := a.PeerView("bob")
 		return p.PausedByPeer
@@ -610,88 +607,74 @@ func TestStalePrekeyResend(t *testing.T) {
 		t.Fatalf("alice learned the new prekey early (%s): the test would not exercise stale_prekey", got)
 	}
 
-	id := sendChat(t, sa, "bob", "sealed to a deleted prekey")
-	Eventually(t, wait, "message held while paused", func() bool { return a.Status().OutboxHeld >= 1 })
-	Call(t, sb, ipc.MethodPeerResume, ipc.AliasParams{Alias: "alice"}, nil)
+	// Discovery refuses while paused, so the request is queued directly.
+	linkID := core.NewID()
+	bobID := b.Daemon.Identity().MachineID()
+	body := core.LinkRequestBody{LinkID: linkID, FromSession: core.SessionRef{ID: leadRec[0].ID, Name: "lead"},
+		ToSessionID: trainer[0].ID, ProposedPermission: core.PermMessages}
+	if _, err := a.Daemon.Outbound().SendEnvelope(ctx, bobID, core.KindLinkRequest, "", body); err != nil {
+		t.Fatal(err)
+	}
+	Eventually(t, wait, "request held while paused", func() bool { return a.Status().OutboxHeld >= 1 })
+	Call(t, b.Conn(), ipc.MethodPeerResume, ipc.AliasParams{Alias: "alice"}, nil)
 
-	WaitItem(t, sb, wait, "message after stale_prekey round trip", isChat(id))
+	b.WaitLink(wait, "request after the stale_prekey round trip", func(v ipc.LinkView) bool {
+		return v.State == "pending" && v.Direction == "in" && v.RemoteSession == "lead"
+	})
 	if got := bobAtAlice().ID; got == old {
 		t.Fatal("alice still holds the purged prekey after delivery")
 	}
-	after := sendChat(t, sa, "bob", "sealed to the new prekey")
-	_, seen := WaitItem(t, sb, wait, "follow-up message", isChat(after))
-	for _, it := range seen {
-		if it.ID == id {
-			t.Fatal("the re-sealed message was shown twice")
+	var n int
+	for _, v := range b.AllLinks() {
+		if v.Direction == "in" && v.RemoteSession == "lead" {
+			n++
 		}
 	}
-	outbox := a.Daemon.Settings().(store.OutboxStore)
-	Eventually(t, wait, "delivered receipt clears alice's outbox", func() bool {
-		_, err := outbox.Get(ctx, id)
-		return errors.Is(err, core.ErrNotFound)
-	})
+	if n != 1 {
+		t.Fatalf("the re-sealed request arrived %d times", n)
+	}
+	_ = lead
 }
 
-// The MCP server works against a real daemon: send_message and check_inbox.
-func TestMCPSmoke(t *testing.T) {
+// v1 peers send chat, task.* and file.offer without a link_id. A v2 machine
+// drops them and answers control.unsupported (at most once an hour); both
+// humans see why in status.
+func TestLinklessV1TrafficGetsControlUnsupported(t *testing.T) {
 	t.Parallel()
 	_, a, b := NewPair(t, PairOptions{})
-	sb, _ := b.Session("codex")
+	trainer := b.Share("claude", "trainer", "all-peers")
 	ctx := context.Background()
-
-	srv, sess := mcpserver.New(mcpserver.Options{
-		Dial:       func(ctx context.Context) (mcpserver.Conn, error) { return ipc.DialContext(ctx, a.Paths.Socket) },
-		ProjectDir: a.Proj,
-		Version:    "e2e",
-	})
-	st, ct := mcp.NewInMemoryTransports()
-	ss, err := srv.Connect(ctx, st, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "claude-code", Version: "1"}, nil)
-	cs, err := client.Connect(ctx, ct, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { cs.Close(); ss.Wait(); sess.Close() })
-
-	call := func(name string, args map[string]any) string {
-		t.Helper()
-		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
+	bobID := b.Daemon.Identity().MachineID()
+	for i := range 3 {
+		if _, err := a.Daemon.Outbound().SendEnvelope(ctx, bobID, core.KindChat, "", core.ChatBody{Text: fmt.Sprintf("v1 chat %d", i)}); err != nil {
+			t.Fatal(err)
 		}
-		var buf bytes.Buffer
-		for _, c := range res.Content {
-			if tc, ok := c.(*mcp.TextContent); ok {
-				buf.WriteString(tc.Text)
+	}
+	if _, err := a.Daemon.Outbound().SendEnvelope(ctx, bobID, core.KindTaskCreate, "", core.TaskCreateBody{TaskID: core.NewID(), Instructions: "v1 task"}); err != nil {
+		t.Fatal(err)
+	}
+	Eventually(t, wait, "alice is told bob needs protocol 2", func() bool {
+		for _, e := range a.Status().Errors {
+			if strings.Contains(e, "bob needs cravv-connect protocol 2") {
+				return true
 			}
 		}
-		if res.IsError {
-			t.Fatalf("%s failed: %s", name, buf.String())
+		return false
+	})
+	st := b.Status()
+	found := false
+	for _, e := range st.Errors {
+		if strings.Contains(e, "alice runs an older cravv-connect") {
+			found = true
 		}
-		return buf.String()
 	}
-
-	call("send_message", map[string]any{"to": "bob", "text": "hello over MCP"})
-	got, _ := WaitItem(t, sb, wait, "MCP chat at bob", func(it ipc.InboxView) bool {
-		return it.Kind == "chat" && strings.Contains(it.Wrapped, "hello over MCP")
-	})
-	if !strings.Contains(got.Wrapped, `session="claude@proj"`) {
-		t.Fatalf("wrapped %q: want the MCP session name claude@proj (clientInfo claude-code, normalized)", got.Wrapped)
+	if !found {
+		t.Fatalf("bob's status errors %v", st.Errors)
 	}
-
-	sendChat(t, sb, "alice", "reply for the agent")
-	var text string
-	Eventually(t, wait, "check_inbox shows the reply", func() bool {
-		text += call("check_inbox", map[string]any{})
-		return strings.Contains(text, "reply for the agent")
-	})
-	if !strings.Contains(text, "<remote_message") || !strings.Contains(text, `from="bob"`) {
-		t.Fatalf("check_inbox output %q", text)
+	if items := Inbox(t, trainer.C); len(items) != 0 {
+		t.Fatalf("link-less traffic reached a session: %+v", items)
 	}
-	if again := call("check_inbox", map[string]any{}); again != mcpserver.NoMessagesText {
-		t.Fatalf("second check_inbox = %q, want %q", again, mcpserver.NoMessagesText)
+	if st.PendingApprovals != 0 {
+		t.Fatal("a link-less task is waiting for approval")
 	}
 }

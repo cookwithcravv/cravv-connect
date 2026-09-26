@@ -65,6 +65,10 @@ func LinkFrom(ctx context.Context) (store.Link, bool) {
 	return l, ok
 }
 
+// errNoLink is returned by a link-scoped handler invoked without a LinkGate
+// in front: it never acts on an envelope the gate did not admit.
+var errNoLink = errors.New("link-scoped kind handled without a link gate")
+
 // LinkGate is the single enforcement point for chat, task.* and file.offer
 // (v2 spec section 10). An envelope reaches Inner only when:
 //   - it carries a link_id (else control.unsupported, rate-limited, and dropped);

@@ -3,15 +3,18 @@
 package present
 
 import (
+	"strconv"
 	"strings"
 	"unicode"
 )
 
-// Item is one inbox item to show an agent. Alias is the local alias; every
-// other string may be chosen by the peer.
+// Item is one inbox item to show an agent. Alias is the local alias, Link
+// the local link number and Permission what the link lets the peer do on
+// this side; every other string may be chosen by the peer.
 type Item struct {
-	Alias, Session, Trust, ID, Kind, TaskID string
-	Body                                    string
+	Alias, Session, Permission, ID, Kind, TaskID string
+	Link                                         int64
+	Body                                         string
 }
 
 // MaxAttrRunes caps every attribute value.
@@ -24,11 +27,11 @@ var (
 
 // Wrap renders it as
 //
-//	<remote_message from="..." session="..." trust="..." id="..." kind="..." task_id="...">
+//	<remote_message from="..." session="..." link="3" permission="..." id="..." kind="..." task_id="...">
 //	ESCAPED BODY
 //	</remote_message>
 //
-// session and task_id are omitted when empty. Attribute values have control
+// session, link, permission and task_id are omitted when empty. Attribute values have control
 // and invisible formatting characters removed, are capped at MaxAttrRunes
 // runes and XML-escaped. The body has invisible characters removed (see
 // isInvisible) and is XML-escaped (&, <, >) so it cannot close the tag or
@@ -49,7 +52,10 @@ func Wrap(it Item) string {
 	}
 	attr("from", it.Alias, true)
 	attr("session", it.Session, false)
-	attr("trust", it.Trust, true)
+	if it.Link > 0 {
+		attr("link", strconv.FormatInt(it.Link, 10), true)
+	}
+	attr("permission", it.Permission, false)
 	attr("id", it.ID, true)
 	attr("kind", it.Kind, true)
 	attr("task_id", it.TaskID, false)

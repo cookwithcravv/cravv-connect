@@ -34,9 +34,9 @@ func fileSHA256(t *testing.T, path string) [sha256.Size]byte {
 // start, a chunk boundary and the end, so it is never held in memory.
 func TestMaxSizeFileTransfer(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{BTrustsA: core.TrustAutonomous})
-	sa, _ := a.Session("claude")
-	sb, _ := b.Session("codex")
+	_, a, b := NewPair(t, PairOptions{})
+	l := LinkUp(t, a, b, "messages")
+	sa, sb := l.A.C, l.B.C
 
 	src := filepath.Join(a.Proj, "max.bin")
 	f, err := os.Create(src)
@@ -61,7 +61,7 @@ func TestMaxSizeFileTransfer(t *testing.T) {
 
 	start := time.Now()
 	var sent ipc.FileSendResult
-	Call(t, sa, ipc.MethodFileSend, ipc.FileSendParams{To: "bob", Path: "max.bin"}, &sent)
+	Call(t, sa, ipc.MethodFileSend, ipc.FileSendParams{Link: l.ANum, Path: "max.bin"}, &sent)
 	item, _ := WaitItem(t, sb, 5*time.Minute, "100 MB file at bob", func(it ipc.InboxView) bool {
 		return it.Kind == "file" && it.FileID == sent.FileID && it.Path != ""
 	})

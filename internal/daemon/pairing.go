@@ -276,7 +276,7 @@ func (s *PairingService) Finalize(ctx context.Context, pendingID, alias string, 
 	// it recorded and releases what it held. Through the outbox, so it is
 	// retried until the peer's relay accepts it (best effort otherwise).
 	if s.sender != nil {
-		_, _ = s.sender.SendEnvelope(ctx, peer.MachineID, core.KindControlResumed, "", "", core.EmptyBody{})
+		_, _ = s.sender.SendEnvelope(ctx, peer.MachineID, core.KindControlResumed, "", core.EmptyBody{})
 	}
 	s.forget(pendingID)
 	_ = s.audit.Record(audit.Event{TS: s.clock.Now(), Type: audit.EvPair, Peer: peer.MachineID, Alias: clean,

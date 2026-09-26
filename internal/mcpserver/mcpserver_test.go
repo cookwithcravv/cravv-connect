@@ -230,11 +230,11 @@ func TestStructuredToolsReturnJSON(t *testing.T) {
 	})
 	d.start()
 	cs, _ := connect(t, d, "claude-code")
-	text, isErr := callTool(t, cs, "create_task", map[string]any{"to": "gpu-box", "instructions": "train", "file_paths": []string{"a.py"}})
+	text, isErr := callTool(t, cs, "create_task", map[string]any{"link": 3, "instructions": "train", "file_paths": []string{"a.py"}})
 	if isErr || text != "{\n  \"task_id\": \"T1\"\n}" {
 		t.Fatalf("%v %q", isErr, text)
 	}
-	if created.To != "gpu-box" || created.Instructions != "train" || !slices.Equal(created.FilePaths, []string{"a.py"}) {
+	if created.Link != 3 || created.Instructions != "train" || !slices.Equal(created.FilePaths, []string{"a.py"}) {
 		t.Fatalf("params %+v", created)
 	}
 	text, isErr = callTool(t, cs, "claim_task", map[string]any{"task_id": "T1"})
@@ -246,7 +246,7 @@ func TestStructuredToolsReturnJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(text), &st); err != nil || st.Session != "claude@glow-v2" || st.MachineID != "m1" {
 		t.Fatalf("status %v %q", err, text)
 	}
-	if _, isErr := callTool(t, cs, "create_task", map[string]any{"to": "gpu-box"}); !isErr {
+	if _, isErr := callTool(t, cs, "create_task", map[string]any{"link": 3}); !isErr {
 		t.Fatal("missing required instructions accepted")
 	}
 }
@@ -278,12 +278,12 @@ func TestDaemonDownThenUp(t *testing.T) {
 		return ipc.IDResult{ID: "M1"}, nil
 	})
 	cs, _ := connect(t, d, "claude-code") // daemon not started yet
-	text, isErr := callTool(t, cs, "send_message", map[string]any{"to": "gpu-box", "text": "hi"})
+	text, isErr := callTool(t, cs, "send_message", map[string]any{"link": 3, "text": "hi"})
 	if !isErr || text != "daemon not running: run `cravv-connect daemon start`" {
 		t.Fatalf("down: %v %q", isErr, text)
 	}
 	d.start()
-	text, isErr = callTool(t, cs, "send_message", map[string]any{"to": "gpu-box", "text": "hi"})
+	text, isErr = callTool(t, cs, "send_message", map[string]any{"link": 3, "text": "hi"})
 	if isErr || !strings.Contains(text, `"id": "M1"`) {
 		t.Fatalf("up: %v %q", isErr, text)
 	}

@@ -37,12 +37,12 @@ func (f *flakyInbox) failNext(n int) {
 // d2FlakyTasks is d2Tasks with an inbox whose writes can be made to fail.
 func d2FlakyTasks(t *testing.T) (*d2TaskEnv, *flakyInbox) {
 	t.Helper()
-	e := d2Tasks(t)
+	e := d2Tasks(t, core.PermTasksAuto)
 	flaky := &flakyInbox{InboxStore: e.st}
-	e.inbox = NewInboxService(flaky, e.reg, e.st, e.clock)
+	e.inbox = NewInboxService(flaky, e.shared, e.st, e.st, e.clock)
 	e.tasks = NewTaskService(TaskDeps{
-		Tasks: e.st, Peers: e.st, Resolver: d2Resolver{e.st}, Inbox: e.inbox, Sender: e.sender,
-		Policy: TrustPolicy{}, Files: e.files, Desktop: e.desktop, Clock: e.clock, Audit: e.audit,
+		Tasks: e.st, Peers: e.st, Links: e.links, Lookup: e.st, Inbox: e.inbox, Sender: e.sender,
+		Files: e.files, Desktop: e.desktop, Clock: e.clock, Audit: e.audit,
 	})
 	return e, flaky
 }
@@ -63,19 +63,16 @@ func handleRetry(t *testing.T, flaky *flakyInbox, h func() error) {
 	}
 }
 
-func inboxFor(t *testing.T, e *d2TaskEnv, taskID string) []InboxEntry {
+// inboxFor returns the session's inbox items for a task, read or not.
+func inboxFor(t *testing.T, e *d2TaskEnv, taskID string) []store.InboxItem {
 	t.Helper()
-	session, err := e.reg.Register(context.Background(), "claude", "/w/fresh-"+taskID)
+	all, err := e.st.SessionItems(context.Background(), e.session.ID, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	all, err := e.inbox.Check(context.Background(), session, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out []InboxEntry
+	var out []store.InboxItem
 	for _, it := range all {
-		if it.Item.TaskID == taskID {
+		if it.TaskID == taskID {
 			out = append(out, it)
 		}
 	}
@@ -85,10 +82,9 @@ func inboxFor(t *testing.T, e *d2TaskEnv, taskID string) []InboxEntry {
 func TestHandleCreateRedeliversAfterRetryableFailure(t *testing.T) {
 	ctx := context.Background()
 	e, flaky := d2FlakyTasks(t)
-	peer, _ := d2Peer(t, e.st, "gpu-box", core.TrustAutonomous)
 	id := core.NewID()
-	env := d2Env(t, peer, core.KindTaskCreate, "codex@train", "", core.TaskCreateBody{TaskID: id, Instructions: "work"})
-	handleRetry(t, flaky, func() error { return e.tasks.HandleCreate(ctx, peer, env) })
+	env := d2Env(t, e.peer, core.KindTaskCreate, e.link.ID, core.TaskCreateBody{TaskID: id, Instructions: "work"})
+	handleRetry(t, flaky, func() error { return e.tasks.HandleCreate(withLink(ctx, e.link), e.peer, env) })
 	if tk := e.state(t, id); tk.State != core.TaskQueued {
 		t.Fatalf("state %s", tk.State)
 	}
@@ -100,25 +96,24 @@ func TestHandleCreateRedeliversAfterRetryableFailure(t *testing.T) {
 func TestHandleUpdateIsRetrySafe(t *testing.T) {
 	ctx := context.Background()
 	e, flaky := d2FlakyTasks(t)
-	peer, _ := d2Peer(t, e.st, "gpu-box", core.TrustAutonomous)
-	id, err := e.tasks.Create(ctx, "claude@proj", "/w/proj", "gpu-box", "work", nil)
+	id, err := e.tasks.Create(ctx, e.session.ID, "/w/proj", e.link.Num, "work", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	running := d2Env(t, peer, core.KindTaskUpdate, "codex@train", "claude@proj", core.TaskUpdateBody{TaskID: id, State: core.TaskRunning, Note: "halfway"})
-	handleRetry(t, flaky, func() error { return e.tasks.HandleUpdate(ctx, peer, running) })
+	lctx := withLink(ctx, e.link)
+	running := d2Env(t, e.peer, core.KindTaskUpdate, e.link.ID, core.TaskUpdateBody{TaskID: id, State: core.TaskRunning, Note: "halfway"})
+	handleRetry(t, flaky, func() error { return e.tasks.HandleUpdate(lctx, e.peer, running) })
 	if tk := e.state(t, id); tk.State != core.TaskRunning || len(tk.Notes) != 1 {
 		t.Fatalf("after running update: %s notes %+v", tk.State, tk.Notes)
 	}
 
-	done := d2Env(t, peer, core.KindTaskUpdate, "codex@train", "claude@proj", core.TaskUpdateBody{TaskID: id, State: core.TaskDone, Result: "42"})
-	handleRetry(t, flaky, func() error { return e.tasks.HandleUpdate(ctx, peer, done) })
+	done := d2Env(t, e.peer, core.KindTaskUpdate, e.link.ID, core.TaskUpdateBody{TaskID: id, State: core.TaskDone, Result: "42"})
+	handleRetry(t, flaky, func() error { return e.tasks.HandleUpdate(lctx, e.peer, done) })
 	if tk := e.state(t, id); tk.State != core.TaskDone || tk.Result != "42" {
 		t.Fatalf("after done update: %+v", tk)
 	}
 	items := inboxFor(t, e, id)
-	if len(items) != 2 || items[0].Item.MsgID != running.ID || items[1].Item.MsgID != done.ID {
+	if len(items) != 2 || items[0].MsgID != running.ID || items[1].MsgID != done.ID {
 		t.Fatalf("inbox = %+v, want the running and done updates once each", items)
 	}
 }
@@ -126,14 +121,13 @@ func TestHandleUpdateIsRetrySafe(t *testing.T) {
 func TestHandleCancelIsRetrySafe(t *testing.T) {
 	ctx := context.Background()
 	e, flaky := d2FlakyTasks(t)
-	peer, _ := d2Peer(t, e.st, "gpu-box", core.TrustAutonomous)
-	id := e.incoming(t, peer, "", "work")
-	if _, err := e.tasks.Claim(ctx, "claude@proj", id); err != nil {
+	id := e.incoming(t, "work")
+	if _, err := e.tasks.Claim(ctx, e.session.ID, id); err != nil {
 		t.Fatal(err)
 	}
 	before := len(inboxFor(t, e, id))
-	cancel := d2Env(t, peer, core.KindTaskCancel, "codex@train", "", core.TaskCancelBody{TaskID: id})
-	handleRetry(t, flaky, func() error { return e.tasks.HandleCancel(ctx, peer, cancel) })
+	cancel := d2Env(t, e.peer, core.KindTaskCancel, e.link.ID, core.TaskCancelBody{TaskID: id})
+	handleRetry(t, flaky, func() error { return e.tasks.HandleCancel(withLink(ctx, e.link), e.peer, cancel) })
 	if tk := e.state(t, id); tk.State != core.TaskCancelled || len(tk.Notes) != 1 {
 		t.Fatalf("after cancel: %s notes %+v", tk.State, tk.Notes)
 	}

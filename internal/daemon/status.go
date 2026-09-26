@@ -16,10 +16,10 @@ type DaemonStatus struct {
 	Killed           bool
 	Peers            []store.Peer
 	Online           map[core.MachineID]bool // relay connected and the peer was heard from within OnlineWindow
-	Sessions         []string                // connected sessions
+	Sessions         []string                // shared sessions that are open or away, as name (state)
 	OutboxPending    int
 	OutboxHeld       int
-	InboxUnread      int // summed over connected sessions
+	InboxUnread      int // summed over open and away shared sessions
 	PendingApprovals int
 	Errors           []string
 }
@@ -38,7 +38,7 @@ type StatusDeps struct {
 	Killed     func() bool
 	Peers      store.PeerStore
 	Outbox     OutboxCounter
-	Sessions   *SessionRegistry
+	Shared     *SessionService
 	Inbox      *InboxService
 	Tasks      *TaskService
 	Activity   *PeerActivity
@@ -66,16 +66,13 @@ func (s *StatusService) Status(ctx context.Context) (DaemonStatus, error) {
 	for _, p := range peers {
 		st.Online[p.MachineID] = connected && !p.Paused && !p.PausedByPeer && s.d.Activity.Online(p.MachineID)
 	}
-	sessions, err := s.d.Sessions.List(ctx)
+	sessions, err := s.d.Shared.List(ctx, core.SessionOpen, core.SessionAway)
 	if err != nil {
 		return st, err
 	}
 	for _, rec := range sessions {
-		if !rec.Connected {
-			continue
-		}
-		st.Sessions = append(st.Sessions, rec.Name)
-		byAlias, err := s.d.Inbox.Unread(ctx, rec.Name)
+		st.Sessions = append(st.Sessions, rec.Name+" ("+string(rec.State)+")")
+		byAlias, err := s.d.Inbox.Unread(ctx, rec.ID)
 		if err != nil {
 			return st, err
 		}

@@ -9,19 +9,19 @@ import (
 )
 
 func (h *handlers) registerTasks(s *ipc.Server) {
-	s.Register(ipc.MethodTaskCreate, ipc.Typed(h.taskCreate), ipc.GateSession)
-	s.Register(ipc.MethodTaskGet, ipc.Typed(h.taskByID(h.p.Tasks.Get)), ipc.GateSession)
-	s.Register(ipc.MethodTaskClaim, ipc.Typed(h.taskByID(h.p.Tasks.Claim)), ipc.GateSession)
-	s.Register(ipc.MethodTaskCancel, ipc.Typed(h.taskByID(h.p.Tasks.Cancel)), ipc.GateSession)
-	s.Register(ipc.MethodTaskUpdate, ipc.Typed(h.taskUpdate), ipc.GateSession)
-	s.Register(ipc.MethodTaskComplete, ipc.Typed(h.taskComplete), ipc.GateSession)
-	s.Register(ipc.MethodTaskFail, ipc.Typed(h.taskFail), ipc.GateSession)
+	s.Register(ipc.MethodTaskCreate, ipc.Typed(h.taskCreate), ipc.GateShared)
+	s.Register(ipc.MethodTaskGet, ipc.Typed(h.taskByID(h.p.Tasks.Get)), ipc.GateShared)
+	s.Register(ipc.MethodTaskClaim, ipc.Typed(h.taskByID(h.p.Tasks.Claim)), ipc.GateShared)
+	s.Register(ipc.MethodTaskCancel, ipc.Typed(h.taskByID(h.p.Tasks.Cancel)), ipc.GateShared)
+	s.Register(ipc.MethodTaskUpdate, ipc.Typed(h.taskUpdate), ipc.GateShared)
+	s.Register(ipc.MethodTaskComplete, ipc.Typed(h.taskComplete), ipc.GateShared)
+	s.Register(ipc.MethodTaskFail, ipc.Typed(h.taskFail), ipc.GateShared)
 	s.Register(ipc.MethodApprovalsList, ipc.Typed(h.approvalsList), ipc.GateUnlock)
 	s.Register(ipc.MethodApprovalsDecide, ipc.Typed(h.approvalsDecide), ipc.GateUnlock)
 }
 
 func (h *handlers) taskCreate(ctx context.Context, cs *ipc.ConnState, p ipc.TaskCreateParams) (any, error) {
-	if err := required("to", p.To); err != nil {
+	if err := linkNumber(p.Link); err != nil {
 		return nil, err
 	}
 	if err := required("instructions", p.Instructions); err != nil {
@@ -30,7 +30,7 @@ func (h *handlers) taskCreate(ctx context.Context, cs *ipc.ConnState, p ipc.Task
 	if len(p.Instructions) > core.MaxTextBytes {
 		return nil, core.ErrTooLarge
 	}
-	id, err := h.p.Tasks.Create(ctx, cs.Session(), cs.ProjectDir(), p.To, p.Instructions, p.FilePaths)
+	id, err := h.p.Tasks.Create(ctx, cs.Shared(), cs.ProjectDir(), p.Link, p.Instructions, p.FilePaths)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func (h *handlers) taskByID(op func(ctx context.Context, session, id string) (st
 		if err := required("task_id", p.TaskID); err != nil {
 			return nil, err
 		}
-		return h.taskResult(ctx)(op(ctx, cs.Session(), p.TaskID))
+		return h.taskResult(ctx)(op(ctx, cs.Shared(), p.TaskID))
 	}
 }
 
@@ -57,7 +57,7 @@ func (h *handlers) taskUpdate(ctx context.Context, cs *ipc.ConnState, p ipc.Task
 	if len(p.Note) > core.MaxTextBytes {
 		return nil, core.ErrTooLarge
 	}
-	return h.taskResult(ctx)(h.p.Tasks.Update(ctx, cs.Session(), p.TaskID, p.Note))
+	return h.taskResult(ctx)(h.p.Tasks.Update(ctx, cs.Shared(), p.TaskID, p.Note))
 }
 
 func (h *handlers) taskComplete(ctx context.Context, cs *ipc.ConnState, p ipc.TaskCompleteParams) (any, error) {
@@ -67,7 +67,7 @@ func (h *handlers) taskComplete(ctx context.Context, cs *ipc.ConnState, p ipc.Ta
 	if len(p.Result) > core.MaxTextBytes {
 		return nil, core.ErrTooLarge
 	}
-	return h.taskResult(ctx)(h.p.Tasks.Complete(ctx, cs.Session(), cs.ProjectDir(), p.TaskID, p.Result, p.FilePaths))
+	return h.taskResult(ctx)(h.p.Tasks.Complete(ctx, cs.Shared(), cs.ProjectDir(), p.TaskID, p.Result, p.FilePaths))
 }
 
 func (h *handlers) taskFail(ctx context.Context, cs *ipc.ConnState, p ipc.TaskFailParams) (any, error) {
@@ -77,7 +77,7 @@ func (h *handlers) taskFail(ctx context.Context, cs *ipc.ConnState, p ipc.TaskFa
 	if len(p.Reason) > core.MaxTextBytes {
 		return nil, core.ErrTooLarge
 	}
-	return h.taskResult(ctx)(h.p.Tasks.Fail(ctx, cs.Session(), p.TaskID, p.Reason))
+	return h.taskResult(ctx)(h.p.Tasks.Fail(ctx, cs.Shared(), p.TaskID, p.Reason))
 }
 
 func (h *handlers) taskResult(ctx context.Context) func(store.Task, error) (any, error) {

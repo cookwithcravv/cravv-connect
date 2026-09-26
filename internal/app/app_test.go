@@ -116,12 +116,22 @@ func TestAgainstRealDaemon(t *testing.T) {
 	if ra.Name != "claude@proj" || rb.Name != "claude@proj-2" {
 		t.Fatalf("names %q %q", ra.Name, rb.Name)
 	}
+	var sh ipc.ShareResult
+	if err := a.Call(ctx, ipc.MethodSessionShare, ipc.SessionShareParams{Name: "lead", Visibility: "all-peers"}, &sh); err != nil {
+		t.Fatal(err)
+	}
+	if sh.WakeToken == "" || sh.ReattachToken == "" || sh.Session.Name != "lead" || sh.Session.Visibility != "all-peers" || sh.Session.Agent != "claude" {
+		t.Fatalf("share %+v", sh)
+	}
+	if err := b.Call(ctx, ipc.MethodSessionShare, ipc.SessionShareParams{Name: "second"}, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	var st ipc.StatusResult
 	if err := a.Call(ctx, ipc.MethodStatus, nil, &st); err != nil {
 		t.Fatal(err)
 	}
-	if len(st.MachineID) != 52 || st.DeviceName != "test-mac" || st.RelayConnected || !slices.Contains(st.Sessions, "claude@proj") {
+	if len(st.MachineID) != 52 || st.DeviceName != "test-mac" || st.RelayConnected || !slices.Contains(st.Sessions, "lead (open)") {
 		t.Fatalf("status %+v", st)
 	}
 	var pl ipc.PeerListResult
@@ -136,8 +146,8 @@ func TestAgainstRealDaemon(t *testing.T) {
 	if err := a.Call(ctx, ipc.MethodHookCounts, ipc.HookCountsParams{Cwd: proj}, &hc); err != nil || hc.Notice != "" {
 		t.Fatalf("hook %v %+v", err, hc)
 	}
-	if err := a.Call(ctx, ipc.MethodChatSend, ipc.ChatSendParams{To: "nobody", Text: "hi"}, nil); !errors.Is(err, core.ErrNotFound) {
-		t.Fatalf("chat to unknown peer: %v", err)
+	if err := a.Call(ctx, ipc.MethodChatSend, ipc.ChatSendParams{Link: 99, Text: "hi"}, nil); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("chat on an unknown link: %v", err)
 	}
 
 	if err := a.Call(ctx, ipc.MethodAllowPathAdd, ipc.AllowPathParams{Path: proj}, nil); !errors.Is(err, core.ErrAuthRequired) {
@@ -165,9 +175,9 @@ func TestAgainstRealDaemon(t *testing.T) {
 	// The daemon's outbound queue accepts envelopes while killed, so the IPC
 	// kill gate must refuse every send.
 	for m, params := range map[string]any{
-		ipc.MethodChatSend:   ipc.ChatSendParams{To: "nobody", Text: "hi"},
-		ipc.MethodTaskCreate: ipc.TaskCreateParams{To: "nobody", Instructions: "go"},
-		ipc.MethodFileSend:   ipc.FileSendParams{To: "nobody", Path: "a.txt"},
+		ipc.MethodChatSend:   ipc.ChatSendParams{Link: 1, Text: "hi"},
+		ipc.MethodTaskCreate: ipc.TaskCreateParams{Link: 1, Instructions: "go"},
+		ipc.MethodFileSend:   ipc.FileSendParams{Link: 1, Path: "a.txt"},
 	} {
 		if err := a.Call(ctx, m, params, nil); !ipc.IsKind(err, ipc.KindKilled) {
 			t.Fatalf("%s while killed: %v", m, err)

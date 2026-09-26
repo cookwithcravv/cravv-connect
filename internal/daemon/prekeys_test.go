@@ -63,9 +63,9 @@ func TestPrekeyEnsureCurrentIsIdempotent(t *testing.T) {
 func TestPrekeyRotateIfDue(t *testing.T) {
 	f := newPrekeyFixture(t)
 	ctx := context.Background()
-	peerA := newTestPeer(t, "a", core.TrustAskFirst)
-	peerB := newTestPeer(t, "b", core.TrustAskFirst)
-	paused := newTestPeer(t, "p", core.TrustAskFirst)
+	peerA := newTestPeer(t, "a")
+	peerB := newTestPeer(t, "b")
+	paused := newTestPeer(t, "p")
 	paused.rec.Paused = true
 	for _, p := range []testPeer{peerA, peerB, paused} {
 		mustPut(t, f.peers, p.rec)

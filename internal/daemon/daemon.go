@@ -51,6 +51,7 @@ type services struct {
 	replies  *LinkReplies
 	links    *LinkService
 	presence *PresenceService
+	versions *VersionNotices
 	prekeys  *PrekeyManager
 	pairing  *PairingService
 	tasks    *TaskService
@@ -430,9 +431,6 @@ func (d *Daemon) maintain(ctx context.Context, g *services) error {
 	}
 	if _, err := g.links.PurgeClosed(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("purge closed links: %w", err))
-	}
-	if _, err := g.tasks.AbandonStaleCLIClaims(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("abandon stale cli claims: %w", err))
 	}
 	if err := d.sessions.Sweep(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("sweep sessions: %w", err))

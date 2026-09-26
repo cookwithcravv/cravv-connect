@@ -231,27 +231,14 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 	} else {
 		d.registered.Store(ok && v == "1")
 	}
-	d.sessions = NewSessionRegistry(db, db, opts.Clock)
+	d.sessions = NewSessionRegistry(db, opts.Clock)
 	if err := d.sessions.DisconnectAll(ctx); err != nil {
 		return nil, err
 	}
 	d.shared = NewSessionService(db, opts.Clock)
 	d.shared.AddObserver(sessionLinks{d})
-	d.inbox = NewInboxService(db, d.sessions, db, opts.Clock)
+	d.inbox = NewInboxService(db, d.shared, db, db, opts.Clock)
 	d.attend = NewAttentionService(d.shared, db, db, d.inbox)
-	d.sessions.OnExpired(func(ctx context.Context, rec store.SessionRecord) {
-		if rec.Agent == CLIAgent {
-			return // CLI sessions keep their claimed tasks (a later cli@<dir> continues them)
-		}
-		if err := d.svc.Load().tasks.AbandonSession(ctx, rec.Name); err != nil {
-			d.log.Warn("abandon tasks", "session", rec.Name, "err", err)
-		}
-	})
-	d.sessions.OnExpired(func(ctx context.Context, rec store.SessionRecord) {
-		if err := d.inbox.RedirectOrphans(ctx, rec.Name); err != nil {
-			d.log.Warn("redirect orphans", "session", rec.Name, "err", err)
-		}
-	})
 	d.svc.Store(d.build(identity))
 	// No connection survives a restart: every open session is away until
 	// its client reattaches (links stay open for the away grace).
@@ -303,47 +290,56 @@ func (d *Daemon) build(id *keys.Identity) *services {
 		Inbox: d.inbox, Desktop: d.opts.Desktop, Clock: clock, Audit: lg, Log: d.log,
 	})
 	g.presence = NewPresenceService(db, db, g.links, g.outbound, clock, d.log)
+	g.versions = NewVersionNotices()
 	g.prekeys = NewPrekeyManager(db, db, id, g.outbound, clock)
 	g.files = NewFileService(FileDeps{
-		Blobs: func() transport.BlobStore { return d.blobs(id) }, Peers: db, Files: db, Inbox: d.inbox,
+		Blobs: func() transport.BlobStore { return d.blobs(id) }, Peers: db, Links: db, Files: db, Inbox: d.inbox,
 		Sender: g.outbound, Guard: d.allow, FilesDir: d.opts.Paths.Files, Quota: d.opts.Config.PeerQuota,
-		Policy: TrustPolicy{}, Clock: clock, Audit: lg, Log: d.log, RetryDelay: d.opts.FileRetryDelay,
+		Policy: PermissionPolicy{}, Clock: clock, Audit: lg, Log: d.log, RetryDelay: d.opts.FileRetryDelay,
 		Killed: d.kill.Killed,
 	})
 	g.tasks = NewTaskService(TaskDeps{
-		Tasks: db, Peers: db, Resolver: g.peers, Inbox: d.inbox, Sender: g.outbound, Policy: TrustPolicy{},
-		Files: g.files, Desktop: d.opts.Desktop, Clock: clock, Audit: lg,
+		Tasks: db, Peers: db, Links: g.links, Lookup: db, Inbox: d.inbox, Sender: g.outbound,
+		Policy: PermissionPolicy{}, Files: g.files, Desktop: d.opts.Desktop, Clock: clock, Audit: lg,
 	})
-	g.peers.AddTrustObserver(g.tasks)
 	g.peers.AddCutOffObserver(g.tasks)
 	g.peers.AddCutOffObserver(g.files)
 	g.peers.AddCutOffObserver(g.links)
+	// A closed link fails its tasks, declines its held files and drops what
+	// an away session had not read yet.
+	g.links.AddCloseObserver(g.tasks)
+	g.links.AddCloseObserver(g.files)
+	g.links.AddCloseObserver(d.inbox)
+	g.links.AddLowerObserver(g.tasks)
 	g.inbound = NewInbound(id, db, db, g.prekeys, g.registry, g.outbound, clock, d.kill.Killed, d.log)
 	g.pairing = NewPairingService(id, d.rooms(), d, pake.SPAKE2{}, db, g.prekeys, g.outbound, d,
 		PairingConfig{DeviceName: d.opts.Config.DeviceName, RelayURL: d.opts.Config.RelayURL}, clock, lg)
-	registerHandlers(g, d.inbox, db)
+	registerHandlers(g, d.inbox, d.shared, db)
 	g.status = NewStatusService(StatusDeps{
 		MachineID: id.MachineID(), DeviceName: d.opts.Config.DeviceName, RelayURL: d.opts.Config.RelayURL,
-		Mailboxes: d, Killed: d.kill.Killed, Peers: db, Outbox: db, Sessions: d.sessions, Inbox: d.inbox,
+		Mailboxes: d, Killed: d.kill.Killed, Peers: db, Outbox: db, Shared: d.shared, Inbox: d.inbox,
 		Tasks: g.tasks, Activity: g.activity,
-		Errors: []func() []string{d.authErrors, d.relayErrors, g.outbound.Errors, inboundWarnings(g.inbound)},
+		Errors: []func() []string{d.authErrors, d.relayErrors, g.outbound.Errors, inboundWarnings(g.inbound), g.versions.Errors},
 	})
 	return g
 }
 
 // registerHandlers is the single place message kinds are bound to handlers.
-func registerHandlers(g *services, inbox *InboxService, peers store.PeerStore) {
+func registerHandlers(g *services, inbox *InboxService, sessions SessionLookup, db store.Store) {
 	r := g.registry
-	r.Register(core.KindChat, NewChatHandler(inbox))
-	// task.create and file.offer pass the trust policy centrally (spec 7.1): a rejected
-	// item never reaches the service's main handler.
-	r.Register(core.KindTaskCreate, PolicyGate{
-		Inner: HandlerFunc(g.tasks.HandleCreate), OnReject: HandlerFunc(g.tasks.RejectCreate)})
-	r.Register(core.KindTaskUpdate, HandlerFunc(g.tasks.HandleUpdate))
-	r.Register(core.KindTaskCancel, HandlerFunc(g.tasks.HandleCancel))
-	r.Register(core.KindFileOffer, PolicyGate{
-		Inner: HandlerFunc(g.files.HandleOffer), OnReject: HandlerFunc(g.files.RejectOffer)})
-	RegisterControlHandlers(r, peers, g.peers, g.outbound)
+	// Every link-scoped kind passes the LinkGate (v2 spec 10): an envelope
+	// without an active link, from the wrong machine, or not permitted on
+	// the link never reaches the service's main handler.
+	gate := func(inner, onReject Handler) Handler {
+		return LinkGate{Links: db, Sessions: sessions, Replies: g.versions.Replier(g.replies), Inner: inner, OnReject: onReject}
+	}
+	r.Register(core.KindChat, gate(NewChatHandler(inbox), nil))
+	r.Register(core.KindTaskCreate, gate(HandlerFunc(g.tasks.HandleCreate), HandlerFunc(g.tasks.RejectCreate)))
+	r.Register(core.KindTaskUpdate, gate(HandlerFunc(g.tasks.HandleUpdate), nil))
+	r.Register(core.KindTaskCancel, gate(HandlerFunc(g.tasks.HandleCancel), nil))
+	r.Register(core.KindFileOffer, gate(HandlerFunc(g.files.HandleOffer), HandlerFunc(g.files.RejectOffer)))
+	RegisterControlHandlers(r, db, g.peers, g.outbound)
+	r.Register(core.KindControlUnsupported, HandlerFunc(g.versions.HandleUnsupported))
 	r.Register(core.KindSessionsList, HandlerFunc(g.discover.HandleList))
 	r.Register(core.KindSessionsListed, HandlerFunc(g.discover.HandleListed))
 	r.Register(core.KindLinkRequest, HandlerFunc(g.links.HandleRequest))
@@ -356,7 +352,7 @@ func registerHandlers(g *services, inbox *InboxService, peers store.PeerStore) {
 	g.activity.WrapAll(r,
 		core.KindChat, core.KindTaskCreate, core.KindTaskUpdate, core.KindTaskCancel, core.KindFileOffer,
 		core.KindControlPrekey, core.KindControlStalePrekey, core.KindControlDelivered, core.KindControlPaused,
-		core.KindControlResumed, core.KindControlUnpaired, core.KindControlRelayMoved,
+		core.KindControlResumed, core.KindControlUnpaired, core.KindControlRelayMoved, core.KindControlUnsupported,
 		core.KindSessionsList, core.KindSessionsListed, core.KindLinkRequest, core.KindLinkAccepted,
 		core.KindLinkRejected, core.KindLinkClosed, core.KindLinkState, core.KindPresencePing, core.KindPresencePong)
 }

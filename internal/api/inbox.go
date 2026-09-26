@@ -15,8 +15,8 @@ const (
 )
 
 func (h *handlers) registerInbox(s *ipc.Server) {
-	s.Register(ipc.MethodInboxCheck, ipc.Typed(h.inboxCheck), ipc.GateSession)
-	s.Register(ipc.MethodInboxWait, ipc.Typed(h.inboxWait), ipc.GateSession)
+	s.Register(ipc.MethodInboxCheck, ipc.Typed(h.inboxCheck), ipc.GateShared)
+	s.Register(ipc.MethodInboxWait, ipc.Typed(h.inboxWait), ipc.GateShared)
 }
 
 func (h *handlers) inboxCheck(ctx context.Context, cs *ipc.ConnState, p ipc.InboxCheckParams) (any, error) {
@@ -25,7 +25,7 @@ func (h *handlers) inboxCheck(ctx context.Context, cs *ipc.ConnState, p ipc.Inbo
 		limit = DefaultInboxLimit
 	}
 	limit = min(limit, MaxInboxLimit)
-	items, err := h.p.Inbox.Check(ctx, cs.Session(), limit)
+	items, err := h.p.Inbox.Check(ctx, cs.Shared(), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +42,7 @@ func WaitTimeout(seconds int) time.Duration {
 }
 
 func (h *handlers) inboxWait(ctx context.Context, cs *ipc.ConnState, p ipc.InboxWaitParams) (any, error) {
-	items, err := h.p.Inbox.Wait(ctx, cs.Session(), WaitTimeout(p.TimeoutS))
+	items, err := h.p.Inbox.Wait(ctx, cs.Shared(), WaitTimeout(p.TimeoutS))
 	if err != nil {
 		return nil, err
 	}

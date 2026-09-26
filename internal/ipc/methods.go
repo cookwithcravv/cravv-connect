@@ -75,8 +75,9 @@ type SessionRegisterResult struct {
 	Name string `json:"name"`
 }
 
+// ChatSendParams sends chat on a link of the session shared on this connection.
 type ChatSendParams struct {
-	To   string `json:"to"`
+	Link int64  `json:"link"`
 	Text string `json:"text"`
 }
 type IDResult struct {
@@ -94,7 +95,7 @@ type InboxResult struct {
 }
 
 type TaskCreateParams struct {
-	To           string   `json:"to"`
+	Link         int64    `json:"link"`
 	Instructions string   `json:"instructions"`
 	FilePaths    []string `json:"file_paths,omitempty"`
 }
@@ -119,7 +120,7 @@ type TaskFailParams struct {
 }
 
 type FileSendParams struct {
-	To   string `json:"to"`
+	Link int64  `json:"link"`
 	Path string `json:"path"`
 }
 type FileSendResult struct {
@@ -217,6 +218,7 @@ type InboxView struct {
 	ID      string    `json:"id"`
 	From    string    `json:"from"`
 	Session string    `json:"session,omitempty"`
+	Link    int64     `json:"link,omitempty"`
 	Kind    string    `json:"kind"`
 	TaskID  string    `json:"task_id,omitempty"`
 	FileID  string    `json:"file_id,omitempty"`

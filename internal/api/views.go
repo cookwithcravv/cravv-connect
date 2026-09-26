@@ -32,15 +32,14 @@ func PeerViewOf(p store.Peer, relayConnected bool) ipc.PeerView {
 	}
 }
 
-// peerLabel returns the local alias and trust label for a machine. Unknown
-// (for example unpaired) machines show their short machine ID, never a
-// peer-chosen name.
-func (h *handlers) peerLabel(ctx context.Context, id core.MachineID) (alias, trust string) {
+// peerLabel returns the local alias for a machine. Unknown (for example
+// unpaired) machines show their short machine ID, never a peer-chosen name.
+func (h *handlers) peerLabel(ctx context.Context, id core.MachineID) string {
 	p, err := h.p.Peers.ByID(ctx, id)
 	if err != nil {
-		return id.Short(), "unpaired"
+		return id.Short()
 	}
-	return p.Alias, p.TrustIn.String()
+	return p.Alias
 }
 
 // taskView maps a task to its view. Peer-authored text is moved out of the
@@ -49,7 +48,7 @@ func (h *handlers) peerLabel(ctx context.Context, id core.MachineID) (alias, tru
 // that arrived in task.update messages (they carry a MsgID) and the result
 // file names.
 func (h *handlers) taskView(ctx context.Context, t store.Task) ipc.TaskView {
-	alias, trust := h.peerLabel(ctx, t.Peer)
+	alias := h.peerLabel(ctx, t.Peer)
 	v := ipc.TaskView{
 		TaskID: t.ID, Direction: string(t.Direction), Peer: alias, State: string(t.State),
 		ClaimedBy: t.ClaimedBy, UpdatedAt: t.UpdatedAt,
@@ -68,13 +67,14 @@ func (h *handlers) taskView(ctx context.Context, t store.Task) ipc.TaskView {
 	}
 	kind, peerSession := "task", t.FromSession
 	if t.Direction == store.TaskInbound {
+		v.ClaimedBy = "" // only the link's own session can claim it; its ID stays inside the daemon
 		v.Result, v.Notes = t.Result, t.Notes
 		section("Instructions", t.Instructions)
 		section("Files", fileList(t.Files))
 		v.Files = withoutNames(t.Files)
 		v.ResultFiles = t.ResultFiles
 	} else {
-		kind, peerSession = "task_update", t.ClaimedBy
+		kind, peerSession = "task_update", t.ToSession
 		// The claimer is the peer's session name, chosen by the peer.
 		v.ClaimedBy = present.CleanAttr(t.ClaimedBy)
 		v.Instructions, v.Files = t.Instructions, t.Files
@@ -93,7 +93,7 @@ func (h *handlers) taskView(ctx context.Context, t store.Task) ipc.TaskView {
 	}
 	if body.Len() > 0 {
 		v.Wrapped = present.Wrap(present.Item{
-			Alias: alias, Session: peerSession, Trust: trust, ID: t.ID, Kind: kind, TaskID: t.ID, Body: body.String(),
+			Alias: alias, Session: peerSession, ID: t.ID, Kind: kind, TaskID: t.ID, Body: body.String(),
 		})
 	}
 	return v
@@ -122,7 +122,7 @@ func withoutNames(fs []core.FileRef) []core.FileRef {
 }
 
 func (h *handlers) fileView(ctx context.Context, f store.FileRecord) ipc.FileView {
-	alias, _ := h.peerLabel(ctx, f.Peer)
+	alias := h.peerLabel(ctx, f.Peer)
 	return ipc.FileView{
 		FileID: f.FileID, Direction: string(f.Direction), Peer: alias, Name: f.Name,
 		State: string(f.State), Path: f.LocalPath, Reason: f.Reason, Size: f.Size,
@@ -130,7 +130,7 @@ func (h *handlers) fileView(ctx context.Context, f store.FileRecord) ipc.FileVie
 }
 
 func (h *handlers) approvalView(ctx context.Context, t store.Task) ipc.ApprovalView {
-	alias, _ := h.peerLabel(ctx, t.Peer)
+	alias := h.peerLabel(ctx, t.Peer)
 	sum := sha256.Sum256([]byte(t.Instructions))
 	return ipc.ApprovalView{
 		TaskID: t.ID, Peer: alias, Preview: truncateRunes(t.Instructions, PreviewRunes),

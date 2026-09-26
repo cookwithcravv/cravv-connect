@@ -80,8 +80,7 @@ func TestEnvelopeJSONRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env.FromSession = "claude@proj"
-		env.ToSession = "codex@repo"
+		env.LinkID = "01JLINK"
 		// Encode as sealing does (no HTML escaping); json.Marshal would
 		// re-escape the RawMessage body and change its bytes.
 		var buf bytes.Buffer
@@ -107,20 +106,20 @@ func TestEnvelopeJSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestEnvelopeJSONFieldNames(t *testing.T) {
-	env := Envelope{V: 1, ID: "I", TS: 7, FromMachine: "f", FromSession: "fs", ToMachine: "t", ToSession: "ts", Kind: KindChat, Body: json.RawMessage(`{}`)}
-	raw, err := json.Marshal(env)
+// v2 envelopes carry no session names: the receiver takes the sender's
+// session from its own link record. A v1 peer's from_session is ignored.
+func TestEnvelopeIgnoresSessionFields(t *testing.T) {
+	var env Envelope
+	raw := `{"v":1,"id":"I","ts":7,"from_machine":"f","from_session":"fs","to_machine":"t","to_session":"ts","kind":"chat","body":{}}`
+	if err := json.Unmarshal([]byte(raw), &env); err != nil {
+		t.Fatal(err)
+	}
+	out, err := json.Marshal(env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"v":1,"id":"I","ts":7,"from_machine":"f","from_session":"fs","to_machine":"t","to_session":"ts","kind":"chat","body":{}}`
-	if string(raw) != want {
-		t.Fatalf("json = %s\nwant   %s", raw, want)
-	}
-	env.FromSession, env.ToSession = "", ""
-	raw, _ = json.Marshal(env)
-	if strings.Contains(string(raw), "session") {
-		t.Fatalf("empty sessions must be omitted: %s", raw)
+	if strings.Contains(string(out), "session") {
+		t.Fatalf("session fields survived: %s", out)
 	}
 }
 

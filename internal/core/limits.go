@@ -24,7 +24,6 @@ const (
 	ApprovalExpiry     = 24 * time.Hour
 	UnclaimedExpiry    = 24 * time.Hour
 	ReclaimGrace       = 5 * time.Minute
-	NewSessionBacklog  = 24 * time.Hour
 	LockoutFailures    = 5
 	LockoutDuration    = 15 * time.Minute
 	UnlockTTL          = 10 * time.Minute

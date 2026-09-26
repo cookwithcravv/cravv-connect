@@ -118,7 +118,7 @@ func (m *PrekeyManager) broadcast(ctx context.Context, signed keys.SignedPrekey)
 		if p.Paused {
 			continue
 		}
-		if _, err := m.sender.SendEnvelope(ctx, p.MachineID, core.KindControlPrekey, "", "", body); err != nil {
+		if _, err := m.sender.SendEnvelope(ctx, p.MachineID, core.KindControlPrekey, "", body); err != nil {
 			errs = append(errs, err)
 		}
 	}

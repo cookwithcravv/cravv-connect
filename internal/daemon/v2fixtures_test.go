@@ -84,7 +84,7 @@ func (n *v2Net) node(name string) *v2Node {
 	v.discover = NewDiscovery(v.shared, v.peers, v.sender, n.clock, nil)
 	v.registry.Register(core.KindSessionsList, HandlerFunc(v.discover.HandleList))
 	v.registry.Register(core.KindSessionsListed, HandlerFunc(v.discover.HandleListed))
-	v.inbox = NewInboxService(st, NewSessionRegistry(st, st, n.clock), st, n.clock)
+	v.inbox = NewInboxService(st, v.shared, st, st, n.clock)
 	v.desktop = &d2Desktop{}
 	v.links = NewLinkService(LinkDeps{
 		Links: st, Sessions: v.shared, Peers: st, Directory: v.discover, Sender: v.sender,
@@ -205,16 +205,17 @@ func (n *v2Net) sent(kind core.Kind) []v2Frame {
 // v2Sender is a node's outbox and direct sender on the test network.
 type v2Sender struct{ node *v2Node }
 
-func (s *v2Sender) envelope(to core.MachineID, kind core.Kind, body any) (v2Frame, error) {
+func (s *v2Sender) envelope(to core.MachineID, kind core.Kind, linkID string, body any) (v2Frame, error) {
 	env, err := core.NewEnvelope(s.node.net.clock, s.node.id, to, kind, body)
 	if err != nil {
 		return v2Frame{}, err
 	}
+	env.LinkID = linkID
 	return v2Frame{from: s.node.id, to: to, env: env}, nil
 }
 
-func (s *v2Sender) SendEnvelope(_ context.Context, to core.MachineID, kind core.Kind, _, _ string, body any) (string, error) {
-	f, err := s.envelope(to, kind, body)
+func (s *v2Sender) SendEnvelope(_ context.Context, to core.MachineID, kind core.Kind, linkID string, body any) (string, error) {
+	f, err := s.envelope(to, kind, linkID, body)
 	if err != nil {
 		return "", err
 	}
@@ -227,7 +228,7 @@ func (s *v2Sender) SendEnvelope(_ context.Context, to core.MachineID, kind core.
 }
 
 func (s *v2Sender) SendDirect(_ context.Context, peer store.Peer, kind core.Kind, body any) error {
-	f, err := s.envelope(peer.MachineID, kind, body)
+	f, err := s.envelope(peer.MachineID, kind, "", body)
 	if err != nil {
 		return err
 	}

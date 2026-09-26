@@ -64,7 +64,7 @@ func TestInboundEphemeralFrames(t *testing.T) {
 func TestOutboxRefusesEphemeralKinds(t *testing.T) {
 	o := NewOutbound(nil, newMemPeers(), newMemOutbox(), &mailboxSlot{}, core.NewFakeClock(testEpoch), nil, nil)
 	for _, k := range []core.Kind{core.KindPresencePing, core.KindPresencePong, core.KindSessionsList, core.KindSessionsListed} {
-		if _, err := o.SendEnvelope(context.Background(), "m", k, "", "", core.EmptyBody{}); err == nil {
+		if _, err := o.SendEnvelope(context.Background(), "m", k, "", core.EmptyBody{}); err == nil {
 			t.Errorf("%s went into the outbox", k)
 		}
 	}

@@ -125,27 +125,53 @@ type d2FileEnv struct {
 	files    *FileService
 }
 
+// d2FileSvc is a FileService on the d2TaskEnv machine: gpu-box may send
+// messages (and so files) on the link to session "lead".
 func d2FileSvc(t *testing.T, quota int64) *d2FileEnv {
 	t.Helper()
-	e := &d2FileEnv{te: d2Tasks(t), blobs: newD2Blobs(), filesDir: filepath.Join(t.TempDir(), "files"), project: t.TempDir(), free: 1 << 40}
+	e := &d2FileEnv{te: d2Tasks(t, core.PermMessages), blobs: newD2Blobs(), filesDir: filepath.Join(t.TempDir(), "files"), project: t.TempDir(), free: 1 << 40}
 	e.files = NewFileService(FileDeps{
-		Blobs: func() transport.BlobStore { return e.blobs }, Peers: e.te.st, Files: e.te.st, Inbox: e.te.inbox,
+		Blobs: func() transport.BlobStore { return e.blobs }, Peers: e.te.st, Links: e.te.st, Files: e.te.st, Inbox: e.te.inbox,
 		Sender: e.te.sender, Guard: NewAllowPaths(e.te.st, e.te.audit), FilesDir: e.filesDir, Quota: quota,
-		Policy: TrustPolicy{}, Clock: e.te.clock, Audit: e.te.audit,
+		Clock: e.te.clock, Audit: e.te.audit,
 		FreeSpace: func(string) (uint64, error) { return e.free, nil },
 		Killed:    e.killed.Load,
 	})
+	e.te.links.AddCloseObserver(e.files)
 	return e
 }
 
-func (e *d2FileEnv) offer(t *testing.T, peer store.Peer, body core.FileOfferBody) core.Envelope {
+// offerOn runs a file.offer from peer on link l through the LinkGate.
+func (e *d2FileEnv) offerOn(t *testing.T, peer store.Peer, l store.Link, body core.FileOfferBody) core.Envelope {
 	t.Helper()
-	env := d2Env(t, peer, core.KindFileOffer, "codex@train", "", body)
-	if err := e.files.HandleOffer(context.Background(), peer, env); err != nil {
-		t.Fatalf("HandleOffer: %v", err)
+	env := d2Env(t, peer, core.KindFileOffer, l.ID, body)
+	g := d2Gated(e.te.st, e.te.shared, e.te.replies, HandlerFunc(e.files.HandleOffer), HandlerFunc(e.files.RejectOffer))
+	if err := g.Handle(context.Background(), peer, env); err != nil {
+		t.Fatalf("file.offer: %v", err)
 	}
 	e.files.Wait()
 	return env
+}
+
+// offer runs a file.offer from gpu-box on the environment's link.
+func (e *d2FileEnv) offer(t *testing.T, body core.FileOfferBody) core.Envelope {
+	t.Helper()
+	return e.offerOn(t, e.te.peer, e.te.link, body)
+}
+
+// hold stores fileID as an inbound file held on the environment's link, the
+// way an older version held files for a human to accept.
+func (e *d2FileEnv) hold(t *testing.T, fileID string, body core.FileOfferBody) {
+	t.Helper()
+	l := e.te.link
+	if err := e.te.st.PutFile(context.Background(), store.FileRecord{
+		FileID: fileID, Direction: store.TaskInbound, Peer: e.te.peer.MachineID, MsgID: core.NewID(), BlobID: body.BlobID,
+		Name: body.Name, Size: body.Size, Chunks: body.Chunks, SHA256: body.SHA256, Key: body.Key,
+		LinkID: l.ID, Session: l.Session, State: store.FileHeld,
+		LocalPath: filepath.Join(e.filesDir, "gpu-box", fileID+"-"+body.Name), CreatedAt: d2Epoch,
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (e *d2FileEnv) record(t *testing.T, id string) store.FileRecord {
@@ -167,12 +193,12 @@ func randomBytes(t *testing.T, n int) []byte {
 func TestSendFileUploadsAndOffers(t *testing.T) {
 	ctx := context.Background()
 	e := d2FileSvc(t, 0)
-	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
+	peer := e.te.peer
 	content := randomBytes(t, 2*core.FileChunkBytes+123)
 	if err := os.WriteFile(filepath.Join(e.project, "data.bin"), content, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ref, err := e.files.SendFile(ctx, peer.MachineID, e.project, "data.bin", "T1")
+	ref, err := e.files.SendFile(ctx, e.te.link, e.project, "data.bin", "T1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +206,7 @@ func TestSendFileUploadsAndOffers(t *testing.T) {
 		t.Fatalf("ref = %+v", ref)
 	}
 	sent := e.te.sender.ofKind(core.KindFileOffer)
-	if len(sent) != 1 || sent[0].To != peer.MachineID {
+	if len(sent) != 1 || sent[0].To != peer.MachineID || sent[0].LinkID != e.te.link.ID {
 		t.Fatalf("offers = %+v", sent)
 	}
 	var offer core.FileOfferBody
@@ -205,7 +231,8 @@ func TestSendFileUploadsAndOffers(t *testing.T) {
 	if len(ev) != 1 || ev[0].Hash != fmt.Sprintf("%x", sum) || ev[0].Alias != "gpu-box" {
 		t.Fatalf("audit = %+v", ev)
 	}
-	if r := e.record(t, ref.FileID); r.State != store.FileSent || r.Direction != store.TaskOutbound || r.MsgID != sent[0].ID {
+	if r := e.record(t, ref.FileID); r.State != store.FileSent || r.Direction != store.TaskOutbound || r.MsgID != sent[0].ID ||
+		r.LinkID != e.te.link.ID || r.Session != e.te.session.ID {
 		t.Fatalf("record = %+v", r)
 	}
 }
@@ -213,19 +240,19 @@ func TestSendFileUploadsAndOffers(t *testing.T) {
 func TestSendFileRefusesSecrets(t *testing.T) {
 	ctx := context.Background()
 	e := d2FileSvc(t, 0)
-	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
+	link := e.te.link
 	os.WriteFile(filepath.Join(e.project, ".env"), []byte("TOKEN=x"), 0o600)
 	outside := filepath.Join(t.TempDir(), "secret.txt")
 	os.WriteFile(outside, []byte("x"), 0o600)
 	for _, p := range []string{".env", outside} {
-		if _, err := e.files.SendFile(ctx, peer.MachineID, e.project, p, ""); !errors.Is(err, core.ErrPathRefused) {
+		if _, err := e.files.SendFile(ctx, link, e.project, p, ""); !errors.Is(err, core.ErrPathRefused) {
 			t.Errorf("SendFile(%s) err = %v, want ErrPathRefused", p, err)
 		}
 	}
 	if err := e.files.d.Guard.(*AllowPaths).Add(ctx, filepath.Dir(outside), true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.files.SendFile(ctx, peer.MachineID, e.project, outside, ""); err != nil {
+	if _, err := e.files.SendFile(ctx, link, e.project, outside, ""); err != nil {
 		t.Fatalf("allowed path refused: %v", err)
 	}
 	if len(e.te.audit.ofType(audit.EvAllowPath)) != 1 {
@@ -233,17 +260,17 @@ func TestSendFileRefusesSecrets(t *testing.T) {
 	}
 
 	os.WriteFile(filepath.Join(e.project, "ok.txt"), []byte("ok"), 0o600)
-	paused, _ := d2Peer(t, e.te.st, "paused", core.TrustAutonomous)
+	paused, _ := d2Peer(t, e.te.st, "paused")
 	paused.Paused = true
 	e.te.st.PutPeer(ctx, paused)
-	if _, err := e.files.SendFile(ctx, paused.MachineID, e.project, "ok.txt", ""); !errors.Is(err, core.ErrPaused) {
+	pausedLink := d2Link(t, e.te.st, paused, e.te.session, "x", core.PermMessages, core.PermMessages)
+	if _, err := e.files.SendFile(ctx, pausedLink, e.project, "ok.txt", ""); !errors.Is(err, core.ErrPaused) {
 		t.Fatalf("send to a peer we paused err = %v", err)
 	}
-	away, _ := d2Peer(t, e.te.st, "away", core.TrustAutonomous)
-	away.PausedByPeer = true
-	e.te.st.PutPeer(ctx, away)
-	if _, err := e.files.SendFile(ctx, away.MachineID, e.project, "ok.txt", ""); err != nil {
-		t.Fatalf("send to a peer that paused us: %v", err)
+	closed := link
+	closed.State = store.LinkClosed
+	if _, err := e.files.SendFile(ctx, closed, e.project, "ok.txt", ""); !errors.Is(err, core.ErrLinkClosed) {
+		t.Fatalf("send on a closed link err = %v", err)
 	}
 }
 
@@ -252,7 +279,6 @@ func TestSendFileRefusesSecrets(t *testing.T) {
 func TestSendFileRefusesHardlinkedSecret(t *testing.T) {
 	ctx := context.Background()
 	e := d2FileSvc(t, 0)
-	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
 	secret := filepath.Join(t.TempDir(), "secret.txt")
 	if err := os.WriteFile(secret, []byte("PRIVATE"), 0o600); err != nil {
 		t.Fatal(err)
@@ -260,7 +286,7 @@ func TestSendFileRefusesHardlinkedSecret(t *testing.T) {
 	if err := os.Link(secret, filepath.Join(e.project, "notes.txt")); err != nil {
 		t.Skipf("hard links unsupported here: %v", err)
 	}
-	if _, err := e.files.SendFile(ctx, peer.MachineID, e.project, "notes.txt", ""); !errors.Is(err, core.ErrPathRefused) {
+	if _, err := e.files.SendFile(ctx, e.te.link, e.project, "notes.txt", ""); !errors.Is(err, core.ErrPathRefused) {
 		t.Fatalf("SendFile(hard link) err = %v, want ErrPathRefused", err)
 	}
 	if n := len(e.te.sender.ofKind(core.KindFileOffer)); n != 0 {
@@ -277,15 +303,14 @@ func TestSendFileRefusesHardlinkedSecret(t *testing.T) {
 func TestReceiveFileRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	e := d2FileSvc(t, 0)
-	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
-	session, _ := e.te.reg.Register(ctx, "claude", "/w/p")
+	session := e.te.session.ID
 	content := randomBytes(t, core.FileChunkBytes+5)
 	body := e.blobs.put(t, "model.pt", content)
-	env := e.offer(t, peer, body)
+	env := e.offer(t, body)
 
 	r := e.record(t, body.FileID)
-	if r.State != store.FileDone {
-		t.Fatalf("state = %s (%s)", r.State, r.Reason)
+	if r.State != store.FileDone || r.LinkID != e.te.link.ID || r.Session != session {
+		t.Fatalf("record = %+v (%s)", r, r.Reason)
 	}
 	want := filepath.Join(e.filesDir, "gpu-box", env.ID+"-model.pt")
 	if r.LocalPath != want {
@@ -309,7 +334,7 @@ func TestReceiveFileRoundTrip(t *testing.T) {
 		t.Fatalf("audit = %+v", ev)
 	}
 	// A duplicate offer changes nothing.
-	if err := e.files.HandleOffer(ctx, peer, env); err != nil {
+	if err := e.files.HandleOffer(withLink(ctx, e.te.link), e.te.peer, env); err != nil {
 		t.Fatal(err)
 	}
 	e.files.Wait()
@@ -321,14 +346,14 @@ func TestReceiveFileRoundTrip(t *testing.T) {
 func TestReceivePathStaysInside(t *testing.T) {
 	ctx := context.Background()
 	e := d2FileSvc(t, 0)
-	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
+	peer := e.te.peer
 	names := []string{"../../.ssh/authorized_keys", ".bashrc", strings.Repeat("n", 300), "notes.txt", "notes.txt", "", `..\..\evil.bat`}
 	aliasDir := filepath.Join(e.filesDir, "gpu-box") + string(filepath.Separator)
 	seen := map[string]bool{}
 	for i, name := range names {
 		content := []byte(fmt.Sprintf("payload %d", i))
 		body := e.blobs.put(t, name, content)
-		e.offer(t, peer, body)
+		e.offer(t, body)
 		r := e.record(t, body.FileID)
 		if r.State != store.FileDone {
 			t.Fatalf("%q: state %s (%s)", name, r.State, r.Reason)
@@ -357,20 +382,19 @@ func TestReceivePathStaysInside(t *testing.T) {
 	}
 
 	hostile := e.blobs.put(t, "x", []byte("x"))
-	env := d2Env(t, peer, core.KindFileOffer, "", "", hostile)
+	env := d2Env(t, peer, core.KindFileOffer, e.te.link.ID, hostile)
 	env.ID = "../../escape"
-	if err := e.files.HandleOffer(ctx, peer, env); err == nil {
+	if err := e.files.HandleOffer(withLink(ctx, e.te.link), peer, env); err == nil {
 		t.Fatal("offer with a path-like message id accepted")
 	}
 }
 
 func TestReceiveResumesAfterInterruption(t *testing.T) {
 	e := d2FileSvc(t, 0)
-	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
 	content := randomBytes(t, 3*core.FileChunkBytes)
 	body := e.blobs.put(t, "big.bin", content)
 	e.blobs.failGet[1] = 1
-	e.offer(t, peer, body)
+	e.offer(t, body)
 	r := e.record(t, body.FileID)
 	if r.State != store.FileDone || r.Attempts != 1 {
 		t.Fatalf("state %s attempts %d (%s)", r.State, r.Attempts, r.Reason)
@@ -386,11 +410,10 @@ func TestReceiveResumesAfterInterruption(t *testing.T) {
 func TestReceiveTamperedChunkFails(t *testing.T) {
 	ctx := context.Background()
 	e := d2FileSvc(t, 0)
-	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
-	session, _ := e.te.reg.Register(ctx, "claude", "/w/p")
+	peer, session := e.te.peer, e.te.session.ID
 	body := e.blobs.put(t, "x.bin", randomBytes(t, 2*core.FileChunkBytes))
 	e.blobs.blobs[body.BlobID][1][10] ^= 0xff
-	e.offer(t, peer, body)
+	e.offer(t, body)
 	r := e.record(t, body.FileID)
 	if r.State != store.FileFailed || r.Attempts != MaxDownloadAttempts {
 		t.Fatalf("state %s attempts %d", r.State, r.Attempts)
@@ -406,21 +429,20 @@ func TestReceiveTamperedChunkFails(t *testing.T) {
 		t.Fatalf("inbox = %+v", items)
 	}
 	chats := e.te.sender.ofKind(core.KindChat)
-	if len(chats) != 1 || chats[0].To != peer.MachineID || !strings.Contains(string(chats[0].Body), "was not received") {
+	if len(chats) != 1 || chats[0].To != peer.MachineID || chats[0].LinkID != e.te.link.ID || !strings.Contains(string(chats[0].Body), "was not received") {
 		t.Fatalf("sender not told: %+v", chats)
 	}
 }
 
 func TestReceiveQuotaAndDisk(t *testing.T) {
 	e := d2FileSvc(t, 2*core.FileChunkBytes)
-	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
 	first := e.blobs.put(t, "a.bin", randomBytes(t, core.FileChunkBytes+1))
-	e.offer(t, peer, first)
+	e.offer(t, first)
 	if e.record(t, first.FileID).State != store.FileDone {
 		t.Fatal("first file within quota not downloaded")
 	}
 	second := e.blobs.put(t, "b.bin", randomBytes(t, core.FileChunkBytes))
-	e.offer(t, peer, second)
+	e.offer(t, second)
 	r := e.record(t, second.FileID)
 	if r.State != store.FileDeclined || r.Reason != core.ErrQuota.Error() {
 		t.Fatalf("over-quota file: %s (%s)", r.State, r.Reason)
@@ -430,9 +452,10 @@ func TestReceiveQuotaAndDisk(t *testing.T) {
 	}
 
 	e.free = 1024
-	other, _ := d2Peer(t, e.te.st, "mac", core.TrustAutonomous)
+	other, _ := d2Peer(t, e.te.st, "mac")
+	otherLink := d2Link(t, e.te.st, other, e.te.session, "laptop", core.PermMessages, core.PermMessages)
 	third := e.blobs.put(t, "c.bin", []byte("small"))
-	e.offer(t, other, third)
+	e.offerOn(t, other, otherLink, third)
 	if r := e.record(t, third.FileID); r.State != store.FileDeclined || r.Reason != "not enough disk space" {
 		t.Fatalf("disk-full file: %s (%s)", r.State, r.Reason)
 	}
@@ -441,27 +464,23 @@ func TestReceiveQuotaAndDisk(t *testing.T) {
 	}
 }
 
-func TestHeldForChatOnlyThenAccepted(t *testing.T) {
+// No link level holds files any more (messages includes files), but a file
+// held by an older version is still released by a human with the password,
+// and only while its link is active.
+func TestHeldFileAcceptedWithPassword(t *testing.T) {
 	ctx := context.Background()
 	e := d2FileSvc(t, 0)
-	peer, _ := d2Peer(t, e.te.st, "stranger", core.TrustChatOnly)
-	session, _ := e.te.reg.Register(ctx, "claude", "/w/p")
 	content := []byte("hello")
 	body := e.blobs.put(t, "readme.md", content)
-	e.offer(t, peer, body)
-	r := e.record(t, body.FileID)
-	if r.State != store.FileHeld || len(e.blobs.getCalls) != 0 {
-		t.Fatalf("chat-only file: %s, fetches %v", r.State, e.blobs.getCalls)
-	}
-	items, _ := e.te.inbox.Check(ctx, session, 10)
-	if len(items) != 1 || !strings.Contains(items[0].Wrapped, "files accept "+body.FileID) {
-		t.Fatalf("held notice = %+v", items)
+	e.hold(t, body.FileID, body)
+	if err := e.files.Accept(ctx, body.FileID, false); !errors.Is(err, core.ErrAuthRequired) {
+		t.Fatalf("accept without the password: %v", err)
 	}
 	if err := e.files.Accept(ctx, body.FileID, true); err != nil {
 		t.Fatal(err)
 	}
 	e.files.Wait()
-	r = e.record(t, body.FileID)
+	r := e.record(t, body.FileID)
 	if r.State != store.FileDone {
 		t.Fatalf("after accept: %s (%s)", r.State, r.Reason)
 	}
@@ -474,11 +493,23 @@ func TestHeldForChatOnlyThenAccepted(t *testing.T) {
 	if err := e.files.Accept(ctx, body.FileID, true); !errors.Is(err, core.ErrBadTransition) {
 		t.Fatalf("second accept err = %v", err)
 	}
+	// Closing the link declines what it still held.
+	other := core.NewID()
+	e.hold(t, other, body)
+	if err := e.te.links.Disconnect(ctx, "", e.te.link.Num); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.record(t, other); r.State != store.FileDeclined || r.Reason != ReasonLinkClosed {
+		t.Fatalf("held file after the link closed: %s (%s)", r.State, r.Reason)
+	}
+	if err := e.files.Accept(ctx, other, true); !errors.Is(err, core.ErrBadTransition) {
+		t.Fatalf("accept after the link closed: %v", err)
+	}
 }
 
 func TestRejectsMalformedOffer(t *testing.T) {
 	e := d2FileSvc(t, 0)
-	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
+	peer := e.te.peer
 	good := e.blobs.put(t, "a", []byte("abc"))
 	cases := map[string]func(b *core.FileOfferBody){
 		"chunk count": func(b *core.FileOfferBody) { b.Chunks = 5 },
@@ -489,8 +520,8 @@ func TestRejectsMalformedOffer(t *testing.T) {
 	for name, mut := range cases {
 		b := good
 		mut(&b)
-		env := d2Env(t, peer, core.KindFileOffer, "", "", b)
-		if err := e.files.HandleOffer(context.Background(), peer, env); err == nil {
+		env := d2Env(t, peer, core.KindFileOffer, e.te.link.ID, b)
+		if err := e.files.HandleOffer(withLink(context.Background(), e.te.link), peer, env); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
@@ -512,9 +543,10 @@ func TestKillStopsDownloadsAndResumeFinishes(t *testing.T) {
 	blobs := newD2Blobs()
 	d := d2NewDaemon(t, t.TempDir(), &blobRelay{blobs: blobs})
 	defer d.Close()
-	peer := newTestPeer(t, "gpu-box", core.TrustAutonomous)
+	peer := newTestPeer(t, "gpu-box")
 	mustPut(t, d.store, peer.rec)
-	session, _ := d.Sessions().Register(ctx, "claude", "/w/p")
+	session := d2Share(t, d.Shared(), "lead")
+	link := d2Link(t, d.store, peer.rec, session, "trainer", core.PermMessages, core.PermMessages)
 	content := randomBytes(t, 4*core.FileChunkBytes)
 	body := blobs.put(t, "big.bin", content)
 
@@ -526,8 +558,8 @@ func TestKillStopsDownloadsAndResumeFinishes(t *testing.T) {
 			<-release
 		}
 	}
-	env := d2Env(t, peer.rec, core.KindFileOffer, "", "", body)
-	if err := d.Files().HandleOffer(ctx, peer.rec, env); err != nil {
+	env := d2Env(t, peer.rec, core.KindFileOffer, link.ID, body)
+	if err := d.Files().HandleOffer(withLink(ctx, link), peer.rec, env); err != nil {
 		t.Fatal(err)
 	}
 	<-reached
@@ -550,7 +582,7 @@ func TestKillStopsDownloadsAndResumeFinishes(t *testing.T) {
 	if n := blobs.getCalls[2] + blobs.getCalls[3]; n != 0 {
 		t.Fatalf("chunks fetched after kill: %v", blobs.getCalls)
 	}
-	if items, _ := d.Inbox().Check(ctx, session, 10); len(items) != 0 {
+	if items, _ := d.Inbox().Check(ctx, session.ID, 10); len(items) != 0 {
 		t.Fatalf("inbox notice while killed: %+v", items)
 	}
 	if err := d.Files().Start(ctx); err != nil {
@@ -573,7 +605,7 @@ func TestKillStopsDownloadsAndResumeFinishes(t *testing.T) {
 	if got, _ := os.ReadFile(r.LocalPath); !bytes.Equal(got, content) {
 		t.Fatal("resumed file differs")
 	}
-	if items, _ := d.Inbox().Check(ctx, session, 10); len(items) != 1 || items[0].FileID != body.FileID {
+	if items, _ := d.Inbox().Check(ctx, session.ID, 10); len(items) != 1 || items[0].FileID != body.FileID {
 		t.Fatalf("inbox after resume = %+v", items)
 	}
 }
@@ -582,17 +614,16 @@ func TestKillStopsDownloadsAndResumeFinishes(t *testing.T) {
 // records are purged then; the files on disk are the human's).
 func TestQuotaForgetsOldDownloads(t *testing.T) {
 	e := d2FileSvc(t, 2*core.FileChunkBytes)
-	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
 	first := e.blobs.put(t, "a.bin", randomBytes(t, core.FileChunkBytes+1))
-	e.offer(t, peer, first)
+	e.offer(t, first)
 	second := e.blobs.put(t, "b.bin", randomBytes(t, core.FileChunkBytes))
-	e.offer(t, peer, second)
+	e.offer(t, second)
 	if r := e.record(t, second.FileID); r.State != store.FileDeclined {
 		t.Fatalf("over quota: %s", r.State)
 	}
 	e.te.clock.Advance(core.InboxRetention + time.Minute)
 	third := e.blobs.put(t, "c.bin", randomBytes(t, core.FileChunkBytes))
-	e.offer(t, peer, third)
+	e.offer(t, third)
 	if r := e.record(t, third.FileID); r.State != store.FileDone {
 		t.Fatalf("after retention: %s (%s)", r.State, r.Reason)
 	}
@@ -603,7 +634,6 @@ func TestQuotaForgetsOldDownloads(t *testing.T) {
 func TestKillStopsUpload(t *testing.T) {
 	ctx := context.Background()
 	e := d2FileSvc(t, 0)
-	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
 	if err := os.WriteFile(filepath.Join(e.project, "big.bin"), randomBytes(t, 4*core.FileChunkBytes), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -620,7 +650,7 @@ func TestKillStopsUpload(t *testing.T) {
 			return nil
 		}
 	}
-	_, err := e.files.SendFile(ctx, peer.MachineID, e.project, "big.bin", "")
+	_, err := e.files.SendFile(ctx, e.te.link, e.project, "big.bin", "")
 	if !errors.Is(err, core.ErrKilled) {
 		t.Fatalf("SendFile during kill err = %v", err)
 	}
@@ -640,7 +670,7 @@ func TestKillStopsUpload(t *testing.T) {
 
 	// While killed, a new upload does not start.
 	e.blobs.onPut = nil
-	if _, err := e.files.SendFile(ctx, peer.MachineID, e.project, "big.bin", ""); !errors.Is(err, core.ErrKilled) {
+	if _, err := e.files.SendFile(ctx, e.te.link, e.project, "big.bin", ""); !errors.Is(err, core.ErrKilled) {
 		t.Fatalf("SendFile while killed err = %v", err)
 	}
 }

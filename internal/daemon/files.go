@@ -49,13 +49,14 @@ type OutboundChecker interface {
 type FileDeps struct {
 	Blobs      func() transport.BlobStore // signed with the current identity
 	Peers      store.PeerStore
+	Links      LinkLookup
 	Files      store.FileStore
 	Inbox      *InboxService
 	Sender     EnvelopeSender
 	Guard      OutboundChecker
 	FilesDir   string
 	Quota      int64 // per-peer inbound bytes; <= 0 means core.DefaultPeerQuota
-	Policy     TrustPolicy
+	Policy     PermissionPolicy
 	Clock      core.Clock
 	Audit      audit.Logger
 	Log        *slog.Logger
@@ -64,7 +65,8 @@ type FileDeps struct {
 	Killed     func() bool                      // kill switch state; nil means never killed
 }
 
-// FileService sends files through relay blobs and receives offered files (spec 5.3, 7.1, 7.4).
+// FileService sends files through relay blobs and receives offered files
+// (spec 5.3, 7.4). Every file travels on one link and belongs to its session.
 type FileService struct {
 	d FileDeps
 
@@ -169,14 +171,19 @@ func (s *FileService) List(ctx context.Context) ([]store.FileRecord, error) {
 	return recs, err
 }
 
-// SendFile checks the path, encrypts and uploads it, and sends a file.offer.
-func (s *FileService) SendFile(ctx context.Context, to core.MachineID, projectDir, path, taskID string) (core.FileRef, error) {
+// SendFile checks the path, encrypts and uploads it, and sends a file.offer
+// on link l, which must be active.
+func (s *FileService) SendFile(ctx context.Context, l store.Link, projectDir, path, taskID string) (core.FileRef, error) {
+	if l.State != store.LinkActive {
+		return core.FileRef{}, fmt.Errorf("link %d: %w", l.Num, core.ErrLinkClosed)
+	}
 	f, info, err := s.d.Guard.Open(ctx, projectDir, path)
 	if err != nil {
 		return core.FileRef{}, err
 	}
 	defer f.Close()
 	abs := f.Name()
+	to := l.Peer
 	peer, err := s.d.Peers.GetPeer(ctx, to)
 	if err != nil {
 		return core.FileRef{}, err
@@ -194,8 +201,8 @@ func (s *FileService) SendFile(ctx context.Context, to core.MachineID, projectDi
 	}
 	rec := store.FileRecord{
 		FileID: core.NewID(), Direction: store.TaskOutbound, Peer: to, Name: filepath.Base(abs),
-		Size: size, Chunks: filecrypt.ChunkCount(size), TaskID: taskID, State: store.FileUploading,
-		LocalPath: abs, CreatedAt: s.d.Clock.Now(),
+		Size: size, Chunks: filecrypt.ChunkCount(size), TaskID: taskID, LinkID: l.ID, Session: l.Session,
+		State: store.FileUploading, LocalPath: abs, CreatedAt: s.d.Clock.Now(),
 	}
 	uctx, done, err := s.uploadContext(ctx, rec.FileID)
 	if err != nil {
@@ -224,7 +231,7 @@ func (s *FileService) SendFile(ctx context.Context, to core.MachineID, projectDi
 		FileID: rec.FileID, BlobID: blobID, Name: rec.Name, Size: size, Chunks: rec.Chunks,
 		SHA256: sum, Key: key, TaskID: taskID,
 	}
-	msgID, err := s.d.Sender.SendEnvelope(ctx, to, core.KindFileOffer, "", "", offer)
+	msgID, err := s.d.Sender.SendEnvelope(ctx, to, core.KindFileOffer, l.ID, offer)
 	if err != nil {
 		s.markOutFailed(ctx, rec.FileID, err)
 		return core.FileRef{}, err
@@ -300,19 +307,27 @@ func chunkLen(size int64, i uint32) int64 {
 	return rest
 }
 
-// HandleOffer records an incoming file.offer and holds, declines or downloads it.
-// Behind a PolicyGate its own decision must match the gate's.
+// HandleOffer records an incoming file.offer and holds, declines or
+// downloads it. Behind a LinkGate its own decision must match the gate's.
 func (s *FileService) HandleOffer(ctx context.Context, peer store.Peer, env core.Envelope) error {
-	return s.handleOffer(ctx, peer, env, s.d.Policy.Decide(peer.TrustIn, core.KindFileOffer))
+	l, ok := LinkFrom(ctx)
+	if !ok {
+		return errNoLink
+	}
+	return s.handleOffer(ctx, peer, l, env, s.d.Policy.Decide(l.PermissionIn, core.KindFileOffer))
 }
 
-// RejectOffer records an incoming file.offer as declined ("not permitted") and tells the
-// sender. It is the PolicyGate's OnReject for file.offer.
+// RejectOffer records an incoming file.offer as declined ("not permitted")
+// and tells the sender. It is the LinkGate's OnReject for file.offer.
 func (s *FileService) RejectOffer(ctx context.Context, peer store.Peer, env core.Envelope) error {
-	return s.handleOffer(ctx, peer, env, DecisionReject)
+	l, ok := LinkFrom(ctx)
+	if !ok {
+		return errNoLink
+	}
+	return s.handleOffer(ctx, peer, l, env, DecisionReject)
 }
 
-func (s *FileService) handleOffer(ctx context.Context, peer store.Peer, env core.Envelope, decision Decision) error {
+func (s *FileService) handleOffer(ctx context.Context, peer store.Peer, l store.Link, env core.Envelope, decision Decision) error {
 	b, err := decodeEnvBody[core.FileOfferBody](env.Body)
 	if err != nil {
 		return err
@@ -328,7 +343,7 @@ func (s *FileService) handleOffer(ctx context.Context, peer store.Peer, env core
 		return err
 	}
 	if cur, err := s.d.Files.GetFile(ctx, b.FileID); err == nil {
-		return Retryable(s.redeliverOffer(ctx, peer, cur, env.ID))
+		return Retryable(s.redeliverOffer(ctx, peer, l, cur, env.ID))
 	} else if !errors.Is(err, core.ErrNotFound) {
 		return Retryable(err)
 	}
@@ -339,7 +354,7 @@ func (s *FileService) handleOffer(ctx context.Context, peer store.Peer, env core
 	rec := store.FileRecord{
 		FileID: b.FileID, Direction: store.TaskInbound, Peer: peer.MachineID, MsgID: env.ID, BlobID: b.BlobID,
 		Name: pathguard.SanitizeName(b.Name), Size: b.Size, Chunks: b.Chunks, SHA256: b.SHA256, Key: b.Key,
-		TaskID: b.TaskID, LocalPath: local, CreatedAt: s.d.Clock.Now(),
+		TaskID: b.TaskID, LinkID: l.ID, Session: l.Session, LocalPath: local, CreatedAt: s.d.Clock.Now(),
 	}
 	switch decision {
 	case DecisionHold:
@@ -375,8 +390,8 @@ func (s *FileService) handleOffer(ctx context.Context, peer store.Peer, env core
 // earlier attempt failed before the inbox notice was written, the notice (and
 // for a decline, the note to the sender) is written now. Anything else is a
 // duplicate and ignored.
-func (s *FileService) redeliverOffer(ctx context.Context, peer store.Peer, cur store.FileRecord, msgID string) error {
-	if cur.Direction != store.TaskInbound || cur.Peer != peer.MachineID || cur.MsgID != msgID {
+func (s *FileService) redeliverOffer(ctx context.Context, peer store.Peer, l store.Link, cur store.FileRecord, msgID string) error {
+	if cur.Direction != store.TaskInbound || cur.Peer != peer.MachineID || cur.LinkID != l.ID || cur.MsgID != msgID {
 		return nil
 	}
 	if cur.State != store.FileHeld && cur.State != store.FileDeclined {
@@ -412,8 +427,12 @@ func (s *FileService) Accept(ctx context.Context, fileID string, unlocked bool) 
 	if peer.Paused {
 		return fmt.Errorf("%s: %w", peer.Alias, core.ErrPaused)
 	}
-	if s.d.Policy.Decide(peer.TrustIn, core.KindFileOffer) == DecisionReject {
-		return fmt.Errorf("%s is %s: %w", peer.Alias, peer.TrustIn, core.ErrNotPermitted)
+	l, err := s.d.Links.GetLink(ctx, rec.Peer, rec.LinkID)
+	if err != nil || l.State != store.LinkActive {
+		return fmt.Errorf("file %s: %w", fileID, core.ErrLinkClosed)
+	}
+	if s.d.Policy.Decide(l.PermissionIn, core.KindFileOffer) == DecisionReject {
+		return fmt.Errorf("link %d allows %s: %w", l.Num, l.PermissionIn, core.ErrNotPermitted)
 	}
 	// The state is checked again inside each update, so of two concurrent
 	// accepts exactly one moves the file on.
@@ -447,12 +466,28 @@ func (s *FileService) Accept(ctx context.Context, fileID string, unlocked bool) 
 // PeerCutOff implements PeerCutOffObserver: the peer's held files are declined
 // and the sender is told (best effort).
 func (s *FileService) PeerCutOff(ctx context.Context, peer store.Peer, reason string) error {
+	return s.declineHeld(ctx, peer, reason, func(r store.FileRecord) bool { return r.Peer == peer.MachineID })
+}
+
+// LinkClosed implements LinkCloseObserver: the link's held files are declined.
+func (s *FileService) LinkClosed(ctx context.Context, l store.Link) error {
+	peer, err := s.d.Peers.GetPeer(ctx, l.Peer)
+	if err != nil {
+		return nil // unpaired: nobody to tell
+	}
+	return s.declineHeld(ctx, peer, ReasonLinkClosed, func(r store.FileRecord) bool {
+		return r.Peer == l.Peer && r.LinkID == l.ID
+	})
+}
+
+// declineHeld declines the inbound held files match selects.
+func (s *FileService) declineHeld(ctx context.Context, peer store.Peer, reason string, match func(store.FileRecord) bool) error {
 	recs, err := s.d.Files.ListFiles(ctx, store.FileHeld)
 	if err != nil {
 		return err
 	}
 	for _, r := range recs {
-		if r.Direction != store.TaskInbound || r.Peer != peer.MachineID {
+		if r.Direction != store.TaskInbound || !match(r) {
 			continue
 		}
 		rec, err := s.d.Files.UpdateFile(ctx, r.FileID, func(f *store.FileRecord) error {
@@ -704,7 +739,7 @@ func (s *FileService) declined(ctx context.Context, peer store.Peer, rec store.F
 		return err
 	}
 	text := fmt.Sprintf("cravv-connect: file %q (file_id %s) was not received: %s", rec.Name, rec.FileID, rec.Reason)
-	_, err := s.d.Sender.SendEnvelope(ctx, peer.MachineID, core.KindChat, "", "", core.ChatBody{Text: text})
+	_, err := s.d.Sender.SendEnvelope(ctx, peer.MachineID, core.KindChat, rec.LinkID, core.ChatBody{Text: text})
 	return err
 }
 
@@ -718,7 +753,8 @@ func (s *FileService) notice(ctx context.Context, rec store.FileRecord) error {
 		return err
 	}
 	_, err = s.d.Inbox.Deliver(ctx, store.InboxItem{
-		MsgID: rec.MsgID, From: rec.Peer, Kind: core.KindFileOffer, Body: body, TaskID: rec.TaskID,
+		MsgID: rec.MsgID, From: rec.Peer, ToSession: rec.Session, LinkID: rec.LinkID,
+		Kind: core.KindFileOffer, Body: body, TaskID: rec.TaskID,
 	})
 	return err
 }

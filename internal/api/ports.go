@@ -57,22 +57,23 @@ type LinkPort interface {
 	Decide(ctx context.Context, link int64, accept bool, permission string, unlocked bool) (ipc.LinkView, error)
 }
 
-// ChatPort sends chat. to is "alias" or "alias/session".
+// ChatPort sends chat on link number link of the shared session sessionID.
 type ChatPort interface {
-	Send(ctx context.Context, fromSession, to, text string) (string, error)
+	Send(ctx context.Context, sessionID string, link int64, text string) (string, error)
 }
 
-// InboxPort reads a session's inbox and advances its read position. The
-// daemon renders each item (local alias, trust, escaped <remote_message>
-// wrapper), so the port returns finished views.
+// InboxPort reads a shared session's inbox and advances its read position.
+// The daemon renders each item (local alias, link, permission, escaped
+// <remote_message> wrapper), so the port returns finished views.
 type InboxPort interface {
 	Check(ctx context.Context, session string, limit int) ([]ipc.InboxView, error)
 	Wait(ctx context.Context, session string, timeout time.Duration) ([]ipc.InboxView, error)
 }
 
-// TaskPort covers both task directions and the human approval queue.
+// TaskPort covers both task directions and the human approval queue. Every
+// session argument is the shared session bound to the connection.
 type TaskPort interface {
-	Create(ctx context.Context, session, projectDir, to, instructions string, filePaths []string) (string, error)
+	Create(ctx context.Context, session, projectDir string, link int64, instructions string, filePaths []string) (string, error)
 	Get(ctx context.Context, session, id string) (store.Task, error)
 	Claim(ctx context.Context, session, id string) (store.Task, error)
 	Update(ctx context.Context, session, id, note string) (store.Task, error)
@@ -85,9 +86,10 @@ type TaskPort interface {
 	Decide(ctx context.Context, id string, approve, unlocked bool) error
 }
 
-// FilePort sends, lists, and accepts files. to is "alias" or "alias/session".
+// FilePort sends, lists, and accepts files. Send uses link number link of
+// the shared session sessionID.
 type FilePort interface {
-	Send(ctx context.Context, to, projectDir, path string) (core.FileRef, error)
+	Send(ctx context.Context, sessionID string, link int64, projectDir, path string) (core.FileRef, error)
 	// Accept releases a held file. unlocked is the connection's unlock state.
 	Accept(ctx context.Context, id string, unlocked bool) error
 	List(ctx context.Context) ([]store.FileRecord, error)
@@ -143,8 +145,8 @@ type AuditPort interface {
 	Read(ctx context.Context, limit int) ([]audit.Event, error)
 }
 
-// HookPort returns unread counts keyed by local alias for the session
-// registered in cwd, plus the number of tasks awaiting approval.
+// HookPort returns unread counts keyed by local alias for the shared session
+// open in cwd, plus the number of tasks awaiting approval.
 type HookPort interface {
 	Counts(ctx context.Context, cwd string) (unread map[string]int, approvals int, err error)
 }

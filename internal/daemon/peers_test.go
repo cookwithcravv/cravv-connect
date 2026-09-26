@@ -29,16 +29,9 @@ func newPeerFixture(t *testing.T) *peerFixture {
 	f.slot.set(f.mb)
 	f.out = &recordingSender{log: f.log}
 	f.svc = NewPeerService(f.peers, f.slot, f.out, f.audit, core.NewFakeClock(testEpoch))
-	f.gpu = newTestPeer(t, "gpu-box", core.TrustAskFirst)
+	f.gpu = newTestPeer(t, "gpu-box")
 	mustPut(t, f.peers, f.gpu.rec)
 	return f
-}
-
-type trustRecorder struct{ lowered []string }
-
-func (r *trustRecorder) TrustLowered(_ context.Context, p store.Peer) error {
-	r.lowered = append(r.lowered, p.Alias+":"+p.TrustIn.String())
-	return nil
 }
 
 func TestPeerResolve(t *testing.T) {
@@ -77,7 +70,7 @@ func TestPeerResolve(t *testing.T) {
 func TestPeerSetAlias(t *testing.T) {
 	f := newPeerFixture(t)
 	ctx := context.Background()
-	other := newTestPeer(t, "laptop", core.TrustAskFirst)
+	other := newTestPeer(t, "laptop")
 	mustPut(t, f.peers, other.rec)
 
 	if err := f.svc.SetAlias(ctx, "gpu-box", "Big GPU!"); err != nil {
@@ -91,42 +84,6 @@ func TestPeerSetAlias(t *testing.T) {
 	}
 	if err := f.svc.SetAlias(ctx, "big-gpu", "!!!"); !errors.Is(err, ErrBadAlias) {
 		t.Fatalf("empty alias err = %v", err)
-	}
-}
-
-func TestPeerSetTrust(t *testing.T) {
-	f := newPeerFixture(t)
-	ctx := context.Background()
-	obs := &trustRecorder{}
-	f.svc.AddTrustObserver(obs)
-
-	if err := f.svc.SetTrust(ctx, "gpu-box", core.TrustAutonomous, false); !errors.Is(err, core.ErrAuthRequired) {
-		t.Fatalf("raise without unlock err = %v, want ErrAuthRequired", err)
-	}
-	if got := mustGetPeer(t, f.peers, f.gpu.rec.MachineID).TrustIn; got != core.TrustAskFirst {
-		t.Fatalf("trust changed to %s without unlock", got)
-	}
-	if err := f.svc.SetTrust(ctx, "gpu-box", core.TrustAutonomous, true); err != nil {
-		t.Fatal(err)
-	}
-	if len(obs.lowered) != 0 {
-		t.Fatalf("observer called on raise: %v", obs.lowered)
-	}
-	if err := f.svc.SetTrust(ctx, "gpu-box", core.TrustChatOnly, false); err != nil {
-		t.Fatalf("lowering must not need unlock: %v", err)
-	}
-	if got := mustGetPeer(t, f.peers, f.gpu.rec.MachineID).TrustIn; got != core.TrustChatOnly {
-		t.Fatalf("trust = %s, want chat-only", got)
-	}
-	if !reflect.DeepEqual(obs.lowered, []string{"gpu-box:chat-only"}) {
-		t.Fatalf("observer = %v", obs.lowered)
-	}
-	ev := f.audit.last()
-	if ev.Type != audit.EvTrust || ev.Detail["from"] != "autonomous" || ev.Detail["to"] != "chat-only" {
-		t.Fatalf("audit = %+v", ev)
-	}
-	if err := f.svc.SetTrust(ctx, "gpu-box", core.TrustLevel(9), true); err == nil {
-		t.Fatal("invalid level accepted")
 	}
 }
 
@@ -293,7 +250,7 @@ func TestPeerMarkPausedByPeer(t *testing.T) {
 func TestPeerSyncAllowList(t *testing.T) {
 	f := newPeerFixture(t)
 	ctx := context.Background()
-	paused := newTestPeer(t, "paused", core.TrustAskFirst)
+	paused := newTestPeer(t, "paused")
 	paused.rec.Paused = true
 	mustPut(t, f.peers, paused.rec)
 	if err := f.svc.SyncAllowList(ctx, f.mb); err != nil {

@@ -1,6 +1,11 @@
 package daemon
 
-import "github.com/cravv/cravv-connect/internal/core"
+import (
+	"context"
+	"fmt"
+
+	"github.com/cravv/cravv-connect/internal/core"
+)
 
 // Decision is what the receiving daemon does with an incoming item.
 type Decision int
@@ -23,33 +28,24 @@ func (d Decision) String() string {
 	return "unknown"
 }
 
-// TrustPolicy maps (incoming trust level, kind) to a decision (spec 7.1).
-type TrustPolicy struct{}
+type decisionKey struct{}
 
-// kindRules holds the kinds whose decision depends on the trust level.
-// Anything not listed (chat, task.update, task.cancel, control.*) is delivered.
-var kindRules = map[core.Kind]map[core.TrustLevel]Decision{
-	core.KindTaskCreate: {
-		core.TrustChatOnly:   DecisionReject,
-		core.TrustAskFirst:   DecisionHold,
-		core.TrustAutonomous: DecisionDeliver,
-	},
-	core.KindFileOffer: {
-		core.TrustChatOnly:   DecisionHold,
-		core.TrustAskFirst:   DecisionDeliver,
-		core.TrustAutonomous: DecisionDeliver,
-	},
+// withDecision records the gate's decision for the wrapped handler.
+func withDecision(ctx context.Context, d Decision) context.Context {
+	return context.WithValue(ctx, decisionKey{}, d)
 }
 
-// Decide returns the decision. An invalid trust level is treated as the most restrictive
-// outcome for gated kinds (reject), so a corrupt record never widens access.
-func (TrustPolicy) Decide(level core.TrustLevel, kind core.Kind) Decision {
-	rules, gated := kindRules[kind]
-	if !gated {
-		return DecisionDeliver
+// DecisionFrom returns the decision a LinkGate made for this envelope, if any.
+func DecisionFrom(ctx context.Context) (Decision, bool) {
+	d, ok := ctx.Value(decisionKey{}).(Decision)
+	return d, ok
+}
+
+// checkGateDecision is the handlers' defense in depth: when a gate ran, the
+// decision the handler computed itself must match the gate's.
+func checkGateDecision(ctx context.Context, own Decision, kind core.Kind, id string) error {
+	if gate, ok := DecisionFrom(ctx); ok && gate != own {
+		return fmt.Errorf("%s %s: policy decision mismatch (gate %s, handler %s)", kind, id, gate, own)
 	}
-	if d, ok := rules[level]; ok {
-		return d
-	}
-	return DecisionReject
+	return nil
 }

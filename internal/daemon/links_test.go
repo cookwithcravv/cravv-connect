@@ -199,7 +199,7 @@ func TestUnseenSessionLooksMissing(t *testing.T) {
 		ids = append(ids, id)
 		body := core.LinkRequestBody{LinkID: id, FromSession: core.SessionRef{ID: core.NewID(), Name: "prober"},
 			ToSessionID: to, ProposedPermission: core.PermMessages}
-		if _, err := a.sender.SendEnvelope(ctx, b.id, core.KindLinkRequest, "", "", body); err != nil {
+		if _, err := a.sender.SendEnvelope(ctx, b.id, core.KindLinkRequest, "", body); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -333,7 +333,7 @@ func TestUnknownLinkReplies(t *testing.T) {
 	n, a, b := linkNet(t)
 	ghost := core.NewID()
 	send := func(kind core.Kind, body any) {
-		if _, err := b.sender.SendEnvelope(ctx, a.id, kind, "", "", body); err != nil {
+		if _, err := b.sender.SendEnvelope(ctx, a.id, kind, "", body); err != nil {
 			t.Fatal(err)
 		}
 		n.pump()

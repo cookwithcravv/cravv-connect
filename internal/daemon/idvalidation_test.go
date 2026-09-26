@@ -34,13 +34,12 @@ func requireRejected(t *testing.T, what string, err error) {
 func TestHostileTaskIDsRejected(t *testing.T) {
 	ctx := context.Background()
 	for _, bad := range hostileIDs {
-		e := d2Tasks(t)
-		peer, _ := d2Peer(t, e.st, "gpu-box", core.TrustAutonomous)
-		session, _ := e.reg.Register(ctx, "claude", "/w/proj")
+		e := d2Tasks(t, core.PermTasksAsk)
+		peer, lctx := e.peer, withLink(ctx, e.link)
 
-		env := d2Env(t, peer, core.KindTaskCreate, "", "", core.TaskCreateBody{TaskID: bad, Instructions: "x"})
-		requireRejected(t, "task.create "+bad, e.tasks.HandleCreate(ctx, peer, env))
-		requireRejected(t, "rejected task.create "+bad, e.tasks.RejectCreate(ctx, peer, env))
+		env := d2Env(t, peer, core.KindTaskCreate, e.link.ID, core.TaskCreateBody{TaskID: bad, Instructions: "x"})
+		requireRejected(t, "task.create "+bad, e.tasks.HandleCreate(lctx, peer, env))
+		requireRejected(t, "rejected task.create "+bad, e.tasks.RejectCreate(lctx, peer, env))
 		if _, err := e.st.GetTask(ctx, bad); !errors.Is(err, core.ErrNotFound) {
 			t.Fatalf("hostile task %q stored: %v", bad, err)
 		}
@@ -51,11 +50,11 @@ func TestHostileTaskIDsRejected(t *testing.T) {
 			t.Fatalf("hostile task %q answered", bad)
 		}
 
-		upd := d2Env(t, peer, core.KindTaskUpdate, "", "", core.TaskUpdateBody{TaskID: bad, State: core.TaskDone})
-		requireRejected(t, "task.update "+bad, e.tasks.HandleUpdate(ctx, peer, upd))
-		cancel := d2Env(t, peer, core.KindTaskCancel, "", "", core.TaskCancelBody{TaskID: bad})
-		requireRejected(t, "task.cancel "+bad, e.tasks.HandleCancel(ctx, peer, cancel))
-		if items, _ := e.inbox.Check(ctx, session, 10); len(items) != 0 {
+		upd := d2Env(t, peer, core.KindTaskUpdate, e.link.ID, core.TaskUpdateBody{TaskID: bad, State: core.TaskDone})
+		requireRejected(t, "task.update "+bad, e.tasks.HandleUpdate(lctx, peer, upd))
+		cancel := d2Env(t, peer, core.KindTaskCancel, e.link.ID, core.TaskCancelBody{TaskID: bad})
+		requireRejected(t, "task.cancel "+bad, e.tasks.HandleCancel(lctx, peer, cancel))
+		if items, _ := e.inbox.Check(ctx, e.session.ID, 10); len(items) != 0 {
 			t.Fatalf("hostile task %q reached the inbox: %+v", bad, items)
 		}
 	}
@@ -63,12 +62,11 @@ func TestHostileTaskIDsRejected(t *testing.T) {
 
 func TestHostileTaskFileIDsRejected(t *testing.T) {
 	ctx := context.Background()
-	e := d2Tasks(t)
-	peer, _ := d2Peer(t, e.st, "gpu-box", core.TrustAutonomous)
+	e := d2Tasks(t, core.PermTasksAuto)
 	id := core.NewID()
-	env := d2Env(t, peer, core.KindTaskCreate, "", "", core.TaskCreateBody{
+	env := d2Env(t, e.peer, core.KindTaskCreate, e.link.ID, core.TaskCreateBody{
 		TaskID: id, Instructions: "x", Files: []core.FileRef{{FileID: "F\x1b[8m", Name: "a.txt", Size: 1}}})
-	requireRejected(t, "task.create with a hostile file id", e.tasks.HandleCreate(ctx, peer, env))
+	requireRejected(t, "task.create with a hostile file id", e.tasks.HandleCreate(withLink(ctx, e.link), e.peer, env))
 	if _, err := e.st.GetTask(ctx, id); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("task with hostile file id stored: %v", err)
 	}
@@ -77,7 +75,7 @@ func TestHostileTaskFileIDsRejected(t *testing.T) {
 func TestHostileFileOfferIDsRejected(t *testing.T) {
 	ctx := context.Background()
 	e := d2FileSvc(t, 0)
-	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
+	peer := e.te.peer
 	mutate := map[string]func(b *core.FileOfferBody){
 		"file id":   func(b *core.FileOfferBody) { b.FileID = "01J8ZR0A1B2C3D4E5F6G7H8J\n\x1b[8m" },
 		"short id":  func(b *core.FileOfferBody) { b.FileID = "F1" },
@@ -88,8 +86,8 @@ func TestHostileFileOfferIDsRejected(t *testing.T) {
 	for name, m := range mutate {
 		body := e.blobs.put(t, "a.txt", []byte("hello"))
 		m(&body)
-		env := d2Env(t, peer, core.KindFileOffer, "", "", body)
-		requireRejected(t, "file.offer "+name, e.files.HandleOffer(ctx, peer, env))
+		env := d2Env(t, peer, core.KindFileOffer, e.te.link.ID, body)
+		requireRejected(t, "file.offer "+name, e.files.HandleOffer(withLink(ctx, e.te.link), peer, env))
 		e.files.Wait()
 		if _, err := e.te.st.GetFile(ctx, body.FileID); !errors.Is(err, core.ErrNotFound) {
 			t.Fatalf("%s: offer stored: %v", name, err)
