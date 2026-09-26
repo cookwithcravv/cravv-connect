@@ -172,6 +172,9 @@ func (s *setup) hostFlow(cfg config.Config, configured bool) error {
 			}
 		}
 		fmt.Fprintf(s.w, "This machine is set up for relay %s as %s.\n", cfg.RelayURL, cfg.DeviceName)
+		if s.o.token != "" {
+			fmt.Fprintln(s.env.Stderr, "Warning: --relay-token ignored: this machine is already registered.")
+		}
 	} else {
 		s.section("Relay")
 		relay, token, err := s.chooseRelay()

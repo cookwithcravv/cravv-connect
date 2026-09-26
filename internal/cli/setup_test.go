@@ -581,3 +581,19 @@ func TestSetupResetRestartsDaemonAfterFailure(t *testing.T) {
 		t.Fatalf("stdout\n%s", r.out.String())
 	}
 }
+
+// --relay-token only matters for a machine's first registration.
+func TestSetupRelayTokenOnSetUpMachine(t *testing.T) {
+	r := newSetupRig(t, connected)
+	r.configure(t, "https://relay.example.com")
+	r.daemon.up()
+	if code := r.run("--yes", "--relay-token", "tok", "--no-agents"); code != 0 {
+		t.Fatalf("code %d stderr %s", code, r.errb.String())
+	}
+	if r.errb.String() != "Warning: --relay-token ignored: this machine is already registered.\n" {
+		t.Fatalf("stderr %q", r.errb.String())
+	}
+	if _, ok := r.settings[SettingRelayAdminToken]; ok {
+		t.Fatal("stored the token")
+	}
+}
