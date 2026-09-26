@@ -32,13 +32,16 @@ type Session struct {
 	dial       func(ctx context.Context) (Conn, error)
 	projectDir string
 
-	agentSession string // the agent's own chat ID, for the chat's hooks ("" if unknown)
+	agentSession    string // the agent's own chat ID, for the chat's hooks ("" if unknown)
+	wakeDir         string // where wake files are written ("" for none)
+	listenerProgram string // how the listener command names cravv-connect
 
 	mu       sync.Mutex
 	agent    string
 	conn     Conn
 	name     string
 	reattach string // reattach token of the session this chat shared ("" if none)
+	wakeFile string // the wake file of that session ("" if none)
 	// pending is set while the current connection still has to take the
 	// session back with the reattach token.
 	pending bool
@@ -123,6 +126,10 @@ func (s *Session) reattachLocked(ctx context.Context) {
 		s.pending = false
 	case ipc.IsKind(err, ipc.KindNotFound):
 		s.reattach, s.pending = "", false
+		if s.wakeFile != "" { // the session is gone: so is its listener
+			os.Remove(s.wakeFile)
+			s.wakeFile = ""
+		}
 	}
 }
 
@@ -173,8 +180,10 @@ func (s *Session) drop(c Conn) {
 	}
 }
 
-// Close ends the connection, which ends the daemon session.
+// Close ends the connection, which ends the daemon session, and removes
+// the wake file.
 func (s *Session) Close() {
+	s.RemoveWakeFile()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn != nil {

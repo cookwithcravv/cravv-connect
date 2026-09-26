@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/cravv/cravv-connect/internal/ipc"
@@ -26,6 +27,10 @@ func newMCPCmd(env *Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			paths, err := env.Paths()
+			if err != nil {
+				return err
+			}
 			return mcpserver.Run(cmd.Context(), mcpserver.Options{
 				Dial: func(ctx context.Context) (mcpserver.Conn, error) {
 					p, err := env.Paths()
@@ -34,14 +39,42 @@ func newMCPCmd(env *Env) *cobra.Command {
 					}
 					return ipc.DialContext(ctx, p.Socket)
 				},
-				ProjectDir:   dir,
-				Version:      Version,
-				AgentSession: agentSessionFromEnv(os.Getenv),
+				ProjectDir:      dir,
+				Version:         Version,
+				AgentSession:    agentSessionFromEnv(os.Getenv),
+				WakeDir:         filepath.Join(paths.Home, "wake"),
+				ListenerProgram: listenerProgram(env, exec.LookPath),
 			})
 		},
 	}
 	cmd.Flags().StringVar(&projectDir, "project-dir", "", "project folder for this session (default: the current directory)")
 	return cmd
+}
+
+// listenerProgram is how the listener command names this binary: plain
+// cravv-connect when that is what PATH finds (it matches the allow rule
+// Bash(cravv-connect listen:*)), else the absolute path.
+func listenerProgram(env *Env, lookPath func(string) (string, error)) string {
+	if env.Executable == nil {
+		return "cravv-connect"
+	}
+	self, err := env.Executable()
+	if err != nil {
+		return "cravv-connect"
+	}
+	if found, err := lookPath("cravv-connect"); err == nil && sameFile(found, self) {
+		return "cravv-connect"
+	}
+	return self
+}
+
+func sameFile(a, b string) bool {
+	fa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	fb, err := os.Stat(b)
+	return err == nil && os.SameFile(fa, fb)
 }
 
 // agentSessionEnv lists the variables agents set to their chat ID for the

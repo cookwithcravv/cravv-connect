@@ -30,8 +30,8 @@ func TestToolDescriptionsMatchBehaviour(t *testing.T) {
 	for _, tool := range res.Tools {
 		desc[tool.Name] = tool.Description
 	}
-	if p := desc["pause_peer"]; strings.Contains(p, "Only the human can resume") || !strings.Contains(p, "cravv-connect resume-peer") {
-		t.Errorf("pause_peer: %q", p)
+	if w := desc["wait_for_message"]; !strings.Contains(w, "at most 600") || !strings.Contains(w, "default 50") {
+		t.Errorf("wait_for_message: %q", w)
 	}
 	for _, pat := range []string{".env", "id_*", "credentials*.json", "service-account*.json", "*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore", "*.kdbx", "*.ppk", "*.ovpn"} {
 		if !strings.Contains(desc["send_file"], pat) {

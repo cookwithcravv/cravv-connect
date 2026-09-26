@@ -32,13 +32,13 @@ func (h *handlers) inboxCheck(ctx context.Context, cs *ipc.ConnState, p ipc.Inbo
 	return inboxResult(items), nil
 }
 
-// WaitTimeout clamps a requested wait to (0, core.MaxWait]; 0 or less means
-// the maximum.
+// WaitTimeout clamps a requested wait to (0, core.MaxWaitLong]; 0 or less
+// means the default, core.MaxWait.
 func WaitTimeout(seconds int) time.Duration {
 	if seconds <= 0 {
 		return core.MaxWait
 	}
-	return min(time.Duration(seconds)*time.Second, core.MaxWait)
+	return min(time.Duration(seconds)*time.Second, core.MaxWaitLong)
 }
 
 func (h *handlers) inboxWait(ctx context.Context, cs *ipc.ConnState, p ipc.InboxWaitParams) (any, error) {

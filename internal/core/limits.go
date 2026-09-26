@@ -27,7 +27,8 @@ const (
 	LockoutFailures    = 5
 	LockoutDuration    = 15 * time.Minute
 	UnlockTTL          = 10 * time.Minute
-	MaxWait            = 50 * time.Second
+	MaxWait            = 50 * time.Second  // default wait_for_message timeout
+	MaxWaitLong        = 600 * time.Second // longest wait_for_message a client may ask for
 	DefaultPeerQuota   = 1 << 30
 	BackoffMin         = time.Second
 	BackoffMax         = 5 * time.Minute

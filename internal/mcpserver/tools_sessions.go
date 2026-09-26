@@ -16,6 +16,15 @@ type Reattacher interface {
 	SetReattach(token string)
 }
 
+// WakeKeeper writes the wake token to a file only this user can read, so
+// the listener command carries a path and never the token. Implemented by
+// *Session.
+type WakeKeeper interface {
+	WriteWakeFile(token string) (path string, err error)
+	RemoveWakeFile()
+	ListenerCommand(wakeFile string) string
+}
+
 // agentSessionOf returns the agent's own chat ID when c knows it.
 func agentSessionOf(c Caller) string {
 	if a, ok := c.(interface{ AgentSession() string }); ok {
@@ -33,14 +42,27 @@ type sessionShareIn struct {
 }
 
 // shareOut is what the model sees: never the reattach token, which the MCP
-// server keeps in memory to take the session back after a reconnect.
+// server keeps in memory to take the session back after a reconnect, and
+// the wake token only when no wake file could be written.
 type shareOut struct {
 	Session   ipc.SharedSessionView `json:"session"`
-	WakeToken string                `json:"wake_token"`
+	Listener  string                `json:"listener"`
+	WakeToken string                `json:"wake_token,omitempty"`
+	Next      string                `json:"next"`
 }
 
+// Listener instructions returned by session_share.
+const (
+	ListenerNext = "Now start the listener: run the listener command as a background command (in Claude Code, the Bash tool with run_in_background). " +
+		"It exits with one line when something arrives for this session. Then call check_inbox (and review_pending when the line says so), " +
+		"handle what arrived, and start the listener again. Start it again after every exit."
+	ListenerNextStdin = "Start the listener command as a background command and write the wake_token to its stdin, never as an argument. " +
+		"It exits with one line when something arrives; then call check_inbox and start it again. If you cannot run background commands, call wait_for_message instead."
+)
+
 func (sessionShareTool) Register(s *mcp.Server, c Caller) {
-	addTool(s, "session_share", "Share this chat as a session other machines can link to. Nothing reaches this chat until it shares and a link is accepted. Returns the wake token for the listener.",
+	addTool(s, "session_share", "Share this chat as a session other machines can link to. Nothing reaches this chat until it shares and a link is accepted. "+
+		"Returns the listener command to run in the background.", annLocal,
 		func(ctx context.Context, in sessionShareIn) (string, error) {
 			var r ipc.ShareResult
 			p := ipc.SessionShareParams{Name: in.Name, Purpose: in.Purpose, Visibility: in.Visibility, AgentSession: agentSessionOf(c)}
@@ -50,14 +72,20 @@ func (sessionShareTool) Register(s *mcp.Server, c Caller) {
 			if ra, ok := c.(Reattacher); ok {
 				ra.SetReattach(r.ReattachToken)
 			}
-			return jsonText(shareOut{Session: r.Session, WakeToken: r.WakeToken})
+			out := shareOut{Session: r.Session, Listener: "cravv-connect listen", WakeToken: r.WakeToken, Next: ListenerNextStdin}
+			if wk, ok := c.(WakeKeeper); ok {
+				if path, err := wk.WriteWakeFile(r.WakeToken); err == nil {
+					out.Listener, out.WakeToken, out.Next = wk.ListenerCommand(path), "", ListenerNext
+				}
+			}
+			return jsonText(out)
 		})
 }
 
 type sessionCloseTool struct{}
 
 func (sessionCloseTool) Register(s *mcp.Server, c Caller) {
-	addTool(s, "session_close", "Close this chat's session and every link it has.",
+	addTool(s, "session_close", "Close this chat's session and every link it has.", annCutOff,
 		func(ctx context.Context, _ noArgs) (string, error) {
 			if err := c.Call(ctx, ipc.MethodSessionClose, nil, nil); err != nil {
 				return "", err
@@ -65,7 +93,33 @@ func (sessionCloseTool) Register(s *mcp.Server, c Caller) {
 			if ra, ok := c.(Reattacher); ok {
 				ra.SetReattach("")
 			}
-			return "Session closed.", nil
+			if wk, ok := c.(WakeKeeper); ok {
+				wk.RemoveWakeFile()
+			}
+			return "Session closed. A running listener exits with a line saying so.", nil
+		})
+}
+
+type sessionSetTool struct{}
+
+type sessionSetIn struct {
+	Purpose    *string `json:"purpose,omitempty" jsonschema:"new purpose: one line, at most 120 characters"`
+	Visibility *string `json:"visibility,omitempty" jsonschema:"private, all-peers, or peers:<alias>[,<alias>...]"`
+}
+
+func (sessionSetTool) Register(s *mcp.Server, c Caller) {
+	addTool(s, "session_set", "Change this chat's session purpose or who can see it. Existing links stay.", annLocal,
+		func(ctx context.Context, in sessionSetIn) (string, error) {
+			return callJSON[ipc.SharedSessionView](ctx, c, ipc.MethodSessionSet, ipc.SessionSetParams{Purpose: in.Purpose, Visibility: in.Visibility})
+		})
+}
+
+type machinesTool struct{}
+
+func (machinesTool) Register(s *mcp.Server, c Caller) {
+	addTool(s, "machines", "List the paired machines (local alias, online, paused). Pairing, pausing and unpairing are for the human (cravv-connect in a terminal).", annRead,
+		func(ctx context.Context, _ noArgs) (string, error) {
+			return callJSON[ipc.PeerListResult](ctx, c, ipc.MethodMachines, nil)
 		})
 }
 
@@ -76,7 +130,7 @@ type machineIn struct {
 }
 
 func (sessionsTool) Register(s *mcp.Server, c Caller) {
-	addTool(s, "sessions", "List the sessions a paired machine lets this machine see. Purposes come from the other machine and are wrapped in <remote_message>.",
+	addTool(s, "sessions", "List the sessions a paired machine lets this machine see. Purposes come from the other machine and are wrapped in <remote_message>.", annReadRemote,
 		func(ctx context.Context, in machineIn) (string, error) {
 			return callJSON[ipc.SessionsListResult](ctx, c, ipc.MethodSessionsList, ipc.MachineParams{Machine: in.Machine})
 		})
@@ -91,7 +145,7 @@ type connectIn struct {
 }
 
 func (connectTool) Register(s *mcp.Server, c Caller) {
-	addTool(s, "connect", "Ask a session on a paired machine for a link. The human on that machine decides; the link is pending until then.",
+	addTool(s, "connect", "Ask a session on a paired machine for a link. The human on that machine decides; the link is pending until then.", annSend,
 		func(ctx context.Context, in connectIn) (string, error) {
 			return callJSON[ipc.LinkView](ctx, c, ipc.MethodLinkConnect, ipc.LinkConnectParams{Target: in.Target, Permission: in.Permission, Note: in.Note})
 		})
@@ -100,7 +154,7 @@ func (connectTool) Register(s *mcp.Server, c Caller) {
 type linksTool struct{}
 
 func (linksTool) Register(s *mcp.Server, c Caller) {
-	addTool(s, "links", "List this session's links: peers, permissions, state and presence.",
+	addTool(s, "links", "List this session's links: peers, permissions, state and presence.", annRead,
 		func(ctx context.Context, _ noArgs) (string, error) {
 			return callJSON[ipc.LinksResult](ctx, c, ipc.MethodLinks, nil)
 		})
@@ -113,7 +167,7 @@ type linkIn struct {
 type disconnectTool struct{}
 
 func (disconnectTool) Register(s *mcp.Server, c Caller) {
-	addTool(s, "disconnect", "Close a link. Closed links are never reopened; connect again for a new one.",
+	addTool(s, "disconnect", "Close a link. Closed links are never reopened; connect again for a new one.", annCutOff,
 		func(ctx context.Context, in linkIn) (string, error) {
 			if err := c.Call(ctx, ipc.MethodLinkDisconnect, ipc.LinkParams{Link: in.Link}, nil); err != nil {
 				return "", err
@@ -130,7 +184,7 @@ type restrictIn struct {
 }
 
 func (restrictTool) Register(s *mcp.Server, c Caller) {
-	addTool(s, "restrict", "Lower what the other side of a link may do here (tasks-auto > tasks-ask > messages). Raising is only possible for the human.",
+	addTool(s, "restrict", "Lower what the other side of a link may do here (tasks-auto > tasks-ask > messages). Raising is only possible for the human.", annCutOff,
 		func(ctx context.Context, in restrictIn) (string, error) {
 			var v ipc.LinkView
 			err := c.Call(ctx, ipc.MethodLinkRestrict, ipc.LinkPermissionParams{Link: in.Link, Permission: in.Permission}, &v)

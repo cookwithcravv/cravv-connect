@@ -218,12 +218,13 @@ func jsonStringLen(s string) int {
 
 // Wait blocks until the session has unread items or the timeout passes, then
 // behaves like Check with DefaultInboxLimit. The timeout is capped at
-// core.MaxWait; <= 0 means core.MaxWait. It returns an empty slice (not an
-// error) on timeout.
+// core.MaxWaitLong; <= 0 means core.MaxWait. It returns an empty slice (not
+// an error) on timeout.
 func (s *InboxService) Wait(ctx context.Context, session string, timeout time.Duration) ([]InboxEntry, error) {
-	if timeout <= 0 || timeout > core.MaxWait {
+	if timeout <= 0 {
 		timeout = core.MaxWait
 	}
+	timeout = min(timeout, core.MaxWaitLong)
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	for {

@@ -85,19 +85,22 @@ func (d *daemonFake) registrations() []ipc.SessionRegisterParams {
 // a client session named clientName.
 func connect(t *testing.T, d *daemonFake, clientName string) (*mcp.ClientSession, *Session) {
 	t.Helper()
+	return connectWith(t, d, clientName, Options{}, nil)
+}
+
+// connectWith is connect with extra server options and client options.
+func connectWith(t *testing.T, d *daemonFake, clientName string, opts Options, copts *mcp.ClientOptions) (*mcp.ClientSession, *Session) {
+	t.Helper()
 	ctx := context.Background()
-	srv, sess := New(Options{
-		Dial:         func(ctx context.Context) (Conn, error) { return ipc.DialContext(ctx, d.sock) },
-		ProjectDir:   "/work/glow-v2",
-		Version:      "test",
-		AgentSession: "chat-1",
-	})
+	opts.Dial = func(ctx context.Context) (Conn, error) { return ipc.DialContext(ctx, d.sock) }
+	opts.ProjectDir, opts.Version, opts.AgentSession = "/work/glow-v2", "test", "chat-1"
+	srv, sess := New(opts)
 	st, ct := mcp.NewInMemoryTransports()
 	ss, err := srv.Connect(ctx, st, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := mcp.NewClient(&mcp.Implementation{Name: clientName, Version: "1"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: clientName, Version: "1"}, copts)
 	cs, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -171,11 +174,35 @@ func TestToolListAndDescriptions(t *testing.T) {
 		}
 	}
 	want := []string{"cancel_task", "check_inbox", "claim_task", "complete_task", "connect", "create_task", "disconnect",
-		"fail_task", "get_task", "kill_switch", "links", "pause_peer", "restrict", "send_file", "send_message",
-		"session_close", "session_share", "sessions", "status", "unpair_peer", "update_task", "wait_for_message"}
+		"fail_task", "get_task", "kill_switch", "links", "machines", "restrict", "send_file", "send_message",
+		"session_close", "session_set", "session_share", "sessions", "update_task", "wait_for_message"}
 	slices.Sort(names)
 	if !slices.Equal(names, want) {
 		t.Fatalf("tools %v", names)
+	}
+	hints := map[string]*mcp.ToolAnnotations{}
+	for _, tool := range res.Tools {
+		hints[tool.Name] = tool.Annotations
+	}
+	for _, n := range []string{"machines", "sessions", "links", "check_inbox", "wait_for_message", "get_task"} {
+		if a := hints[n]; a == nil || !a.ReadOnlyHint {
+			t.Errorf("%s should be read-only: %+v", n, a)
+		}
+	}
+	for _, n := range []string{"connect", "send_message", "create_task", "send_file", "update_task", "complete_task", "fail_task"} {
+		if a := hints[n]; a == nil || a.ReadOnlyHint || a.OpenWorldHint == nil || !*a.OpenWorldHint {
+			t.Errorf("%s sends to another machine: %+v", n, a)
+		}
+	}
+	for _, n := range []string{"session_share", "session_set", "links", "check_inbox"} {
+		if a := hints[n]; a == nil || a.OpenWorldHint == nil || *a.OpenWorldHint {
+			t.Errorf("%s stays on this machine: %+v", n, a)
+		}
+	}
+	for _, n := range []string{"disconnect", "session_close", "kill_switch"} {
+		if a := hints[n]; a == nil || a.DestructiveHint == nil || !*a.DestructiveHint {
+			t.Errorf("%s is a cut-off: %+v", n, a)
+		}
 	}
 	if got := cs.InitializeResult().Instructions; got == "" {
 		t.Fatal("no instructions sent")
@@ -197,7 +224,11 @@ func TestInboxToolsReturnWrappedText(t *testing.T) {
 			{Wrapped: `<remote_message from="gpu-box" kind="task">do</remote_message>`},
 		}}, nil
 	})
+	var waits []int
 	d.handle(ipc.MethodInboxWait, ipc.GateSession, func(_ *ipc.ConnState, raw json.RawMessage) (any, error) {
+		var p ipc.InboxWaitParams
+		json.Unmarshal(raw, &p)
+		waits = append(waits, p.TimeoutS)
 		return ipc.InboxResult{}, nil
 	})
 	d.start()
@@ -212,6 +243,10 @@ func TestInboxToolsReturnWrappedText(t *testing.T) {
 	}
 	if text, _ := callTool(t, cs, "wait_for_message", map[string]any{"timeout_s": 1}); text != NothingYetText {
 		t.Fatalf("wait: %q", text)
+	}
+	callTool(t, cs, "wait_for_message", map[string]any{"timeout_s": 600})
+	if !slices.Equal(waits, []int{1, 600}) {
+		t.Fatalf("waits %v: the tool passes the timeout on, the daemon caps it", waits)
 	}
 	if !slices.Equal(limits, []int{0, 1}) {
 		t.Fatalf("limits %v", limits)
@@ -228,8 +263,13 @@ func TestStructuredToolsReturnJSON(t *testing.T) {
 	d.handle(ipc.MethodTaskClaim, ipc.GateSession, func(*ipc.ConnState, json.RawMessage) (any, error) {
 		return nil, core.ErrAlreadyClaimed
 	})
-	d.handle(ipc.MethodStatus, ipc.GateAllowWhenKilled, func(*ipc.ConnState, json.RawMessage) (any, error) {
-		return ipc.StatusResult{MachineID: "m1", RelayConnected: true}, nil
+	d.handle(ipc.MethodMachines, ipc.GateAllowWhenKilled, func(*ipc.ConnState, json.RawMessage) (any, error) {
+		return ipc.PeerListResult{Peers: []ipc.PeerView{{Alias: "gpu-box", Online: true}}}, nil
+	})
+	var set ipc.SessionSetParams
+	d.handle(ipc.MethodSessionSet, ipc.GateSession, func(_ *ipc.ConnState, raw json.RawMessage) (any, error) {
+		json.Unmarshal(raw, &set)
+		return ipc.SharedSessionView{Name: "lead", Purpose: *set.Purpose, Visibility: "private"}, nil
 	})
 	d.start()
 	cs, _ := connect(t, d, "claude-code")
@@ -244,10 +284,14 @@ func TestStructuredToolsReturnJSON(t *testing.T) {
 	if !isErr || text != "task already claimed" {
 		t.Fatalf("claim: %v %q", isErr, text)
 	}
-	text, _ = callTool(t, cs, "status", nil)
-	var st statusOut
-	if err := json.Unmarshal([]byte(text), &st); err != nil || st.Session != "claude@glow-v2" || st.MachineID != "m1" {
-		t.Fatalf("status %v %q", err, text)
+	text, _ = callTool(t, cs, "machines", nil)
+	var pl ipc.PeerListResult
+	if err := json.Unmarshal([]byte(text), &pl); err != nil || len(pl.Peers) != 1 || pl.Peers[0].Alias != "gpu-box" {
+		t.Fatalf("machines %v %q", err, text)
+	}
+	text, isErr = callTool(t, cs, "session_set", map[string]any{"purpose": "trains models"})
+	if isErr || set.Purpose == nil || *set.Purpose != "trains models" || set.Visibility != nil || !strings.Contains(text, `"purpose": "trains models"`) {
+		t.Fatalf("session_set %v %q %+v", isErr, text, set)
 	}
 	if _, isErr := callTool(t, cs, "create_task", map[string]any{"link": 3}); !isErr {
 		t.Fatal("missing required instructions accepted")
@@ -439,5 +483,54 @@ func TestNormalizeAgent(t *testing.T) {
 		if got := normalizeAgent(in); got != want {
 			t.Errorf("normalizeAgent(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// session_share writes the wake token to a private file and hands the
+// model a listener command that names the file: the token never appears in
+// the model's context or on a command line.
+func TestShareWritesAPrivateWakeFile(t *testing.T) {
+	d := newDaemonFake(t)
+	d.handle(ipc.MethodSessionShare, ipc.GateSession, func(*ipc.ConnState, json.RawMessage) (any, error) {
+		return ipc.ShareResult{Session: ipc.SharedSessionView{Name: "lead", State: "open"}, WakeToken: "WAKE-SECRET", ReattachToken: "R"}, nil
+	})
+	d.handle(ipc.MethodSessionClose, ipc.GateSession, func(*ipc.ConnState, json.RawMessage) (any, error) { return nil, nil })
+	d.start()
+	dir := filepath.Join(t.TempDir(), "wake")
+	cs, sess := connectWith(t, d, "claude-code", Options{WakeDir: dir, ListenerProgram: "/opt/my tools/cravv-connect"}, nil)
+	text, isErr := callTool(t, cs, "session_share", map[string]any{"name": "lead"})
+	var out shareOut
+	if err := json.Unmarshal([]byte(text), &out); isErr || err != nil || strings.Contains(text, "WAKE-SECRET") || out.WakeToken != "" || out.Next != ListenerNext {
+		t.Fatalf("share output %v %q", isErr, text)
+	}
+	prefix := "'/opt/my tools/cravv-connect' listen --wake-file "
+	path, ok := strings.CutPrefix(out.Listener, prefix)
+	if !ok || filepath.Dir(path) != dir {
+		t.Fatalf("listener %q", out.Listener)
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("wake file %v %v", fi, err)
+	}
+	if di, err := os.Stat(dir); err != nil || di.Mode().Perm() != 0o700 {
+		t.Fatalf("wake dir %v %v", di, err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "WAKE-SECRET\n" {
+		t.Fatalf("wake file holds %q", b)
+	}
+	if _, isErr := callTool(t, cs, "session_close", nil); isErr {
+		t.Fatal("close failed")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("wake file left after session_close: %v", err)
+	}
+	callTool(t, cs, "session_share", map[string]any{"name": "lead"})
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("wake files %v", entries)
+	}
+	sess.Close()
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("wake file left after the MCP server stopped: %v", entries)
 	}
 }

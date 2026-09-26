@@ -20,6 +20,12 @@ type Options struct {
 	// CLAUDE_CODE_SESSION_ID for its MCP servers). The daemon records it
 	// with the shared session so the chat's hooks find it.
 	AgentSession string
+	// WakeDir is where session_share writes the wake file the listener
+	// reads ("" returns the wake token to the model instead).
+	WakeDir string
+	// ListenerProgram names cravv-connect in the listener command
+	// (default "cravv-connect").
+	ListenerProgram string
 }
 
 // New builds the MCP server and its daemon session.
@@ -32,7 +38,7 @@ type Options struct {
 // records the name before any tool runs. ServerRequest.ClientInfo covers both.
 func New(opts Options) (*mcp.Server, *Session) {
 	sess := NewSession(opts.Dial, opts.ProjectDir)
-	sess.agentSession = opts.AgentSession
+	sess.agentSession, sess.wakeDir, sess.listenerProgram = opts.AgentSession, opts.WakeDir, opts.ListenerProgram
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)

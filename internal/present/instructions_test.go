@@ -20,6 +20,9 @@ func TestInstructionsCoverTheRules(t *testing.T) {
 		"inside the current project",
 		"check_inbox", "wait_for_message",
 		"disconnect", "kill_switch",
+		"listener", "run_in_background", "start the listener again", "after every wake",
+		"review_pending", "Do not ask the user to approve them again", "never guess it",
+		"password",
 	}
 	for _, m := range must {
 		if !strings.Contains(Instructions, m) {

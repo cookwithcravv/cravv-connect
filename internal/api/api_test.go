@@ -228,7 +228,7 @@ func TestInboxWaitClampsTimeout(t *testing.T) {
 	for _, tc := range []struct {
 		in   int
 		want time.Duration
-	}{{0, 50 * time.Second}, {-3, 50 * time.Second}, {5, 5 * time.Second}, {50, 50 * time.Second}, {600, 50 * time.Second}} {
+	}{{0, 50 * time.Second}, {-3, 50 * time.Second}, {5, 5 * time.Second}, {50, 50 * time.Second}, {600, 600 * time.Second}, {3600, 600 * time.Second}} {
 		if got := WaitTimeout(tc.in); got != tc.want {
 			t.Errorf("WaitTimeout(%d) = %v, want %v", tc.in, got, tc.want)
 		}
@@ -239,7 +239,7 @@ func TestInboxWaitClampsTimeout(t *testing.T) {
 	if err := c.Call(bg, ipc.MethodInboxWait, ipc.InboxWaitParams{TimeoutS: 120}, &r); err != nil {
 		t.Fatal(err)
 	}
-	if h.w.lastWait != 50*time.Second || r.Items == nil {
+	if h.w.lastWait != 120*time.Second || r.Items == nil {
 		t.Fatalf("wait %v items %v", h.w.lastWait, r.Items)
 	}
 }

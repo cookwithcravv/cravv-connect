@@ -41,6 +41,7 @@ func TestLimitValues(t *testing.T) {
 		{"MaxClockSkew", MaxClockSkew, 10 * time.Minute},
 		{"ReclaimGrace", ReclaimGrace, 5 * time.Minute},
 		{"MaxWait", MaxWait, 50 * time.Second},
+		{"MaxWaitLong", MaxWaitLong, 600 * time.Second},
 		{"BackoffMax", BackoffMax, 5 * time.Minute},
 		{"AwayGrace", AwayGrace, 10 * time.Minute},
 		{"LinkRequestExpiry", LinkRequestExpiry, 10 * time.Minute},
