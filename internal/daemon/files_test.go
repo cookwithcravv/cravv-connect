@@ -721,3 +721,21 @@ func TestLinkCloseCancelsDownload(t *testing.T) {
 		t.Fatalf("%d chats sent on the closed link", got-chats)
 	}
 }
+
+// A held file declined because its link closed gets a local notice, but no
+// chat goes out on the closed link.
+func TestDeclineOnClosedLinkSendsNoChat(t *testing.T) {
+	ctx := context.Background()
+	e := d2FileSvc(t, 0)
+	body := e.blobs.put(t, "readme.md", []byte("hello"))
+	e.hold(t, body.FileID, body)
+	if err := e.te.links.Disconnect(ctx, "", e.te.link.Num); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.record(t, body.FileID); r.State != store.FileDeclined || r.Reason != ReasonLinkClosed {
+		t.Fatalf("held file after the link closed: %s (%s)", r.State, r.Reason)
+	}
+	if got := e.te.sender.ofKind(core.KindChat); len(got) != 0 {
+		t.Fatalf("chat sent on the closed link: %+v", got)
+	}
+}

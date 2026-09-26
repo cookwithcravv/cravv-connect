@@ -800,10 +800,14 @@ func (s *FileService) fail(ctx context.Context, rec store.FileRecord, cause erro
 	}
 }
 
-// declined puts a local notice in the inbox and tells the sender why.
+// declined puts a local notice in the inbox and, while the file's link is
+// still active, tells the sender why.
 func (s *FileService) declined(ctx context.Context, peer store.Peer, rec store.FileRecord) error {
 	if err := s.notice(ctx, rec); err != nil {
 		return err
+	}
+	if l, err := s.d.Links.GetLink(ctx, peer.MachineID, rec.LinkID); err != nil || l.State != store.LinkActive {
+		return nil
 	}
 	text := fmt.Sprintf("cravv-connect: file %q (file_id %s) was not received: %s", rec.Name, rec.FileID, rec.Reason)
 	_, err := s.d.Sender.SendEnvelope(ctx, peer.MachineID, core.KindChat, rec.LinkID, core.ChatBody{Text: text})
