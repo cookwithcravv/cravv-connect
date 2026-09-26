@@ -1,6 +1,7 @@
 package pake
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
@@ -75,6 +76,12 @@ func (x *spake2Exchange) Finish(peerMsg []byte) (key []byte, err error) {
 	}
 	x.finished = true
 	if len(peerMsg) != spakeMsgLen || peerMsg[0] != sideByte(x.side.Other()) {
+		return nil, ErrBadMessage
+	}
+	// A reflected message (our own element sent back) must never produce a
+	// key. gospake2 has a reflection check of its own, but it compares
+	// encodings that can differ in padding, so compare the element here too.
+	if bytes.Equal(peerMsg[1:], x.msg[1:]) {
 		return nil, ErrBadMessage
 	}
 	defer func() {
