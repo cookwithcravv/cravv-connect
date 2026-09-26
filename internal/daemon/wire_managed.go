@@ -2,7 +2,11 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/audit"
 	"github.com/cravv/cravv-connect/internal/store"
@@ -12,9 +16,37 @@ import (
 // ResetIdentity, like the shared sessions).
 func (d *Daemon) assembleManaged(db store.Store, lg audit.Logger) {
 	home, _ := os.UserHomeDir()
+	self, err := os.Executable()
+	if err != nil {
+		self = "cravv-connect"
+	}
 	d.offers = NewOfferService(db, currentPeers{d}, FolderRules{Home: home, StateDir: d.opts.Paths.Home}, d.clock, lg)
-	d.host = NewSessionHost(HostDeps{Offers: d.offers, Store: db, Sessions: d.shared, Clock: d.clock, Audit: lg, Log: d.log})
+	d.host = NewSessionHost(HostDeps{
+		Offers: d.offers, Store: db, Sessions: d.shared, Inbox: d.inbox, Links: db, Peers: db,
+		Tasks:  func() HostTasks { return d.svc.Load().tasks },
+		Sender: func() EnvelopeSender { return d.svc.Load().outbound },
+		Adapter: func() AgentAdapter {
+			return ClaudeAdapter{Path: FindClaude(os.Getenv, exec.LookPath, home)}
+		},
+		Runner: ExecRunner{}, RunDir: filepath.Join(d.opts.Paths.Home, "runs"), Self: self, StateDir: d.opts.Paths.Home,
+		Killed: d.kill.Killed, Clock: d.clock, Audit: lg, Log: d.log,
+	})
 	d.offers.AddObserver(d.host)
+}
+
+// runRetention is how long run starts are kept for the caps.
+const runRetention = 48 * time.Hour
+
+// maintainManaged closes idle managed sessions and purges old run records.
+func (d *Daemon) maintainManaged(ctx context.Context) []error {
+	var errs []error
+	if _, err := d.host.Sweep(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("sweep managed sessions: %w", err))
+	}
+	if _, err := d.store.PurgeRunsBefore(ctx, d.clock.Now().Add(-runRetention)); err != nil {
+		errs = append(errs, fmt.Errorf("purge run records: %w", err))
+	}
+	return errs
 }
 
 // buildManaged connects the identity-bound services to them: discovery

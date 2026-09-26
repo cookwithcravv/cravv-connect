@@ -229,7 +229,11 @@ func (d *Daemon) runServices(ctx context.Context, g *services) error {
 		return fmt.Errorf("resume downloads: %w", err)
 	}
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
+	go func() {
+		defer wg.Done()
+		_ = d.host.Run(ctx)
+	}()
 	go func() {
 		defer wg.Done()
 		if err := g.outbound.Run(ctx); err != nil && ctx.Err() == nil {
@@ -446,6 +450,7 @@ func (d *Daemon) maintain(ctx context.Context, g *services) error {
 	if _, err := d.shared.PurgeClosed(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("purge closed sessions: %w", err))
 	}
+	errs = append(errs, d.maintainManaged(ctx)...)
 	return errors.Join(errs...)
 }
 

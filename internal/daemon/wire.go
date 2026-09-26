@@ -252,6 +252,7 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 	}
 	kill.SetHooks(KillHooks{
 		BeforeKill: func(ctx context.Context) {
+			d.host.StopAll() // managed runs end first: their process groups are killed
 			g := d.svc.Load()
 			if err := g.tasks.FailActive(ctx, "killed"); err != nil {
 				d.log.Warn("fail tasks on kill", "err", err)

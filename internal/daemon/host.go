@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -16,8 +17,10 @@ import (
 
 // Audit event types for managed sessions.
 const (
-	EvManagedStart = "managed_start"
-	EvManagedClose = "managed_close"
+	EvManagedStart   = "managed_start"
+	EvManagedClose   = "managed_close"
+	EvManagedRun     = "managed_run"
+	EvManagedRefused = "managed_refused"
 )
 
 // ErrManagedBusy means an offer is at its concurrency limit or the peer at
@@ -31,11 +34,42 @@ type HostOffers interface {
 	Folders() FolderRules
 }
 
-// HostDeps are the SessionHost collaborators.
+// HostInbox reads a managed session's queue: its inbox, one item at a
+// time. Implemented by *InboxService.
+type HostInbox interface {
+	Check(ctx context.Context, session string, limit int) ([]InboxEntry, error)
+	Changed() <-chan struct{}
+}
+
+// HostTasks is what the SessionHost does to the tasks it runs.
+// Implemented by *TaskService.
+type HostTasks interface {
+	Claim(ctx context.Context, session, id string) (store.Task, error)
+	Get(ctx context.Context, session, id string) (store.Task, error)
+	Fail(ctx context.Context, session, id, reason string) (store.Task, error)
+	FailQueued(ctx context.Context, session, id, reason string) error
+	FailClaimedBy(ctx context.Context, session, reason string) error
+}
+
+// HostDeps are the SessionHost collaborators. Tasks and Sender return the
+// current services (ResetIdentity replaces them); Adapter is asked for each
+// run, so a claude installed later is found.
 type HostDeps struct {
 	Offers   HostOffers
 	Store    store.OfferStore
 	Sessions *SessionService
+	Inbox    HostInbox
+	Links    LinkLookup
+	Peers    store.PeerStore
+	Tasks    func() HostTasks
+	Sender   func() EnvelopeSender
+	Adapter  func() AgentAdapter
+	Runner   Runner
+	RunDir   string          // where each run's MCP config is written (0700)
+	Self     string          // the cravv-connect executable the MCP config starts
+	StateDir string          // CRAVV_HOME for the run's MCP server
+	Env      func() []string // the child's environment (default os.Environ)
+	Killed   func() bool
 	Clock    core.Clock
 	Audit    audit.Logger
 	Log      *slog.Logger
@@ -43,11 +77,23 @@ type HostDeps struct {
 
 // SessionHost starts and runs managed sessions (v2 spec 6.2). A link
 // request to an offer creates one (StartManaged); closing its one link
-// closes it.
+// closes it. Each managed session's inbox is its queue: one item at a time
+// goes to a headless agent run in the offer's folder.
 type SessionHost struct {
-	d HostDeps
+	d      HostDeps
+	tokens runTokens
+	poke   chan struct{}
+	wg     sync.WaitGroup // workers
 
-	mu sync.Mutex // serializes StartManaged so the concurrency count is exact
+	startMu sync.Mutex // serializes StartManaged so the concurrency count is exact
+
+	mu      sync.Mutex
+	busy    map[string]bool               // sessions with a worker
+	cancel  map[string]context.CancelFunc // sessions with a run: stops it
+	notes   map[string][]string           // file notices for the next run
+	live    map[string]int                // sessions a human opened: their queue waits
+	noticed map[string]time.Time          // links last told of a refused message
+	changed chan struct{}                 // closed and replaced when a worker stops
 }
 
 // NewSessionHost builds the host.
@@ -58,7 +104,17 @@ func NewSessionHost(d HostDeps) *SessionHost {
 	if d.Log == nil {
 		d.Log = slog.New(slog.DiscardHandler)
 	}
-	return &SessionHost{d: d}
+	if d.Env == nil {
+		d.Env = os.Environ
+	}
+	if d.Killed == nil {
+		d.Killed = func() bool { return false }
+	}
+	return &SessionHost{
+		d: d, tokens: runTokens{byHash: map[string]runGrant{}}, poke: make(chan struct{}, 1),
+		busy: map[string]bool{}, cancel: map[string]context.CancelFunc{}, notes: map[string][]string{},
+		live: map[string]int{}, noticed: map[string]time.Time{}, changed: make(chan struct{}),
+	}
 }
 
 // StartManaged creates the managed session for an accepted request from
@@ -74,8 +130,8 @@ func (h *SessionHost) StartManaged(ctx context.Context, peer store.Peer, offerID
 	if err := h.d.Offers.Folders().Recheck(o); err != nil {
 		return store.SharedSession{}, "", err
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.startMu.Lock()
+	defer h.startMu.Unlock()
 	open, err := h.openFor(ctx, o.ID)
 	if err != nil {
 		return store.SharedSession{}, "", err
@@ -150,6 +206,7 @@ func (h *SessionHost) Close(ctx context.Context, sessionID, reason string) error
 	if err != nil || s.State == core.SessionClosed {
 		return err
 	}
+	h.stop(sessionID)
 	if err := h.d.Sessions.Close(ctx, sessionID); err != nil {
 		return err
 	}

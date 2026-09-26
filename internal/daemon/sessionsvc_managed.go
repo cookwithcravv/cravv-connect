@@ -28,3 +28,30 @@ func (s *SessionService) CreateManaged(ctx context.Context, name, purpose, folde
 	}
 	return rec, nil
 }
+
+// BindRun binds managed session id to connection conn for one run (the
+// SessionHost checked the run token). The session is then Current for conn
+// until UnbindRun or Close. A connection that shares or runs another
+// session is refused.
+func (s *SessionService) BindRun(ctx context.Context, id string, conn uint64) (store.SharedSession, error) {
+	rec, err := s.store.GetShared(ctx, id)
+	if err != nil || rec.Kind != core.SessionManaged || rec.State == core.SessionClosed {
+		return store.SharedSession{}, core.ErrNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for sid, c := range s.bound {
+		if c == conn && sid != id {
+			return store.SharedSession{}, ErrAlreadyShared
+		}
+	}
+	s.bound[id] = conn
+	return rec, nil
+}
+
+// UnbindRun ends a run's binding: its connection can no longer act as the session.
+func (s *SessionService) UnbindRun(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.bound, id)
+}
