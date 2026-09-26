@@ -188,6 +188,44 @@ password; anything that narrows it does not. `resume-peer` is the one
 exception without a password, because it only restores a state the human
 already chose when pairing.
 
+### Chat decisions and confirmation codes
+
+`review_pending` lets the human behind a chat decide link requests and held
+tasks on `tasks-ask` links without the password, at the chat tier: it can
+never grant `tasks-auto` or raise a permission. The answer comes from an MCP
+form the human fills in, or, when the agent cannot show one, from a 4-digit
+confirmation code:
+
+- The code is shown only in a macOS desktop notification. The daemon hands
+  the notification script to `osascript` on stdin, never as an argument, so
+  the code does not appear in `ps`. It never travels over the daemon socket
+  or reaches the model; the human reads it and types `accept <code>` in the
+  chat.
+- The notification starts with the code, then says in the daemon's own words
+  what is being decided. Text the peer wrote (a task's instructions) comes
+  last, after `From <alias>/<session>:`, cut at 280 characters, so a peer
+  cannot put a fake code before the real one.
+- A code is valid for 10 minutes and is used up once the decision is
+  applied (a decision that fails leaves it valid for a retry).
+- An item takes at most 3 wrong codes over its whole life; asking for a new
+  code does not reset the count. After the third, no code ever works for that
+  item again: the human decides it with the password, in a terminal
+  (`cravv-connect approvals`, `cravv-connect links`) or in the web UI
+  (`cravv-connect ui`).
+- A chat session takes at most 10 wrong codes in 24 hours over all its items.
+- These counts are stored in the daemon's database, so restarting the daemon
+  does not reset them.
+- On Linux there is no desktop notifier (`notify-send` only takes the text
+  as arguments), so there is no code path: the password path is the only way.
+
+Residual risk: macOS keeps delivered notifications in its notification
+database under your Library folder. A process with Full Disk Access can read
+it. If the terminal or IDE that runs your agent has Full Disk Access, a
+shell command the agent runs inherits it and could read the code and approve
+on its own, within the chat tier (never `tasks-auto`). Do not give Full Disk
+Access to the terminal or IDE your agents run in, or decide with the password
+instead.
+
 ## The web UI
 
 `cravv-connect ui` asks the daemon to serve a local page on `127.0.0.1`
