@@ -279,6 +279,7 @@ type Store interface {
 	SessionStore
 	SharedSessionStore
 	LinkStore
+	OfferStore
 	TaskStore
 	FileStore
 	DedupStore

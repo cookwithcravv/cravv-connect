@@ -195,6 +195,48 @@ DELETE FROM outbox WHERE id IN (
 		AND COALESCE(json_extract(env, '$.link_id'), '') = ''
 );
 `,
+	// v2 Phase 3: managed-session offers per paired machine, what the daemon
+	// keeps about each managed session, and run starts for the caps.
+	`
+CREATE TABLE offers (
+	id              TEXT PRIMARY KEY,
+	peer            TEXT NOT NULL,
+	label           TEXT NOT NULL,
+	folder          TEXT NOT NULL,
+	real_folder     TEXT NOT NULL,
+	agent           TEXT NOT NULL,
+	permission      TEXT NOT NULL,
+	run_mode        TEXT NOT NULL,
+	max_concurrent  INTEGER NOT NULL,
+	idle_timeout_ms INTEGER NOT NULL,
+	max_turns       INTEGER NOT NULL,
+	run_timeout_ms  INTEGER NOT NULL,
+	runs_per_hour   INTEGER NOT NULL,
+	runs_per_day    INTEGER NOT NULL,
+	created_at      INTEGER NOT NULL,
+	updated_at      INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX offers_peer_label ON offers(peer, label);
+CREATE TABLE managed_sessions (
+	session_id    TEXT PRIMARY KEY REFERENCES shared_sessions(id) ON DELETE CASCADE,
+	offer_id      TEXT NOT NULL,
+	peer          TEXT NOT NULL,
+	link_id       TEXT NOT NULL,
+	agent_session TEXT NOT NULL,
+	started       INTEGER NOT NULL,
+	last_active   INTEGER NOT NULL,
+	created_at    INTEGER NOT NULL
+);
+CREATE TABLE managed_runs (
+	id         TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	peer       TEXT NOT NULL,
+	link_id    TEXT NOT NULL,
+	started_at INTEGER NOT NULL
+);
+CREATE INDEX managed_runs_peer ON managed_runs(peer, started_at);
+CREATE INDEX managed_runs_link ON managed_runs(link_id, started_at);
+`,
 }
 
 // migrate creates schema_migrations and applies every migration whose
