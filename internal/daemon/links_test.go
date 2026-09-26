@@ -58,6 +58,10 @@ func TestLinkRequestAndAccept(t *testing.T) {
 	if acc.State != store.LinkActive || acc.PermissionIn != core.PermTasksAsk || !acc.ExpiresAt.IsZero() {
 		t.Fatalf("accepted %+v", acc)
 	}
+	// The requester lets the acceptor send messages only (its PermissionIn).
+	if acc.PermissionOut != core.PermMessages {
+		t.Fatalf("acceptor's PermissionOut %q, want messages", acc.PermissionOut)
+	}
 	n.pump()
 	got := a.linkOf(t, b, out.ID)
 	if got.State != store.LinkActive || got.PermissionOut != core.PermTasksAsk || got.PermissionIn != core.PermMessages {

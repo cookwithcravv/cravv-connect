@@ -279,6 +279,8 @@ func (s *LinkService) Decide(ctx context.Context, num int64, accept bool, perm c
 			return fmt.Errorf("link %d is %s: %w", num, x.State, core.ErrBadTransition)
 		}
 		x.State, x.PermissionIn, x.ExpiresAt, x.UpdatedAt = store.LinkActive, perm, time.Time{}, now
+		// The requester lets this side send messages only until it raises that.
+		x.PermissionOut = core.PermMessages
 		return nil
 	})
 	if err != nil {
