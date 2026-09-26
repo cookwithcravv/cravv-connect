@@ -194,3 +194,26 @@ func TestPromptNoticeReminders(t *testing.T) {
 		t.Fatal("still counted as listening")
 	}
 }
+
+// Review focus: a session found only by folder (no chat ID bound) may
+// belong to another chat in that folder, so its Stop hook never keeps a
+// chat going; it only gives the notice.
+func TestStopHookNeverBlocksOnFolderFallback(t *testing.T) {
+	ctx := context.Background()
+	e := newHookEnv(t)
+	s, l := e.share(t, "lead") // shared by an agent that gives no chat ID
+	e.deliver(t, s, l, core.KindChat)
+	for _, chat := range []string{"", "chat-unbound"} {
+		a, err := e.hooks.Check(ctx, HookQuery{AgentSession: chat, Cwd: "/w/proj", Event: HookStop})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a.Block || a.Reason != "" || !strings.Contains(a.Notice, "1 new message on link "+itoa(l.Num)) {
+			t.Fatalf("chat %q: %+v", chat, a)
+		}
+	}
+	e.hooks.Bind("chat-1", s.ID)
+	if a, _ := e.hooks.Check(ctx, HookQuery{AgentSession: "chat-1", Cwd: "/w/proj", Event: HookStop}); !a.Block {
+		t.Fatalf("the bound chat: %+v", a)
+	}
+}

@@ -66,7 +66,7 @@ type HookCounts interface {
 // the agent's chat ID when it shares or reattaches, so two chats in one
 // folder are told apart. Without that ID (an agent that does not give its
 // MCP server one), the newest open session of the folder whose chat ID is
-// unknown answers.
+// unknown answers, with a notice only: it never blocks Stop.
 type HookService struct {
 	sessions HookSessions
 	counts   HookCounts
@@ -102,8 +102,10 @@ func (h *HookService) Bind(agentSession, sessionID string) {
 	h.chats[agentSession] = sessionID
 }
 
-// resolve returns the shared session the hook's chat holds.
-func (h *HookService) resolve(ctx context.Context, q HookQuery) (store.SharedSession, bool) {
+// resolve returns the shared session the hook's chat holds. byChat
+// reports that the chat ID named it; otherwise it is the folder's newest
+// unbound session, which may belong to another chat in that folder.
+func (h *HookService) resolve(ctx context.Context, q HookQuery) (s store.SharedSession, byChat, ok bool) {
 	h.mu.Lock()
 	id, known := h.chats[q.AgentSession]
 	bound := make(map[string]bool, len(h.chats))
@@ -114,27 +116,26 @@ func (h *HookService) resolve(ctx context.Context, q HookQuery) (store.SharedSes
 	if known {
 		s, err := h.sessions.Get(ctx, id)
 		if err != nil || s.State == core.SessionClosed {
-			return store.SharedSession{}, false
+			return store.SharedSession{}, false, false
 		}
-		return s, true
+		return s, true, true
 	}
 	open, err := h.sessions.List(ctx, core.SessionOpen)
 	if err != nil {
-		return store.SharedSession{}, false
+		return store.SharedSession{}, false, false
 	}
-	var found store.SharedSession
-	ok := false
-	for _, s := range open { // oldest first: the last match is the newest
-		if s.ProjectDir == q.Cwd && q.Cwd != "" && !bound[s.ID] {
-			found, ok = s, true
+	for _, o := range open { // oldest first: the last match is the newest
+		if o.ProjectDir == q.Cwd && q.Cwd != "" && !bound[o.ID] {
+			s, ok = o, true
 		}
 	}
-	return found, ok
+	return s, false, ok
 }
 
-// Check answers one hook run.
+// Check answers one hook run. A session found only by folder never blocks
+// Stop: the notice is all it gets.
 func (h *HookService) Check(ctx context.Context, q HookQuery) (HookAnswer, error) {
-	s, ok := h.resolve(ctx, q)
+	s, byChat, ok := h.resolve(ctx, q)
 	if !ok {
 		return HookAnswer{}, nil
 	}
@@ -146,7 +147,7 @@ func (h *HookService) Check(ctx context.Context, q HookQuery) (HookAnswer, error
 	listening := h.counts.Listening(s.ID)
 	switch q.Event {
 	case HookStop, HookSubagentStop:
-		a.Block = h.stop(q, s.ID, c)
+		a.Block = byChat && h.stop(q, s.ID, c)
 		if a.Block {
 			a.Reason = present.PendingLine(unhandledGroups(c.Groups))
 			if !listening {
