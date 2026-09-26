@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -10,11 +11,14 @@ import (
 	"github.com/cravv/cravv-connect/internal/ipc"
 )
 
+// sessionNames lists the sessions as name:state, sorted: sessions shared
+// in the same millisecond have no set order.
 func sessionNames(r ipc.SessionsListResult) string {
 	var names []string
 	for _, s := range r.Sessions {
 		names = append(names, s.Name+":"+s.State)
 	}
+	slices.Sort(names)
 	return strings.Join(names, ",")
 }
 
@@ -41,7 +45,7 @@ func TestShareAndDiscoverVisibility(t *testing.T) {
 	vis := "peers:alice"
 	Call(t, secret.C, ipc.MethodSessionSet, ipc.SessionSetParams{Visibility: &vis}, nil)
 	Call(t, a.Conn(), ipc.MethodSessionsList, ipc.MachineParams{Machine: "bob"}, &r)
-	if got := sessionNames(r); got != "trainer:open,secret:open" {
+	if got := sessionNames(r); got != "secret:open,trainer:open" {
 		t.Fatalf("after session.set alice sees %q", got)
 	}
 	// Session names are unique among open sessions on a machine.
