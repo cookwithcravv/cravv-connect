@@ -631,3 +631,34 @@ func TestSetupRelayTokenOnSetUpMachine(t *testing.T) {
 		t.Fatal("stored the token")
 	}
 }
+
+// After a restart the LAN test relay this machine ran is gone: setup advises
+// starting a new one rather than joining another machine.
+func TestSetupAdvisesNewLANRelayAfterRestart(t *testing.T) {
+	defer func(d time.Duration) { setupOnlineWait = d }(setupOnlineWait)
+	setupOnlineWait = 300 * time.Millisecond
+	for _, relay := range []string{"http://mac.local:8787", "http://192.168.1.10:8787", "http://127.0.0.1:8787"} {
+		r := newSetupRig(t, ipc.StatusResult{RelayURL: relay, Errors: []string{"relay: connection refused"}})
+		r.env.Hostname = func() (string, error) { return "Mac.lan", nil }
+		r.sys.private = []netip.Addr{netip.MustParseAddr("192.168.1.10")}
+		r.configure(t, relay)
+		r.daemon.up()
+		if code := r.run("--no-agents"); code != 1 {
+			t.Fatalf("%s: code %d", relay, code)
+		}
+		want := "; relay: connection refused. The relay " + relay + " is on this machine, and a LAN test relay stops when the machine restarts: " +
+			"start a new one with `cravv-connect setup --reset` (you pair again with every peer). Logs: "
+		if !strings.Contains(r.errb.String(), want) || strings.Contains(r.errb.String(), "--join") {
+			t.Errorf("%s: stderr %q", relay, r.errb.String())
+		}
+	}
+
+	r := newSetupRig(t, ipc.StatusResult{RelayURL: "http://gpu-box.local:8787"})
+	r.env.Hostname = func() (string, error) { return "Mac.lan", nil }
+	r.sys.private = []netip.Addr{netip.MustParseAddr("192.168.1.10")}
+	r.configure(t, "http://gpu-box.local:8787")
+	r.daemon.up()
+	if code := r.run("--no-agents"); code != 1 || !strings.Contains(r.errb.String(), "`cravv-connect setup --reset --join <code>`") {
+		t.Errorf("another machine's relay: %d %q", code, r.errb.String())
+	}
+}

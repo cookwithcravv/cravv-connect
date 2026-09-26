@@ -303,8 +303,13 @@ func (s *setup) daemonOnline(install, needRelay bool) (ipc.StatusResult, error) 
 	if err != nil || !needRelay {
 		return st, err
 	}
-	return s.waitRelay(st, "If another machine is already on this relay, set this one up with "+
-		"`cravv-connect setup --reset --join <code>` instead (a join code from `cravv-connect pair` there). ")
+	advice := "If another machine is already on this relay, set this one up with " +
+		"`cravv-connect setup --reset --join <code>` instead (a join code from `cravv-connect pair` there). "
+	if s.lanRelayHere(st.RelayURL) {
+		advice = fmt.Sprintf("The relay %s is on this machine, and a LAN test relay stops when the machine restarts: "+
+			"start a new one with `cravv-connect setup --reset` (you pair again with every peer). ", terminalSafe(st.RelayURL))
+	}
+	return s.waitRelay(st, advice)
 }
 
 // waitRelay waits until the daemon is connected to the relay, polling from

@@ -130,3 +130,33 @@ func loopbackRelay(origin string) bool {
 	u, err := url.Parse(origin)
 	return err == nil && loopbackHost(u.Hostname())
 }
+
+// lanRelayHere reports whether origin is where setup would have started a
+// LAN test relay on this machine: plain http on the LAN relay port, at
+// <host>.local, one of this machine's private addresses, or loopback.
+func (s *setup) lanRelayHere(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "http" || u.Port() != strconv.Itoa(lanRelayPort) {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if loopbackHost(host) {
+		return true
+	}
+	if h, err := s.env.Hostname(); err == nil {
+		if label, _, _ := strings.Cut(h, "."); hostLabel.MatchString(label) && host == strings.ToLower(label)+".local" {
+			return true
+		}
+	}
+	a, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	addrs, _ := s.sys.PrivateAddrs()
+	for _, p := range addrs {
+		if p == a.Unmap() {
+			return true
+		}
+	}
+	return false
+}
