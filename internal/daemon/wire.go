@@ -231,6 +231,7 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 	if err := d.sessions.DisconnectAll(ctx); err != nil {
 		return nil, err
 	}
+	d.shared = NewSessionService(db, opts.Clock)
 	d.inbox = NewInboxService(db, d.sessions, db, opts.Clock)
 	d.sessions.OnExpired(func(ctx context.Context, rec store.SessionRecord) {
 		if rec.Agent == CLIAgent {
@@ -246,6 +247,11 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 		}
 	})
 	d.svc.Store(d.build(identity))
+	// No connection survives a restart: every open session is away until
+	// its client reattaches (links stay open for the away grace).
+	if err := d.shared.AwayAll(ctx); err != nil {
+		return nil, err
+	}
 	kill.SetHooks(KillHooks{
 		BeforeKill: func(ctx context.Context) {
 			g := d.svc.Load()

@@ -67,6 +67,7 @@ type Daemon struct {
 	guard    *auth.Guard
 	allow    *AllowPaths
 	sessions *SessionRegistry
+	shared   *SessionService
 	inbox    *InboxService
 
 	svc        atomic.Pointer[services]
@@ -401,6 +402,12 @@ func (d *Daemon) maintain(ctx context.Context, g *services) error {
 	if err := d.sessions.Sweep(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("sweep sessions: %w", err))
 	}
+	if _, err := d.shared.Sweep(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("sweep shared sessions: %w", err))
+	}
+	if _, err := d.shared.PurgeClosed(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("purge closed sessions: %w", err))
+	}
 	return errors.Join(errs...)
 }
 
@@ -469,6 +476,7 @@ func (d *Daemon) Close() error {
 // Accessors used by the API layer (internal/app adapts them to api ports).
 
 func (d *Daemon) Sessions() *SessionRegistry    { return d.sessions }
+func (d *Daemon) Shared() *SessionService       { return d.shared }
 func (d *Daemon) Inbox() *InboxService          { return d.inbox }
 func (d *Daemon) Tasks() *TaskService           { return d.svc.Load().tasks }
 func (d *Daemon) Files() *FileService           { return d.svc.Load().files }
