@@ -173,8 +173,8 @@ func TestCrossSessionIsolation(t *testing.T) {
 }
 
 // Criterion 2: a task on a tasks-auto link runs create, claim, update,
-// complete, and the sender sees every state (including seen-less queued)
-// and the result through inbox.wait.
+// complete, and the sender sees every state (including seen) and the result
+// through inbox.wait.
 func TestTaskOverTasksAutoLink(t *testing.T) {
 	t.Parallel()
 	_, a, b := NewPair(t, PairOptions{})
@@ -191,7 +191,12 @@ func TestTaskOverTasksAutoLink(t *testing.T) {
 		t.Fatalf("task item wrapped %q", item.Wrapped)
 	}
 
+	// Bob's inbox returned the task: alice sees "seen" before anyone claims it.
 	var tv ipc.TaskView
+	Eventually(t, wait, "sender sees seen", func() bool {
+		Call(t, l.A.C, ipc.MethodTaskGet, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
+		return tv.State == "seen"
+	})
 	Call(t, l.B.C, ipc.MethodTaskClaim, ipc.TaskIDParams{TaskID: created.TaskID}, &tv)
 	if tv.State != "claimed" {
 		t.Fatalf("after claim: %+v", tv)

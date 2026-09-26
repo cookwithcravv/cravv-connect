@@ -37,6 +37,13 @@ type InboxSessions interface {
 	SetCursor(ctx context.Context, id string, cursor int64) error
 }
 
+// ReadObserver is told which items a session's Check just returned (for
+// the first time: the cursor moved past them). TaskService implements it to
+// send task.update{seen}.
+type ReadObserver interface {
+	ItemsRead(ctx context.Context, session string, items []store.InboxItem)
+}
+
 // InboxService stores delivered items and serves them to the shared session
 // each one is for (v2 spec 10: the inbox is scoped by session and link).
 type InboxService struct {
@@ -49,6 +56,14 @@ type InboxService struct {
 
 	mu      sync.Mutex
 	changed chan struct{} // closed and replaced by Notify
+	readers []ReadObserver
+}
+
+// AddReadObserver registers o for items returned by Check.
+func (s *InboxService) AddReadObserver(o ReadObserver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.readers = append(s.readers, o)
 }
 
 // NewInboxService builds the service with the default renderers.
@@ -168,6 +183,16 @@ func (s *InboxService) Check(ctx context.Context, session string, limit int) ([]
 	}
 	if err := s.sessions.SetCursor(ctx, rec.ID, out[len(out)-1].Item.Seq); err != nil {
 		return nil, err
+	}
+	read := make([]store.InboxItem, len(out))
+	for i, e := range out {
+		read[i] = e.Item
+	}
+	s.mu.Lock()
+	obs := append([]ReadObserver(nil), s.readers...)
+	s.mu.Unlock()
+	for _, o := range obs {
+		o.ItemsRead(ctx, rec.ID, read)
 	}
 	return out, nil
 }

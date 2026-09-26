@@ -624,3 +624,61 @@ func TestGetHidesUnapprovedInboundTasks(t *testing.T) {
 		t.Fatalf("Get(approved) = %+v, %v", tk, err)
 	}
 }
+
+// v2 spec 4: the sender learns when the receiving session's inbox first
+// returns a task (seen), so a slow session and a stuck one look different.
+func TestSeenSentWhenTheInboxReturnsTheTask(t *testing.T) {
+	ctx := context.Background()
+	e := d2Tasks(t, core.PermTasksAuto)
+	e.inbox.AddReadObserver(e.tasks)
+	id := e.incoming(t, "work")
+	seen := func() int {
+		n := 0
+		for _, u := range d2Updates(t, e.sender) {
+			if u.TaskID == id && u.State == core.TaskSeen {
+				n++
+			}
+		}
+		return n
+	}
+	if seen() != 0 {
+		t.Fatal("seen sent before the session read its inbox")
+	}
+	if items, _ := e.inbox.Check(ctx, e.session.ID, 10); len(items) != 1 {
+		t.Fatalf("inbox %+v", items)
+	}
+	if seen() != 1 {
+		t.Fatalf("seen sent %d times, want 1", seen())
+	}
+	e.inbox.Check(ctx, e.session.ID, 10)
+	if seen() != 1 {
+		t.Fatal("seen sent again")
+	}
+	if st := e.state(t, id).State; st != core.TaskQueued {
+		t.Fatalf("receiver state %s, want queued (seen is sender-side only)", st)
+	}
+}
+
+func TestSenderMirrorsSeenWithoutGoingBackwards(t *testing.T) {
+	ctx := context.Background()
+	e := d2Tasks(t, core.PermTasksAuto)
+	id, err := e.tasks.Create(ctx, e.session.ID, "/w", e.link.Num, "work", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(st core.TaskState) {
+		if err := e.handle(t, d2Env(t, e.peer, core.KindTaskUpdate, e.link.ID, core.TaskUpdateBody{TaskID: id, State: st})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send(core.TaskQueued)
+	send(core.TaskSeen)
+	if st := e.state(t, id).State; st != core.TaskSeen {
+		t.Fatalf("after seen: %s", st)
+	}
+	send(core.TaskClaimed)
+	send(core.TaskSeen) // a late, reordered seen
+	if st := e.state(t, id).State; st != core.TaskClaimed {
+		t.Fatalf("a late seen moved the task back to %s", st)
+	}
+}

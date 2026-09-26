@@ -238,6 +238,7 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 	d.shared = NewSessionService(db, opts.Clock)
 	d.shared.AddObserver(sessionLinks{d})
 	d.inbox = NewInboxService(db, d.shared, db, db, opts.Clock)
+	d.inbox.AddReadObserver(taskReader{d})
 	d.attend = NewAttentionService(d.shared, db, db, d.inbox)
 	d.svc.Store(d.build(identity))
 	// No connection survives a restart: every open session is away until
@@ -355,6 +356,14 @@ func registerHandlers(g *services, inbox *InboxService, sessions SessionLookup, 
 		core.KindControlResumed, core.KindControlUnpaired, core.KindControlRelayMoved, core.KindControlUnsupported,
 		core.KindSessionsList, core.KindSessionsListed, core.KindLinkRequest, core.KindLinkAccepted,
 		core.KindLinkRejected, core.KindLinkClosed, core.KindLinkState, core.KindPresencePing, core.KindPresencePong)
+}
+
+// taskReader forwards inbox reads to the current TaskService (ResetIdentity
+// replaces the services; the inbox and its observer stay).
+type taskReader struct{ d *Daemon }
+
+func (o taskReader) ItemsRead(ctx context.Context, session string, items []store.InboxItem) {
+	o.d.svc.Load().tasks.ItemsRead(ctx, session, items)
 }
 
 // sessionLinks forwards shared-session changes to the current LinkService

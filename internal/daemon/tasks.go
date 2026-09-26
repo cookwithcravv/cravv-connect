@@ -251,6 +251,22 @@ func (s *TaskService) deliverTask(ctx context.Context, t store.Task, msgID strin
 	return err
 }
 
+// ItemsRead implements ReadObserver: the first time the receiving session's
+// inbox returns a queued task, its sender is told it was seen (v2 spec 4),
+// so a slow session and a stuck one look different. The task stays queued.
+func (s *TaskService) ItemsRead(ctx context.Context, session string, items []store.InboxItem) {
+	for _, it := range items {
+		if it.Kind != core.KindTaskCreate || it.TaskID == "" {
+			continue
+		}
+		t, err := s.inboundTask(ctx, session, it.TaskID)
+		if err != nil || t.State != core.TaskQueued {
+			continue
+		}
+		s.sendUpdate(ctx, t, core.TaskUpdateBody{TaskID: t.ID, State: core.TaskSeen})
+	}
+}
+
 // sendUpdate reports an inbound task's state to its sender over the task's
 // link. It is best effort: the outbox persists it, and after the link
 // closed the sender fails the task on its own side.
