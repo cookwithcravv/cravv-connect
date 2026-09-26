@@ -228,10 +228,12 @@ in progress (the partial blob is deleted and no offer is sent), and stops
 handling incoming frames, which wait at the relay for up to 7 days. Messages
 the relay already accepted are still delivered to peers; nothing new is sent
 until `cravv-connect resume`. Every IPC method except `status`,
-`auth.unlock`, `resume`, `kill`, `daemon.shutdown`, `peer.list`,
-`audit.read` and `hook.counts` fails, so agents cannot send, read the inbox
-or work on tasks, and `pause`, `unpair`, trust changes and `reset-identity`
-also wait until resume. Pulling the switch again while it is on succeeds and
+`auth.unlock`, `resume`, `kill`, `daemon.shutdown`, `reset_identity`,
+`peer.list`, `audit.read` and `hook.counts` fails, so agents cannot send,
+read the inbox or work on tasks, and `pause`, `unpair` and trust changes also
+wait until resume. `reset-identity` still works (with the password), so a
+machine killed because it may be compromised gets a new identity without
+reconnecting under the old one first. Pulling the switch again while it is on succeeds and
 changes nothing.
 
 ## Keys and local storage
@@ -260,8 +262,8 @@ changes nothing.
   files under `files/<alias>/` (never deleted automatically). The relay admin
   token given to `init --relay-token` is kept in `store.db` until the first
   successful registration.
-- `cravv-connect reset-identity` (with the kill switch off) turns the kill
-  switch on, deletes every peer, prekey and queued outgoing message, and
+- `cravv-connect reset-identity` (also while killed) turns the kill
+  switch on (or leaves it on), deletes every peer, prekey and queued outgoing message, and
   replaces the identity. The new identity has no relay mailbox: it registers
   again with an admin token or with the invite received the next time you
   join a pairing. Every peer has to pair again; run `cravv-connect resume`

@@ -102,8 +102,8 @@ Error:
 Each method has a gate, checked before the handler in this order:
 
 1. **Kill switch.** While the kill switch is on, only `status`, `auth.unlock`,
-   `resume`, `kill`, `daemon.shutdown`, `peer.list`, `audit.read`, and
-   `hook.counts` run. Everything else fails with `killed`.
+   `resume`, `kill`, `daemon.shutdown`, `reset_identity`, `peer.list`,
+   `audit.read`, and `hook.counts` run. Everything else fails with `killed`.
 2. **session:** `session.register` must have succeeded on this connection,
    otherwise `no_session`.
 3. **unlock:** `auth.unlock` must have succeeded on this connection within the
@@ -165,7 +165,7 @@ with `auth_unavailable`.
 | `files.list` | `{}` | `{files: [FileView]}` | none | no |
 | `files.accept` | `{file_id}` | `{}` | unlock | no |
 | `allow_path.add` | `{path}` | `{}` | unlock | no |
-| `reset_identity` | `{}` | `{}` | unlock | no |
+| `reset_identity` | `{}` | `{}` | unlock | yes |
 | `audit.read` | `{limit}` | `{events: [Event]}` | none | yes |
 | `hook.counts` | `{cwd}` | `{notice, unread, approvals}` | none | yes |
 | `daemon.shutdown` | `{}` | `{}` | none | yes |
@@ -268,8 +268,9 @@ with `auth_unavailable`.
   (`paused`) or its trust no longer allows files. The quota and disk checks
   still apply; if one fails the file is declined, the sender is told, and the
   error is returned (`quota` for the quota).
-- **`reset_identity`:** only runs while the kill switch is off. It turns the
-  kill switch on, deletes every peer, prekey and outbox item, stops pending
+- **`reset_identity`:** also runs while the kill switch is on, so a machine
+  killed because it may be compromised can get a new identity without
+  resuming first. It turns the kill switch on (or leaves it on), deletes every peer, prekey and outbox item, stops pending
   pairings, and creates a new identity with no relay mailbox.
 - **`audit.read`:** the newest `limit` events (default 50, at most 1000),
   oldest first.

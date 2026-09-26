@@ -12,7 +12,9 @@ func (h *handlers) registerControl(s *ipc.Server) {
 	s.Register(ipc.MethodKill, ipc.Typed(h.kill), ipc.GateAllowWhenKilled)
 	s.Register(ipc.MethodResume, ipc.Typed(h.resume), ipc.GateUnlock|ipc.GateAllowWhenKilled)
 	s.Register(ipc.MethodAllowPathAdd, ipc.Typed(h.allowPath), ipc.GateUnlock)
-	s.Register(ipc.MethodResetIdentity, ipc.Typed(h.resetIdentity), ipc.GateUnlock)
+	// Resetting a compromised identity must not need a resume first (which
+	// would reconnect with the old identity); it kills and stays killed.
+	s.Register(ipc.MethodResetIdentity, ipc.Typed(h.resetIdentity), ipc.GateUnlock|ipc.GateAllowWhenKilled)
 	// Stopping the daemon cuts traffic off, like kill: agents may do it, no
 	// password, also while killed. Starting it again needs no password either.
 	s.Register(ipc.MethodDaemonShutdown, ipc.Typed(h.shutdown), ipc.GateAllowWhenKilled)

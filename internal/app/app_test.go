@@ -183,3 +183,34 @@ func TestAgainstRealDaemon(t *testing.T) {
 		t.Fatalf("inbox after resume: %v", err)
 	}
 }
+
+// reset_identity is a recovery step for a compromised machine: it must work
+// while the kill switch is on (it needs the password, not a resume first).
+func TestResetIdentityWhileKilled(t *testing.T) {
+	sock, _ := realDaemon(t)
+	ctx := context.Background()
+	c := dial(t, sock)
+	var before ipc.StatusResult
+	if err := c.Call(ctx, ipc.MethodStatus, nil, &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Call(ctx, ipc.MethodKill, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Call(ctx, ipc.MethodResetIdentity, nil, nil); !errors.Is(err, core.ErrAuthRequired) {
+		t.Fatalf("reset_identity while killed without unlock: %v", err)
+	}
+	if err := c.Call(ctx, ipc.MethodAuthUnlock, ipc.UnlockParams{Password: "pw"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Call(ctx, ipc.MethodResetIdentity, nil, nil); err != nil {
+		t.Fatalf("reset_identity while killed: %v", err)
+	}
+	var after ipc.StatusResult
+	if err := c.Call(ctx, ipc.MethodStatus, nil, &after); err != nil {
+		t.Fatal(err)
+	}
+	if after.MachineID == before.MachineID || !after.Killed {
+		t.Fatalf("after reset: machine %s (was %s), killed %v", after.MachineID, before.MachineID, after.Killed)
+	}
+}

@@ -113,7 +113,7 @@ func TestEveryMethodRegisteredWithGate(t *testing.T) {
 		ipc.MethodFilesList:       ipc.GateNone,
 		ipc.MethodFilesAccept:     ipc.GateUnlock,
 		ipc.MethodAllowPathAdd:    ipc.GateUnlock,
-		ipc.MethodResetIdentity:   ipc.GateUnlock,
+		ipc.MethodResetIdentity:   ipc.GateUnlock | ipc.GateAllowWhenKilled,
 		ipc.MethodAuditRead:       ipc.GateAllowWhenKilled,
 		ipc.MethodHookCounts:      ipc.GateAllowWhenKilled,
 		ipc.MethodDaemonShutdown:  ipc.GateAllowWhenKilled,

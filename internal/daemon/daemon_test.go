@@ -816,3 +816,19 @@ func TestKillFlushWindowIsClosed(t *testing.T) {
 		t.Fatalf("inbound handled %d deliveries during the kill flush", handled)
 	}
 }
+
+func TestResetIdentityWhenAlreadyKilled(t *testing.T) {
+	ctx := context.Background()
+	d := d2NewDaemon(t, t.TempDir(), &d2Relay{})
+	defer d.Close()
+	old := d.Identity().MachineID()
+	if err := d.Kill().Kill(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.ResetIdentity(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if d.Identity().MachineID() == old || !d.Kill().Killed() {
+		t.Fatalf("identity replaced %v, killed %v", d.Identity().MachineID() != old, d.Kill().Killed())
+	}
+}
