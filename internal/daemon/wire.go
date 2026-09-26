@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/cravv/cravv-connect/internal/audit"
@@ -37,6 +39,9 @@ type Options struct {
 	ReconnectMin     time.Duration                                    // default core.BackoffMin
 	MaintenanceEvery time.Duration                                    // default 1 minute
 	FileRetryDelay   time.Duration                                    // default 2 seconds
+	// StatPAMConfig stats the PAM configuration file for the self-test cache
+	// key; default os.Stat.
+	StatPAMConfig func(path string) (os.FileInfo, error)
 }
 
 // New is the composition root: it opens the store, loads or creates the
@@ -48,9 +53,10 @@ func New(opts Options) (*Daemon, error) {
 	// A verifier that accepts any password (for example a PAM stack ending
 	// in pam_permit) would turn every password gate into a no-op: refuse.
 	// The self-test is a failed login against the OS account (pam_faillock
-	// counts it), so it runs once per PAM service and the result is kept in
-	// the store. A fresh install runs it before the store is created.
-	serviceID := selfTestIdentity(opts.Config)
+	// counts it), so it runs once per PAM service and configuration file
+	// version, and the result is kept in the store. A fresh install runs it
+	// before the store is created.
+	serviceID := selfTestIdentity(opts.Config, opts.StatPAMConfig)
 	_, statErr := os.Stat(opts.Paths.DB)
 	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 		return nil, statErr
@@ -81,13 +87,21 @@ func New(opts Options) (*Daemon, error) {
 	return d, nil
 }
 
-// selfTestIdentity names the password stack the self-test ran against.
-func selfTestIdentity(cfg config.Config) string {
+// selfTestIdentity names the password stack the self-test ran against:
+// GOOS:service:size:mtime of /etc/pam.d/<service>, or GOOS:service:nostat when
+// the file cannot be stat'ed. Editing the PAM file changes the key, so the
+// self-test runs again on the next start.
+func selfTestIdentity(cfg config.Config, stat func(string) (os.FileInfo, error)) string {
 	svc := cfg.PAMService
 	if svc == "" {
 		svc = auth.DefaultPAMService()
 	}
-	return runtime.GOOS + ":" + svc
+	id := runtime.GOOS + ":" + svc + ":"
+	fi, err := stat(filepath.Join("/etc/pam.d", svc))
+	if err != nil {
+		return id + "nostat"
+	}
+	return id + strconv.FormatInt(fi.Size(), 10) + ":" + strconv.FormatInt(fi.ModTime().UnixNano(), 10)
 }
 
 func selfTest(opts Options) error {
@@ -117,6 +131,9 @@ func recordSelfTest(db store.SettingsStore, opts Options, serviceID string, test
 }
 
 func normalize(o *Options) error {
+	if o.StatPAMConfig == nil {
+		o.StatPAMConfig = os.Stat
+	}
 	if o.Clock == nil {
 		o.Clock = core.SystemClock{}
 	}

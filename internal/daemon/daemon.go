@@ -26,8 +26,9 @@ const (
 	SettingRelayInvite = "relay_invite"
 	// SettingRelayRegistered is "1" once this identity has a relay mailbox.
 	SettingRelayRegistered = "relay_registered"
-	// SettingAuthSelfTestOK holds GOOS:PAM-service once the password verifier
-	// self-test passed for that service; it runs again when the service changes.
+	// SettingAuthSelfTestOK holds GOOS:PAM-service:size:mtime (of the PAM
+	// file) once the password verifier self-test passed for it; the test runs
+	// again when the service or its configuration file changes.
 	SettingAuthSelfTestOK = "auth_selftest_ok"
 )
 

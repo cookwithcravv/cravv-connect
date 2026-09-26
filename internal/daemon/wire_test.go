@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/auth"
 	"github.com/cravv/cravv-connect/internal/core"
@@ -115,4 +116,68 @@ func TestSelfTestStillRefusesOnExistingStore(t *testing.T) {
 		}
 		t.Fatalf("New err = %v, want ErrAcceptsAnyPassword", err)
 	}
+}
+
+type fakePAMFile struct {
+	size  int64
+	mtime time.Time
+}
+
+func (f fakePAMFile) Name() string       { return "login" }
+func (f fakePAMFile) Size() int64        { return f.size }
+func (f fakePAMFile) Mode() os.FileMode  { return 0o644 }
+func (f fakePAMFile) ModTime() time.Time { return f.mtime }
+func (f fakePAMFile) IsDir() bool        { return false }
+func (f fakePAMFile) Sys() any           { return nil }
+
+// Editing the PAM configuration (say, adding pam_permit) must not ride on an
+// earlier pass: the cached result is keyed by the file's size and mtime too.
+func TestSelfTestRerunsWhenPAMConfigChanges(t *testing.T) {
+	dir := t.TempDir()
+	v := &d2CountingVerifier{}
+	file := fakePAMFile{size: 100, mtime: time.Unix(1000, 0)}
+	var statErr error
+	var statted []string
+	open := func() {
+		t.Helper()
+		opts := d2Options(dir, &d2Relay{})
+		opts.Verifier = v
+		opts.Config.PAMService = "login"
+		opts.StatPAMConfig = func(path string) (os.FileInfo, error) {
+			statted = append(statted, path)
+			if statErr != nil {
+				return nil, statErr
+			}
+			return file, nil
+		}
+		d, err := New(opts)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		d.Close()
+	}
+	want := func(n int32, what string) {
+		t.Helper()
+		if got := v.calls.Load(); got != n {
+			t.Fatalf("%s: %d self-tests, want %d", what, got, n)
+		}
+	}
+	open()
+	want(1, "first start")
+	if len(statted) == 0 || statted[0] != "/etc/pam.d/login" {
+		t.Fatalf("stat paths = %v", statted)
+	}
+	open()
+	want(1, "unchanged file")
+	file.mtime = time.Unix(2000, 0)
+	open()
+	want(2, "changed mtime")
+	file.size = 101
+	open()
+	want(3, "changed size")
+	statErr = os.ErrPermission
+	open()
+	want(4, "unreadable file")
+	open()
+	want(4, "still unreadable")
 }

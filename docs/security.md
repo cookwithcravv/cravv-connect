@@ -131,9 +131,10 @@ How it works:
   Linux, set with `pam_service` in `config.toml`; any other value is refused.
   After the password, PAM's account check must also pass (expired or disabled
   accounts are refused).
-- The first time the daemon starts with a PAM service, it checks that a
-  random password is rejected and refuses to start otherwise. This counts as
-  one failed login for that account.
+- The first time the daemon starts with a PAM service, and again whenever
+  that service's file in `/etc/pam.d` changes (size or modification time), it
+  checks that a random password is rejected and refuses to start otherwise.
+  This counts as one failed login for that account.
 - PAM needs cgo; a binary built with `CGO_ENABLED=0` refuses every
   password-gated action (the CLI reports "password check unavailable").
 - A successful check unlocks only that one connection, for 10 minutes. It is
