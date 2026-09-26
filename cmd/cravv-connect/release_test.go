@@ -93,3 +93,40 @@ func TestReleaseWorkflowAttests(t *testing.T) {
 		t.Error("README does not say how to verify the attestation")
 	}
 }
+
+// Every action in the workflows is pinned to a full commit SHA with its
+// version in a comment, and checkout never leaves the token in .git/config.
+func TestWorkflowsPinActions(t *testing.T) {
+	uses := regexp.MustCompile(`(?m)^\s*(?:-\s+)?uses:\s*(\S+)(.*)$`)
+	pinned := regexp.MustCompile(`^[\w.-]+/[\w.-]+@[0-9a-f]{40}$`)
+	version := regexp.MustCompile(`^\s+# v\d+\.\d+\.\d+$`)
+	for _, name := range []string{"release.yml", "ci.yml"} {
+		b, err := os.ReadFile("../../.github/workflows/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wf := string(b)
+		all := uses.FindAllStringSubmatch(wf, -1)
+		if len(all) == 0 {
+			t.Fatalf("%s uses no actions", name)
+		}
+		for _, m := range all {
+			if !pinned.MatchString(m[1]) || !version.MatchString(m[2]) {
+				t.Errorf("%s: %q is not pinned as owner/repo@<sha> # vX.Y.Z", name, strings.TrimSpace(m[0]))
+			}
+		}
+		steps := strings.Split(wf, "\n      - ")
+		checkouts := 0
+		for _, step := range steps {
+			if strings.HasPrefix(step, "uses: actions/checkout@") {
+				checkouts++
+				if !strings.Contains(step, "persist-credentials: false") {
+					t.Errorf("%s: a checkout step keeps its credentials", name)
+				}
+			}
+		}
+		if checkouts == 0 && name == "ci.yml" {
+			t.Errorf("%s: no checkout step found", name)
+		}
+	}
+}
