@@ -181,3 +181,51 @@ func TestReviewApprovesTasksAskTasks(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// failingLinks runs the decider, then fails the first decision as a
+// store error would, and passes later ones to the real service.
+type failingLinks struct {
+	ReviewLinks
+	failed bool
+}
+
+func (f *failingLinks) DecideVia(ctx context.Context, d Decider, num int64) (store.Link, error) {
+	if !f.failed {
+		f.failed = true
+		if _, err := d.Decide(ctx, DecisionRequest{}); err != nil {
+			return store.Link{}, err
+		}
+		return store.Link{}, errors.New("database is locked")
+	}
+	return f.ReviewLinks.DecideVia(ctx, d, num)
+}
+
+// Review focus: a right code is used up only once the decision is
+// applied; a decision that fails leaves the code valid for a retry.
+func TestReviewCodeSurvivesAFailedDecision(t *testing.T) {
+	ctx := context.Background()
+	n, a, b := linkNet(t)
+	desk := &titleDesktop{}
+	rv := NewReviewService(ReviewDeps{
+		Links: b.st, Tasks: b.st, Peers: b.st, LinkSvc: &failingLinks{ReviewLinks: b.links}, Codes: NewConfirmCodes(b.net.clock, desk), Clock: b.net.clock,
+	})
+	lead := shareOn(t, a, 1, "lead", core.Visibility{})
+	trainer := shareOn(t, b, 1, "trainer", core.Visibility{Mode: core.VisibilityAllPeers})
+	in := requestTo(t, n, a, b, lead, core.PermMessages)
+	item := "link-" + itoa(in.Num)
+	if err := rv.ShowCode(ctx, trainer.Session.ID, item); err != nil {
+		t.Fatal(err)
+	}
+	code := desk.shownCode(t)
+	cd := CodeDecider{Codes: rv.d.Codes, Item: item, Code: code, Answer: DecisionAnswer{Accept: true}}
+	if _, _, err := rv.Decide(ctx, trainer.Session.ID, item, cd); err == nil || errors.Is(err, ErrBadCode) {
+		t.Fatalf("the failing decision: %v", err)
+	}
+	l, _, err := rv.Decide(ctx, trainer.Session.ID, item, cd)
+	if err != nil || l.State != store.LinkActive {
+		t.Fatalf("retry with the same code: %+v, %v", l, err)
+	}
+	if err := rv.d.Codes.Check(trainer.Session.ID, item, code); !errors.Is(err, ErrBadCode) {
+		t.Fatalf("the code outlived the decision: %v", err)
+	}
+}

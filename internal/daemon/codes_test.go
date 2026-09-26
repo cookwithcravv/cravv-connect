@@ -60,6 +60,10 @@ func TestConfirmCodeSingleUseAndExpiry(t *testing.T) {
 	if err := c.Check("s1", "link-1", code); err != nil {
 		t.Fatalf("right code: %v", err)
 	}
+	if err := c.Check("s1", "link-1", code); err != nil {
+		t.Fatalf("a right code stays valid until the decision is applied: %v", err)
+	}
+	c.Forget("link-1")
 	if err := c.Check("s1", "link-1", code); !errors.Is(err, ErrBadCode) {
 		t.Fatalf("a code is single-use: %v", err)
 	}

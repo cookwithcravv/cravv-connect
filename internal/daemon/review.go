@@ -126,7 +126,9 @@ func (s *ReviewService) item(ctx context.Context, session, id string) (ReviewIte
 }
 
 // Decide applies the human's answer to the session's item through d with
-// AuthChat. It returns the decided link (and task, for a task item).
+// AuthChat. It returns the decided link (and task, for a task item). A
+// confirmation code is checked by d, and used up only once the decision
+// is applied: a decision that fails leaves it valid for a retry.
 func (s *ReviewService) Decide(ctx context.Context, session, id string, d Decider) (store.Link, *store.Task, error) {
 	it, err := s.item(ctx, session, id)
 	if err != nil {

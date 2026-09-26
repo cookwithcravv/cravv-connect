@@ -228,8 +228,10 @@ func (c *ConfirmCodes) Show(session, item, text string) error {
 	return nil
 }
 
-// Check verifies code for item, typed in session's chat. A right code is
-// used up; a wrong one counts toward CodeMaxWrong for the item and
+// Check verifies code for item, typed in session's chat. A right code
+// stays valid: the caller uses it up with Forget once the decision is
+// applied, so a decision that fails can be tried again with the same code.
+// A wrong one counts toward CodeMaxWrong for the item and
 // CodeSessionMaxWrong for the session.
 func (c *ConfirmCodes) Check(session, item, code string) error {
 	c.mu.Lock()
@@ -255,11 +257,11 @@ func (c *ConfirmCodes) Check(session, item, code string) error {
 		c.saveLocked()
 		return ErrBadCode
 	}
-	delete(c.codes, item)
 	return nil
 }
 
-// Forget drops an item's code (the item was decided some other way).
+// Forget uses up an item's code: the item was decided (with the code or
+// some other way).
 func (c *ConfirmCodes) Forget(item string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
