@@ -590,6 +590,14 @@ func (s *LinkService) PeerCutOff(ctx context.Context, peer store.Peer, reason st
 	return errors.Join(errs...)
 }
 
+// ClosePresence implements PresenceCloser: the link closes with
+// presence_timeout, the session is told, and link.closed is queued so the
+// peer converges when it is reachable again.
+func (s *LinkService) ClosePresence(ctx context.Context, l store.Link) error {
+	_, err := s.closeLink(ctx, l, closeSpec{local: core.ClosePresenceTimeout, wire: core.ClosePresenceTimeout, tell: true})
+	return err
+}
+
 // CloseAll closes every open link and tells the peers (kill switch).
 func (s *LinkService) CloseAll(ctx context.Context, reason string) error {
 	ls, err := s.d.Links.ListLinks(ctx, store.LinkFilter{States: []store.LinkState{store.LinkPending, store.LinkActive}})

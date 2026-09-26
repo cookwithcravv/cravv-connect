@@ -32,11 +32,12 @@ type v2Net struct {
 	nodes      map[core.MachineID]*v2Node
 	queue      []v2Frame
 	holdDirect bool
-	log        []v2Frame // every frame sent, in order
+	down       map[core.MachineID]bool // machines that are offline: their frames are lost
+	log        []v2Frame               // every frame sent, in order
 }
 
 func newV2Net(t *testing.T) *v2Net {
-	return &v2Net{t: t, clock: core.NewFakeClock(d2Epoch), nodes: map[core.MachineID]*v2Node{}}
+	return &v2Net{t: t, clock: core.NewFakeClock(d2Epoch), nodes: map[core.MachineID]*v2Node{}, down: map[core.MachineID]bool{}}
 }
 
 // v2Node is one machine: a real SQLite store, sessions and a handler registry.
@@ -54,6 +55,7 @@ type v2Node struct {
 	inbox    *InboxService
 	desktop  *d2Desktop
 	links    *LinkService
+	presence *PresenceService
 	lowered  []store.Link // LinkLowered calls
 	closed   []store.Link // LinkClosed calls
 }
@@ -96,6 +98,9 @@ func (n *v2Net) node(name string) *v2Node {
 	v.registry.Register(core.KindLinkRejected, HandlerFunc(v.links.HandleRejected))
 	v.registry.Register(core.KindLinkClosed, HandlerFunc(v.links.HandleClosed))
 	v.registry.Register(core.KindLinkState, HandlerFunc(v.links.HandleState))
+	v.presence = NewPresenceService(st, st, v.links, v.sender, n.clock, nil)
+	v.registry.Register(core.KindPresencePing, HandlerFunc(v.presence.HandlePing))
+	v.registry.Register(core.KindPresencePong, HandlerFunc(v.presence.HandlePong))
 	n.mu.Lock()
 	n.nodes[v.id] = v
 	n.mu.Unlock()
@@ -128,8 +133,9 @@ func (v *v2Node) peerRec(other *v2Node) store.Peer {
 func (n *v2Net) deliver(f v2Frame) {
 	n.mu.Lock()
 	to, from := n.nodes[f.to], n.nodes[f.from]
+	lost := n.down[f.to] || n.down[f.from]
 	n.mu.Unlock()
-	if to == nil || from == nil {
+	if to == nil || from == nil || lost {
 		return
 	}
 	peer, err := to.st.GetPeer(context.Background(), f.from)
@@ -161,6 +167,13 @@ func (n *v2Net) pump() {
 		n.mu.Unlock()
 		n.deliver(f)
 	}
+}
+
+// setDown takes a machine off the network (true) or brings it back.
+func (n *v2Net) setDown(v *v2Node, down bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.down[v.id] = down
 }
 
 // dropQueued discards queued frames of kind (a lost or overtaken message).

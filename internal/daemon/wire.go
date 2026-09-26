@@ -38,6 +38,7 @@ type Options struct {
 	IdentityStore    func(settings store.SettingsStore) IdentityStore // default DefaultIdentityStore
 	ReconnectMin     time.Duration                                    // default core.BackoffMin
 	MaintenanceEvery time.Duration                                    // default 1 minute
+	PresenceEvery    time.Duration                                    // default core.PresenceInterval
 	FileRetryDelay   time.Duration                                    // default 2 seconds
 	// StatPAMConfig stats the PAM configuration file for the self-test cache
 	// key; default os.Stat.
@@ -192,6 +193,9 @@ func normalize(o *Options) error {
 	if o.MaintenanceEvery <= 0 {
 		o.MaintenanceEvery = time.Minute
 	}
+	if o.PresenceEvery <= 0 {
+		o.PresenceEvery = core.PresenceInterval
+	}
 	if o.FileRetryDelay <= 0 {
 		o.FileRetryDelay = 2 * time.Second
 	}
@@ -297,6 +301,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 		Links: db, Sessions: d.shared, Peers: db, Directory: g.discover, Sender: g.outbound, Replies: g.replies,
 		Inbox: d.inbox, Desktop: d.opts.Desktop, Clock: clock, Audit: lg, Log: d.log,
 	})
+	g.presence = NewPresenceService(db, db, g.links, g.outbound, clock, d.log)
 	g.prekeys = NewPrekeyManager(db, db, id, g.outbound, clock)
 	g.files = NewFileService(FileDeps{
 		Blobs: func() transport.BlobStore { return d.blobs(id) }, Peers: db, Files: db, Inbox: d.inbox,
@@ -345,12 +350,14 @@ func registerHandlers(g *services, inbox *InboxService, peers store.PeerStore) {
 	r.Register(core.KindLinkRejected, HandlerFunc(g.links.HandleRejected))
 	r.Register(core.KindLinkClosed, HandlerFunc(g.links.HandleClosed))
 	r.Register(core.KindLinkState, HandlerFunc(g.links.HandleState))
+	r.Register(core.KindPresencePing, HandlerFunc(g.presence.HandlePing))
+	r.Register(core.KindPresencePong, HandlerFunc(g.presence.HandlePong))
 	g.activity.WrapAll(r,
 		core.KindChat, core.KindTaskCreate, core.KindTaskUpdate, core.KindTaskCancel, core.KindFileOffer,
 		core.KindControlPrekey, core.KindControlStalePrekey, core.KindControlDelivered, core.KindControlPaused,
 		core.KindControlResumed, core.KindControlUnpaired, core.KindControlRelayMoved,
 		core.KindSessionsList, core.KindSessionsListed, core.KindLinkRequest, core.KindLinkAccepted,
-		core.KindLinkRejected, core.KindLinkClosed, core.KindLinkState)
+		core.KindLinkRejected, core.KindLinkClosed, core.KindLinkState, core.KindPresencePing, core.KindPresencePong)
 }
 
 // sessionLinks forwards shared-session changes to the current LinkService

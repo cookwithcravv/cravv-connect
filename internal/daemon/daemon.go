@@ -50,6 +50,7 @@ type services struct {
 	discover *Discovery
 	replies  *LinkReplies
 	links    *LinkService
+	presence *PresenceService
 	prekeys  *PrekeyManager
 	pairing  *PairingService
 	tasks    *TaskService
@@ -221,12 +222,16 @@ func (d *Daemon) runServices(ctx context.Context, g *services) error {
 		return fmt.Errorf("resume downloads: %w", err)
 	}
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		if err := g.outbound.Run(ctx); err != nil && ctx.Err() == nil {
 			d.log.Error("outbound stopped", "err", err)
 		}
+	}()
+	go func() {
+		defer wg.Done()
+		d.presenceLoop(ctx, g)
 	}()
 	go func() {
 		defer wg.Done()
@@ -352,6 +357,26 @@ func (d *Daemon) markRegistered(ctx context.Context, used transport.Credentials)
 	}
 	if used.Invite != "" {
 		_ = d.store.SetSetting(ctx, SettingRelayInvite, "")
+	}
+}
+
+// presenceLoop runs the presence heartbeat every Options.PresenceEvery
+// (core.PresenceInterval by default); nothing is sent while killed.
+func (d *Daemon) presenceLoop(ctx context.Context, g *services) {
+	t := time.NewTicker(d.opts.PresenceEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if d.kill.Killed() {
+				continue
+			}
+			if err := g.presence.Tick(ctx); err != nil {
+				d.log.Warn("presence", "err", err)
+			}
+		}
 	}
 }
 
@@ -492,6 +517,7 @@ func (d *Daemon) Files() *FileService           { return d.svc.Load().files }
 func (d *Daemon) Peers() *PeerService           { return d.svc.Load().peers }
 func (d *Daemon) Discovery() *Discovery         { return d.svc.Load().discover }
 func (d *Daemon) Links() *LinkService           { return d.svc.Load().links }
+func (d *Daemon) Presence() *PresenceService    { return d.svc.Load().presence }
 func (d *Daemon) Pairing() *PairingService      { return d.svc.Load().pairing }
 func (d *Daemon) Status() *StatusService        { return d.svc.Load().status }
 func (d *Daemon) Outbound() *Outbound           { return d.svc.Load().outbound }
