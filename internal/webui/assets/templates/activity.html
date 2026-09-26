@@ -1,0 +1,13 @@
+{{define "content"}}
+<section>
+{{if .Data}}
+<div class="table-wrap"><table>
+<thead><tr><th>Time</th><th>Event</th><th>Device</th><th>Item</th><th>Detail</th></tr></thead>
+<tbody>
+{{range .Data}}<tr><td>{{time .At}}</td><td>{{.Type}}</td><td>{{dash .Who}}</td><td>{{dash .Item}}</td><td>{{.Detail}}</td></tr>
+{{end}}
+</tbody>
+</table></div>
+{{else}}<p class="muted">No activity recorded yet.</p>{{end}}
+</section>
+{{end}}

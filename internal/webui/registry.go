@@ -61,6 +61,8 @@ func (r *Registry) Actions() []Action { return append([]Action(nil), r.actions..
 func DefaultRegistry() *Registry {
 	r := &Registry{}
 	for _, add := range []func(*Registry){
+		addDevices,
+		addActivity,
 		addStatus,
 	} {
 		add(r)

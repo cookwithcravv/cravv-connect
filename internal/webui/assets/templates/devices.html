@@ -1,0 +1,41 @@
+{{define "content"}}{{$csrf := .CSRF}}
+<section>
+<h2>Paired devices</h2>
+{{with .Data}}{{if .Peers}}
+<div class="table-wrap"><table>
+<thead><tr><th>Name</th><th>Machine</th><th>Status</th><th>Last seen</th><th>Paired</th><th></th></tr></thead>
+<tbody>
+{{range .Peers}}<tr>
+<td>{{.Alias}}</td>
+<td><code>{{short .MachineID}}</code></td>
+<td>{{if .Paused}}paused by you{{else if .PausedByPeer}}paused by them{{else if .Online}}online{{else}}offline{{end}}</td>
+<td>{{time .LastSeen}}</td>
+<td>{{time .PairedAt}}</td>
+<td>
+{{if .Paused}}<form method="post" action="/devices/resume"><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="alias" value="{{.Alias}}"><button type="submit">Resume</button></form>
+{{else}}<form method="post" action="/devices/pause"><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="alias" value="{{.Alias}}"><button type="submit" class="secondary">Pause</button></form>
+{{end}}<form method="post" action="/devices/unpair" data-confirm="Unpair {{.Alias}}? Its links close, and it must pair again to reconnect."><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="alias" value="{{.Alias}}"><button type="submit" class="danger">Unpair</button></form>
+</td>
+</tr>{{end}}
+</tbody>
+</table></div>
+{{else}}<p class="muted">No paired devices yet.</p>{{end}}{{end}}
+</section>
+<section>
+<h2>Pair a new device</h2>
+<p>Creates a one-time bind code for the other device. It works once and expires in 10 minutes.</p>
+<form method="post" action="/devices/pair" class="block">
+<input type="hidden" name="csrf" value="{{$csrf}}">
+{{template "password" (not $.Unlocked)}}
+<button type="submit">Create a bind code</button>
+</form>
+<h2>Join with a code</h2>
+<p>Enter the bind code the other device shows.</p>
+<form method="post" action="/devices/join" class="block">
+<input type="hidden" name="csrf" value="{{$csrf}}">
+<label>Bind code <input name="code" required autocomplete="off"></label>
+{{template "password" (not $.Unlocked)}}
+<button type="submit">Join</button>
+</form>
+</section>
+{{end}}

@@ -1,0 +1,14 @@
+{{define "content"}}{{$csrf := .CSRF}}{{with .Data}}
+<section>
+<p>On the other device, join with this code in its cravv-connect UI, or run:</p>
+<p class="code">{{.Code}}</p>
+<pre>cravv-connect join {{.Code}}</pre>
+<p>The code works once and expires in 10 minutes.</p>
+<form method="post" action="/devices/pair/wait" data-autosubmit>
+<input type="hidden" name="csrf" value="{{$csrf}}">
+<input type="hidden" name="pending_id" value="{{.PendingID}}">
+<button type="submit">Wait for the other device</button>
+</form>
+<p class="muted">Waiting for the other device. Keep this page open.</p>
+</section>
+{{end}}{{end}}
