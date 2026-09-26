@@ -107,6 +107,12 @@ cravv-connect daemon install
 No token: this machine gets its mailbox from an invite that arrives during
 pairing.
 
+`daemon install` points the service at the running binary with symlinks
+resolved, so install a built binary (for example `make build`, then
+`bin/cravv-connect daemon install`), not `go run`: it refuses paths under the
+temporary directory or Go's build cache. It then waits up to 10 seconds for
+the daemon to answer and, if it does not, says where the logs are.
+
 ### 4. Pair
 
 On the first machine:

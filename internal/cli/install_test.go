@@ -3,10 +3,14 @@ package cli
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/install"
+	"github.com/cravv/cravv-connect/internal/ipc"
 )
 
 type fakeInstaller struct {
@@ -69,6 +73,8 @@ func TestInstallCommands(t *testing.T) {
 
 func TestDaemonInstallCommands(t *testing.T) {
 	fd := newFakeDaemon(t)
+	fd.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, ipc.StatusResult{})
+	fd.start()
 	env, out, errb := fd.env(&fakePrompter{}, "")
 	env.Executable = func() (string, error) { return "/usr/local/bin/cravv-connect", nil }
 	if code := Main([]string{"daemon", "install"}, env); code != 1 || !strings.Contains(errb.String(), "no supported service manager") {
@@ -83,5 +89,40 @@ func TestDaemonInstallCommands(t *testing.T) {
 	out.Reset()
 	if code := Main([]string{"daemon", "uninstall"}, env); code != 0 || setup.removed == "" || out.String() != "Daemon service removed.\n" {
 		t.Fatalf("%q", out.String())
+	}
+}
+
+// `daemon install` from `go run` or a test binary would point the login
+// service at a file that is deleted soon: refuse it.
+func TestDaemonInstallRefusesTemporaryBinary(t *testing.T) {
+	fd := newFakeDaemon(t)
+	for _, bin := range []string{
+		"/Users/me/Library/Caches/go-build/ab/cd/exe/cravv-connect",
+		"/private/var/folders/x/T/go-build1234/b001/exe/cravv-connect",
+		filepath.Join(os.TempDir(), "cravv-build", "cravv-connect"),
+	} {
+		env, _, errb := fd.env(&fakePrompter{}, "")
+		setup := &fakeSetup{}
+		env.ServiceSetup = setup
+		env.Executable = func() (string, error) { return bin, nil }
+		if code := Main([]string{"daemon", "install"}, env); code != 1 || setup.installed != "" ||
+			!strings.Contains(errb.String(), "make build then bin/cravv-connect daemon install") {
+			t.Fatalf("%s: code %d installed %q stderr %q", bin, code, setup.installed, errb.String())
+		}
+	}
+}
+
+// A service that does not come up is reported, with where to look.
+func TestDaemonInstallReportsDaemonNotStarting(t *testing.T) {
+	old := installWait
+	installWait = 200 * time.Millisecond
+	t.Cleanup(func() { installWait = old })
+	fd := newFakeDaemon(t) // never started: nothing answers on the socket
+	env, _, errb := fd.env(&fakePrompter{}, "")
+	env.ServiceSetup = &fakeSetup{}
+	env.Executable = func() (string, error) { return "/usr/local/bin/cravv-connect", nil }
+	if code := Main([]string{"daemon", "install"}, env); code != 1 ||
+		!strings.Contains(errb.String(), "did not answer") || !strings.Contains(errb.String(), "daemon.log") {
+		t.Fatalf("code %d stderr %q", code, errb.String())
 	}
 }

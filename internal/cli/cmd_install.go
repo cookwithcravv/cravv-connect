@@ -3,9 +3,12 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/install"
 	"github.com/spf13/cobra"
@@ -106,12 +109,21 @@ func newDaemonInstallCmd(env *Env) *cobra.Command {
 			if env.ServiceSetup == nil {
 				return install.ErrNoServiceManager
 			}
-			bin, err := env.Executable()
+			bin, err := serviceBinary(env)
 			if err != nil {
 				return err
 			}
-			if err := env.ServiceSetup.Install(cmd.Context(), bin); err != nil {
+			ctx := cmd.Context()
+			if err := env.ServiceSetup.Install(ctx, bin); err != nil {
 				return err
+			}
+			deadline := time.Now().Add(installWait)
+			for !daemonUp(ctx, env) {
+				if time.Now().After(deadline) {
+					return fmt.Errorf("the login service is installed but the daemon did not answer within %s; see %s",
+						installWait, daemonLogHint(env))
+				}
+				time.Sleep(100 * time.Millisecond)
 			}
 			fmt.Fprintln(env.Stdout, "Daemon installed as a login service and started.")
 			if runtime.GOOS == "linux" {
@@ -138,4 +150,54 @@ func newDaemonUninstallCmd(env *Env) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// installWait is how long `daemon install` waits for the service's daemon to answer.
+var installWait = 10 * time.Second
+
+// serviceBinary is the executable the login service will run: symlinks
+// resolved, and never a temporary build (`go run`, a test binary), which
+// would be deleted and leave a service that cannot start.
+func serviceBinary(env *Env) (string, error) {
+	bin, err := env.Executable()
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(bin); err == nil {
+		bin = resolved
+	}
+	if isTemporaryBinary(bin) {
+		return "", fmt.Errorf("refusing to install %s: it is a temporary build that will be deleted; "+
+			"install a built binary first, e.g. make build then bin/cravv-connect daemon install", bin)
+	}
+	return bin, nil
+}
+
+func isTemporaryBinary(bin string) bool {
+	if strings.Contains(bin, "/go-build") {
+		return true
+	}
+	tmps := []string{os.TempDir()}
+	if r, err := filepath.EvalSymlinks(os.TempDir()); err == nil {
+		tmps = append(tmps, r)
+	}
+	for _, tmp := range tmps {
+		tmp = filepath.Clean(tmp)
+		if tmp != "/" && strings.HasPrefix(bin, tmp+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// daemonLogHint names where a background daemon's logs are.
+func daemonLogHint(env *Env) string {
+	paths, err := env.Paths()
+	if err != nil {
+		return "the daemon log"
+	}
+	if runtime.GOOS == "linux" {
+		return paths.Log + " and `journalctl --user -u cravv-connect`"
+	}
+	return paths.Log + " and " + paths.StderrLog()
 }
