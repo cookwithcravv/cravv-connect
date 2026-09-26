@@ -355,7 +355,7 @@ note. No `task.update` is sent back; unknown or finished tasks are ignored.
 | `control.paused` | `{}` | This machine paused the peer (sent directly, then the peer is denied on the relay) |
 | `control.resumed` | `{}` | This machine resumed the peer, or finalized pairing with it |
 | `control.unpaired` | `{}` | This machine unpaired the peer (sent directly, best effort) |
-| `control.relay_moved` | `{"relay_url": "https://..."}` | Reserved for relay changes. v1 daemons accept and store it (only `https` URLs, or `http` for `localhost`, `127.0.0.1` and `::1`) but do not send it |
+| `control.relay_moved` | `{"relay_url": "https://..."}` | Reserved for relay changes. v1 daemons accept and store it (only `https` URLs, or `http` for localhost and private network addresses) but do not send it |
 
 Handlers:
 
@@ -542,7 +542,7 @@ ends the exchange with "pairing failed", and closing the room burns it.
 
 4. **Validation.** The received IK is 32 bytes, is not this machine's own IK,
    the prekey signature verifies against it, and `relay_url` is an `https` URL
-   (plain `http` only for `localhost`, `127.0.0.1` and `::1`).
+   (plain `http` only for localhost, private network addresses (RFC 1918, unique local IPv6, 100.64.0.0/10) and single-label `.local` names).
 5. **Ack.** Each side sends the sealed constant `cravv-connect/pair-v1/ok`
    (same key and AAD, nonce last byte `2` for A, `3` for B) and checks the
    peer's. A payload tampered with in either direction therefore fails on both
