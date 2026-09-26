@@ -32,10 +32,11 @@ type Session struct {
 	dial       func(ctx context.Context) (Conn, error)
 	projectDir string
 
-	mu    sync.Mutex
-	agent string
-	conn  Conn
-	name  string
+	mu       sync.Mutex
+	agent    string
+	conn     Conn
+	name     string
+	reattach string // reattach token of the session this chat shared ("" if none)
 }
 
 // NewSession returns an unconnected session for projectDir.
@@ -61,7 +62,18 @@ func (s *Session) Name() string {
 	return s.name
 }
 
-// Connect makes sure a live, registered connection exists.
+// SetReattach records the reattach token of the session this chat shared
+// ("" forgets it). It stays in memory only.
+func (s *Session) SetReattach(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reattach = token
+}
+
+// Connect makes sure a live, registered connection exists. A chat that
+// shared a session takes it back on the new connection with its reattach
+// token; if the daemon refuses (the session closed meanwhile), the token is
+// forgotten and the chat must share again.
 func (s *Session) Connect(ctx context.Context) (Conn, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -83,6 +95,11 @@ func (s *Session) Connect(ctx context.Context) (Conn, error) {
 		c.Close()
 		return nil, err
 	}
+	if s.reattach != "" {
+		if err := c.Call(ctx, ipc.MethodSessionReattach, ipc.SessionReattachParams{ReattachToken: s.reattach}, nil); err != nil {
+			s.reattach = ""
+		}
+	}
 	s.conn, s.name = c, r.Name
 	return c, nil
 }
@@ -93,11 +110,13 @@ func (s *Session) Connect(ctx context.Context) (Conn, error) {
 // read), so it is not repeated: the error is returned and only the next call
 // reconnects.
 var retrySafe = map[string]bool{
-	ipc.MethodStatus:     true,
-	ipc.MethodPeerList:   true,
-	ipc.MethodTaskGet:    true,
-	ipc.MethodFilesList:  true,
-	ipc.MethodHookCounts: true,
+	ipc.MethodStatus:       true,
+	ipc.MethodPeerList:     true,
+	ipc.MethodTaskGet:      true,
+	ipc.MethodFilesList:    true,
+	ipc.MethodHookCounts:   true,
+	ipc.MethodLinks:        true,
+	ipc.MethodSessionsList: true,
 }
 
 // Call runs one daemon call. If the connection dropped, a read-only call is

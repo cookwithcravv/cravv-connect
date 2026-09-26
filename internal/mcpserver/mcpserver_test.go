@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/ipc"
@@ -168,8 +169,9 @@ func TestToolListAndDescriptions(t *testing.T) {
 			t.Errorf("%s: bad description %q", tool.Name, tool.Description)
 		}
 	}
-	want := []string{"cancel_task", "check_inbox", "claim_task", "complete_task", "create_task", "fail_task", "get_task",
-		"kill_switch", "lower_trust", "pause_peer", "send_file", "send_message", "status", "unpair_peer", "update_task", "wait_for_message"}
+	want := []string{"cancel_task", "check_inbox", "claim_task", "complete_task", "connect", "create_task", "disconnect",
+		"fail_task", "get_task", "kill_switch", "links", "pause_peer", "restrict", "send_file", "send_message",
+		"session_close", "session_share", "sessions", "status", "unpair_peer", "update_task", "wait_for_message"}
 	slices.Sort(names)
 	if !slices.Equal(names, want) {
 		t.Fatalf("tools %v", names)
@@ -251,24 +253,63 @@ func TestStructuredToolsReturnJSON(t *testing.T) {
 	}
 }
 
-func TestLowerTrustExplainsRaise(t *testing.T) {
+func TestRestrictExplainsRaise(t *testing.T) {
 	d := newDaemonFake(t)
-	d.handle(ipc.MethodPeerTrust, ipc.GateNone, func(cs *ipc.ConnState, raw json.RawMessage) (any, error) {
-		var p ipc.PeerTrustParams
+	d.handle(ipc.MethodLinkRestrict, ipc.GateNone, func(cs *ipc.ConnState, raw json.RawMessage) (any, error) {
+		var p ipc.LinkPermissionParams
 		json.Unmarshal(raw, &p)
-		if p.Level == "autonomous" {
+		if p.Permission == "tasks-auto" {
 			return nil, core.ErrAuthRequired
 		}
-		return nil, nil
+		return ipc.LinkView{Link: p.Link, PermissionIn: p.Permission}, nil
 	})
 	d.start()
 	cs, _ := connect(t, d, "claude-code")
-	if text, isErr := callTool(t, cs, "lower_trust", map[string]any{"alias": "gpu-box", "level": "chat-only"}); isErr || text != "Trust for gpu-box is now chat-only." {
+	if text, isErr := callTool(t, cs, "restrict", map[string]any{"link": 3, "permission": "messages"}); isErr || text != "Link 3 now allows messages." {
 		t.Fatalf("%v %q", isErr, text)
 	}
-	text, isErr := callTool(t, cs, "lower_trust", map[string]any{"alias": "gpu-box", "level": "autonomous"})
+	text, isErr := callTool(t, cs, "restrict", map[string]any{"link": 3, "permission": "tasks-auto"})
 	if !isErr || !strings.Contains(text, "human's password") {
 		t.Fatalf("%v %q", isErr, text)
+	}
+}
+
+// session_share hands the model the wake token but never the reattach
+// token; the MCP server keeps that and takes the session back after the
+// daemon restarts.
+func TestShareKeepsReattachTokenForReconnects(t *testing.T) {
+	d := newDaemonFake(t)
+	var mu sync.Mutex
+	var reattached []string
+	d.handle(ipc.MethodSessionShare, ipc.GateSession, func(cs *ipc.ConnState, raw json.RawMessage) (any, error) {
+		return ipc.ShareResult{Session: ipc.SharedSessionView{Name: "lead", State: "open"}, WakeToken: "WAKE", ReattachToken: "SECRET-REATTACH"}, nil
+	})
+	d.handle(ipc.MethodSessionReattach, ipc.GateSession, func(cs *ipc.ConnState, raw json.RawMessage) (any, error) {
+		var p ipc.SessionReattachParams
+		json.Unmarshal(raw, &p)
+		mu.Lock()
+		reattached = append(reattached, p.ReattachToken)
+		mu.Unlock()
+		return ipc.SharedSessionView{Name: "lead", State: "open"}, nil
+	})
+	d.handle(ipc.MethodLinks, ipc.GateNone, func(*ipc.ConnState, json.RawMessage) (any, error) {
+		return ipc.LinksResult{Links: []ipc.LinkView{}}, nil
+	})
+	d.start()
+	cs, _ := connect(t, d, "claude-code")
+	text, isErr := callTool(t, cs, "session_share", map[string]any{"name": "lead"})
+	if isErr || !strings.Contains(text, `"wake_token": "WAKE"`) || strings.Contains(text, "SECRET-REATTACH") {
+		t.Fatalf("share output %v %q", isErr, text)
+	}
+	d.stop()
+	d.start()
+	if _, isErr := callTool(t, cs, "links", nil); isErr {
+		t.Fatal("links after the daemon restarted")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reattached) != 1 || reattached[0] != "SECRET-REATTACH" {
+		t.Fatalf("reattached with %v", reattached)
 	}
 }
 
@@ -293,11 +334,21 @@ func TestReconnectsAfterDaemonRestart(t *testing.T) {
 	d := newDaemonFake(t)
 	d.handle(ipc.MethodKill, ipc.GateNone, func(*ipc.ConnState, json.RawMessage) (any, error) { return nil, nil })
 	d.start()
-	cs, _ := connect(t, d, "claude-code")
+	cs, sess := connect(t, d, "claude-code")
 	if _, isErr := callTool(t, cs, "kill_switch", nil); isErr {
 		t.Fatal("first call failed")
 	}
 	d.stop()
+	// kill_switch is not retried on a dropped connection, so wait until the
+	// client has seen the old one close (under load that can lag the stop).
+	sess.mu.Lock()
+	old := sess.conn
+	sess.mu.Unlock()
+	select {
+	case <-old.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the old connection never closed")
+	}
 	d.start()
 	text, isErr := callTool(t, cs, "kill_switch", nil)
 	if isErr || !strings.HasPrefix(text, "Kill switch is on.") {

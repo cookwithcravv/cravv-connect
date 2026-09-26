@@ -19,11 +19,12 @@ type ToolRegistrar interface {
 func Tools() []ToolRegistrar {
 	return []ToolRegistrar{
 		statusTool{},
+		sessionShareTool{}, sessionCloseTool{}, sessionsTool{}, connectTool{}, linksTool{},
 		sendMessageTool{}, checkInboxTool{}, waitForMessageTool{},
 		createTaskTool{}, getTaskTool{}, claimTaskTool{}, updateTaskTool{},
 		completeTaskTool{}, failTaskTool{}, cancelTaskTool{},
 		sendFileTool{},
-		pausePeerTool{}, unpairPeerTool{}, lowerTrustTool{}, killSwitchTool{},
+		disconnectTool{}, restrictTool{}, pausePeerTool{}, unpairPeerTool{}, killSwitchTool{},
 	}
 }
 

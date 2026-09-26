@@ -56,8 +56,9 @@ func TestNonIdempotentCallsAreNotRetried(t *testing.T) {
 	for _, method := range []string{
 		ipc.MethodChatSend, ipc.MethodTaskCreate, ipc.MethodTaskUpdate, ipc.MethodTaskComplete,
 		ipc.MethodTaskFail, ipc.MethodTaskCancel, ipc.MethodTaskClaim, ipc.MethodFileSend,
-		ipc.MethodPeerPause, ipc.MethodPeerUnpair, ipc.MethodPeerTrust, ipc.MethodKill,
-		ipc.MethodInboxCheck, ipc.MethodInboxWait,
+		ipc.MethodPeerPause, ipc.MethodPeerUnpair, ipc.MethodKill,
+		ipc.MethodInboxCheck, ipc.MethodInboxWait, ipc.MethodSessionShare, ipc.MethodLinkConnect,
+		ipc.MethodLinkDisconnect, ipc.MethodLinkRestrict,
 	} {
 		s, log, dials := flakySession()
 		err := s.Call(context.Background(), method, nil, nil)
@@ -75,7 +76,8 @@ func TestNonIdempotentCallsAreNotRetried(t *testing.T) {
 }
 
 func TestIdempotentReadsAreRetried(t *testing.T) {
-	for _, method := range []string{ipc.MethodStatus, ipc.MethodPeerList, ipc.MethodTaskGet, ipc.MethodFilesList, ipc.MethodHookCounts} {
+	for _, method := range []string{ipc.MethodStatus, ipc.MethodPeerList, ipc.MethodTaskGet, ipc.MethodFilesList, ipc.MethodHookCounts,
+		ipc.MethodLinks, ipc.MethodSessionsList} {
 		s, log, dials := flakySession()
 		if err := s.Call(context.Background(), method, nil, nil); err != nil {
 			t.Fatalf("%s: %v", method, err)

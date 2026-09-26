@@ -2,10 +2,8 @@ package mcpserver
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/ipc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -19,7 +17,7 @@ type statusOut struct {
 }
 
 func (statusTool) Register(s *mcp.Server, c Caller) {
-	addTool(s, "status", "Show this machine, this session, paired peers (alias, trust, online, paused) and pending counts.",
+	addTool(s, "status", "Show this machine, its shared sessions, paired peers (alias, online, paused) and pending counts.",
 		func(ctx context.Context, _ noArgs) (string, error) {
 			var st ipc.StatusResult
 			if err := c.Call(ctx, ipc.MethodStatus, nil, &st); err != nil {
@@ -58,27 +56,6 @@ func (unpairPeerTool) Register(s *mcp.Server, c Caller) {
 				return "", err
 			}
 			return fmt.Sprintf("Unpaired %s.", in.Alias), nil
-		})
-}
-
-type lowerTrustTool struct{}
-
-type lowerTrustIn struct {
-	Alias string `json:"alias" jsonschema:"peer alias"`
-	Level string `json:"level" jsonschema:"chat-only or ask-first"`
-}
-
-func (lowerTrustTool) Register(s *mcp.Server, c Caller) {
-	addTool(s, "lower_trust", "Lower what a peer may do on this machine (autonomous > ask-first > chat-only). Raising trust is only possible for the human.",
-		func(ctx context.Context, in lowerTrustIn) (string, error) {
-			err := c.Call(ctx, ipc.MethodPeerTrust, ipc.PeerTrustParams{Alias: in.Alias, Level: in.Level}, nil)
-			if errors.Is(err, core.ErrAuthRequired) {
-				return "", errors.New("raising trust needs the human's password: ask them to run `cravv-connect trust` in their terminal")
-			}
-			if err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("Trust for %s is now %s.", in.Alias, in.Level), nil
 		})
 }
 
