@@ -41,9 +41,7 @@ func DialContext(ctx context.Context, socketPath string) (*Client, error) {
 		}
 		return nil, fmt.Errorf("%w (%v)", ErrDaemonNotRunning, err)
 	}
-	c := &Client{conn: conn, pending: map[uint64]chan Response{}, done: make(chan struct{})}
-	go c.readLoop()
-	return c, nil
+	return NewClient(conn), nil
 }
 
 func (c *Client) readLoop() {
