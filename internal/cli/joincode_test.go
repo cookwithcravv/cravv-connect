@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"io"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -32,6 +34,8 @@ func pairDaemonUnstarted(t *testing.T, relay string) *fakeDaemon {
 // pair shows the join code with its QR code (upper case, for the compact
 // alphanumeric mode) and the plain bind code for machines already set up.
 func TestPairShowsJoinCodeAndQR(t *testing.T) {
+	defer func(f func(io.Writer) bool) { isTerminal = f }(isTerminal)
+	isTerminal = func(io.Writer) bool { return true }
 	fd := pairDaemon(t, "https://relay.example.com")
 	r := fd.run(&fakePrompter{passwords: []string{"pw"}, lines: []string{""}}, "pair")
 	if r.code != 0 {
@@ -60,6 +64,24 @@ func TestPairNoQR(t *testing.T) {
 	r := fd.run(&fakePrompter{passwords: []string{"pw"}, lines: []string{""}}, "pair", "--no-qr")
 	if r.code != 0 || strings.Contains(r.stdout, "\x1b") || !strings.Contains(r.stdout, "Join code: "+testJoinCode+"\n\nOn a new machine") {
 		t.Fatalf("code %d stdout %q", r.code, r.stdout)
+	}
+}
+
+// The QR code is drawn only on a terminal: piped or redirected output gets
+// the join code as text.
+func TestPairNoQROffATerminal(t *testing.T) {
+	fd := pairDaemon(t, "https://relay.example.com")
+	r := fd.run(&fakePrompter{passwords: []string{"pw"}, lines: []string{""}}, "pair")
+	if r.code != 0 || strings.Contains(r.stdout, "\x1b") || !strings.Contains(r.stdout, "Join code: "+testJoinCode+"\n\nOn a new machine") {
+		t.Fatalf("code %d stdout %q", r.code, r.stdout)
+	}
+	f, err := os.CreateTemp(t.TempDir(), "out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if isTerminal(f) || isTerminal(&bytes.Buffer{}) {
+		t.Fatal("a file or a buffer counts as a terminal")
 	}
 }
 

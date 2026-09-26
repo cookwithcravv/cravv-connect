@@ -5,13 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/cravv/cravv-connect/internal/bindcode"
 	"github.com/cravv/cravv-connect/internal/ipc"
 	"github.com/cravv/cravv-connect/internal/joincode"
 	"github.com/cravv/cravv-connect/internal/qrcode"
+	"golang.org/x/term"
 )
+
+// isTerminal reports whether w is a terminal. The QR code is drawn only
+// there: in a pipe or a file it is just noise. Tests replace it.
+var isTerminal = func(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
+}
 
 // daemonRelay returns the relay URL the daemon uses, or "" when it cannot
 // tell (an older daemon, or no answer).
@@ -24,8 +33,9 @@ func daemonRelay(ctx context.Context, c Caller) string {
 }
 
 // printPairingCode shows how another machine pairs with bind, a bind code
-// made on relay: the join code (with its QR code when qr is set) for a new
-// machine, and the plain bind code for one already set up for this relay.
+// made on relay: the join code (with its QR code when qr is set and w is a
+// terminal) for a new machine, and the plain bind code for one already set up
+// for this relay.
 // Without a usable relay it shows the bind code alone.
 func printPairingCode(w io.Writer, relay, bind string, qr bool) error {
 	b, err := bindcode.Parse(bind)
@@ -39,7 +49,7 @@ func printPairingCode(w io.Writer, relay, bind string, qr bool) error {
 		fmt.Fprintf(w, "  cravv-connect join %s\n", bind)
 	} else {
 		fmt.Fprintf(w, "Join code: %s\n\n", jc)
-		if qr {
+		if qr && isTerminal(w) {
 			// Upper case fits the QR alphanumeric mode; join codes parse in any case.
 			if err := qrcode.Terminal(w, strings.ToUpper(jc.String())); err != nil {
 				return err

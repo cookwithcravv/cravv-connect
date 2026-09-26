@@ -68,3 +68,23 @@ func TestTerminalRefusesEmptyText(t *testing.T) {
 		t.Fatal("empty text accepted")
 	}
 }
+
+// The QR specification asks for a light border of four modules; scanners
+// miss codes with less, especially in a dark terminal.
+func TestQuietZoneIsFourModules(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Terminal(&buf, sample); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+	cells := func(i int) []rune { return []rune(strings.TrimSuffix(strings.TrimPrefix(lines[i], colors), reset)) }
+	// Two lines hold four module rows: all light at the top and the bottom.
+	for _, i := range []int{0, 1, len(lines) - 2} {
+		if strings.TrimSpace(string(cells(i))) != "" {
+			t.Fatalf("line %d is not blank: %q", i, string(cells(i)))
+		}
+	}
+	if row := cells(2); strings.TrimSpace(string(row[:4])) != "" || row[4] == ' ' {
+		t.Fatalf("left border of line 2: %q", string(row[:6]))
+	}
+}

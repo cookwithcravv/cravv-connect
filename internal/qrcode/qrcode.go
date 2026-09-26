@@ -10,8 +10,9 @@ import (
 	"rsc.io/qr"
 )
 
-// Quiet is the light border around the code, in modules.
-const Quiet = 2
+// Quiet is the light border around the code, in modules: the four the QR
+// specification asks for.
+const Quiet = 4
 
 // ANSI black on white for every line, so the code scans the same in dark and
 // light terminals (scanners want dark modules on a light background).
