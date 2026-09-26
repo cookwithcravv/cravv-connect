@@ -18,8 +18,9 @@ import (
 // mcpAgent is an MCP client (clientInfo "claude-code") talking to the real
 // MCP server, which talks to node's daemon over its IPC socket.
 type mcpAgent struct {
-	t  *testing.T
-	cs *mcp.ClientSession
+	t    *testing.T
+	cs   *mcp.ClientSession
+	seen *[]string // every tool result the model saw (nil: not kept)
 }
 
 func newMCPAgent(t *testing.T, n *Node) *mcpAgent {
@@ -56,6 +57,9 @@ func (m *mcpAgent) try(name string, args map[string]any) (string, bool) {
 		if tc, ok := c.(*mcp.TextContent); ok {
 			buf.WriteString(tc.Text)
 		}
+	}
+	if m.seen != nil {
+		*m.seen = append(*m.seen, buf.String())
 	}
 	return buf.String(), res.IsError
 }
