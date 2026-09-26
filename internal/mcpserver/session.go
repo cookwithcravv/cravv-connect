@@ -110,7 +110,9 @@ func (s *Session) Connect(ctx context.Context) (Conn, error) {
 		return nil, err
 	}
 	if s.runToken != "" {
-		// A managed run acts only as its run's session, on every connection.
+		// A managed run acts only as its run's session. The token is
+		// single-use: if this connection drops, a new one cannot bind it
+		// again, and the run's tools fail until the run ends.
 		if err := c.Call(ctx, ipc.MethodSessionRunBind, ipc.RunBindParams{RunToken: s.runToken}, nil); err != nil {
 			c.Close()
 			return nil, err

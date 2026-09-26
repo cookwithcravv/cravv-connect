@@ -55,11 +55,13 @@ func (h *SessionHost) wake() {
 	}
 }
 
-// recoverRuns kills the process groups runs of the last daemon left, and
+// recoverRuns kills the process groups runs of the last daemon left,
+// removes their MCP configs (each holds a run token), and
 // fails the tasks managed sessions had claimed: their run ended with the
 // daemon.
 func (h *SessionHost) recoverRuns(ctx context.Context) {
 	h.killRecordedGroups()
+	h.removeStaleConfigs()
 	all, err := h.d.Store.ListManaged(ctx)
 	if err != nil {
 		h.d.Log.Warn("list managed sessions", "err", err)
@@ -367,6 +369,15 @@ func runOutcome(out RunOutcome, res AgentResult) (string, string) {
 	return "ok", ""
 }
 
+// removeStaleConfigs removes the run MCP configs a daemon that stopped
+// without finishing its runs left behind. It runs before any run starts.
+func (h *SessionHost) removeStaleConfigs() {
+	files, _ := filepath.Glob(filepath.Join(h.d.RunDir, "run-*.json"))
+	for _, f := range files {
+		_ = os.Remove(f)
+	}
+}
+
 // writeConfig writes the run's MCP config (0600, only cravv-connect, the
 // token in its environment) and returns its path.
 func (h *SessionHost) writeConfig(adapter AgentAdapter, runID, token string) (string, error) {
@@ -486,12 +497,14 @@ func (h *SessionHost) Sweep(ctx context.Context) (int, error) {
 }
 
 // BindRun binds connection conn to the managed session whose current run
-// holds token (the child's `cravv-connect mcp` presents it). Every failure
-// looks the same (not found). Once bound, the run's MCP config file is
-// removed: the child's MCP server holds the token, and nothing in the run
-// can read it from the disk any more.
+// holds token (the child's `cravv-connect mcp` presents it). The token is
+// single-use: once a connection bound it, only that connection may present
+// it again, so a process that read it later (the MCP config is removed at
+// the bind, but a shell run could race for it) cannot take the binding.
+// Every failure looks the same (not found). Once bound, the run's MCP
+// config file is removed.
 func (h *SessionHost) BindRun(ctx context.Context, token string, conn uint64) (store.SharedSession, error) {
-	g, ok := h.tokens.session(token)
+	g, ok := h.tokens.claim(token, conn)
 	if !ok {
 		return store.SharedSession{}, fmt.Errorf("run token: %w", core.ErrNotFound)
 	}
@@ -513,6 +526,7 @@ type runTokens struct {
 type runGrant struct {
 	session string
 	config  string // the run's MCP config file
+	conn    uint64 // the connection that bound it (0: none yet)
 }
 
 func (t *runTokens) issue(session string) string {
@@ -538,11 +552,19 @@ func (t *runTokens) revoke(token string) {
 	delete(t.byHash, hashToken(token))
 }
 
-func (t *runTokens) session(token string) (runGrant, bool) {
+// claim returns the grant of token for connection conn: the first
+// connection to present it takes it, and afterwards only that one may.
+func (t *runTokens) claim(token string, conn uint64) (runGrant, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	g, ok := t.byHash[hashToken(token)]
-	return g, ok
+	h := hashToken(token)
+	g, ok := t.byHash[h]
+	if !ok || (g.conn != 0 && g.conn != conn) {
+		return runGrant{}, false
+	}
+	g.conn = conn
+	t.byHash[h] = g
+	return g, true
 }
 
 // runPrompt is what a run is asked: who it is, the wrapped item, and the

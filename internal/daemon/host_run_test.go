@@ -330,7 +330,7 @@ func TestHostRunTokenBindsOnlyItsSession(t *testing.T) {
 	ctx := context.Background()
 	var other store.SharedSession
 	var e *hostEnv
-	type seen struct{ bind, current, otherCurrent, otherBind, bogus error }
+	type seen struct{ bind, current, otherCurrent, otherBind, bogus, again, second error }
 	got := make(chan seen, 1)
 	var token string
 	e = newHostEnv(t, "ok", func(in *OfferInput) { in.MaxConcurrent = 2 })
@@ -350,6 +350,10 @@ func TestHostRunTokenBindsOnlyItsSession(t *testing.T) {
 		_, s.otherCurrent = e.shared.Current(ctx, other.ID, 777)
 		_, s.otherBind = e.shared.BindRun(ctx, other.ID, 777)
 		_, s.bogus = e.host.BindRun(ctx, "not-a-token", 778)
+		// The token is single-use: the connection that bound it may ask
+		// again, no other connection may bind it.
+		_, s.again = e.host.BindRun(ctx, token, 777)
+		_, s.second = e.host.BindRun(ctx, token, 780)
 		// The child answers as its own session.
 		id := strings.Split(strings.Split(c.Stdin, `task_id="`)[1], `"`)[0]
 		if _, err := e.tasks.Complete(ctx, e.sess.ID, "", id, "42 lines", nil); err != nil {
@@ -370,6 +374,9 @@ func TestHostRunTokenBindsOnlyItsSession(t *testing.T) {
 	}
 	if !errors.Is(s.otherCurrent, core.ErrNotShared) || !errors.Is(s.otherBind, ErrAlreadyShared) || !errors.Is(s.bogus, core.ErrNotFound) {
 		t.Fatalf("other session: current %v, bind %v; bogus token %v", s.otherCurrent, s.otherBind, s.bogus)
+	}
+	if s.again != nil || !errors.Is(s.second, core.ErrNotFound) {
+		t.Fatalf("binding the token again: same connection %v, another connection %v", s.again, s.second)
 	}
 	if tk := e.finished(t, id); tk.State != core.TaskDone || tk.Result != "42 lines" {
 		t.Fatalf("task %+v", tk)
@@ -632,5 +639,31 @@ func TestHostDailyCapHoldsUnderConcurrentStarts(t *testing.T) {
 	}
 	if n, _ := e.st.CountRuns(ctx, store.RunFilter{Peer: e.peer.MachineID}); n != 1 {
 		t.Fatalf("%d runs recorded", n)
+	}
+}
+
+// Run configs a crashed daemon left behind are removed at startup: each
+// holds a run token in the clear.
+func TestHostRemovesStaleRunConfigs(t *testing.T) {
+	e := newHostEnv(t, "ok", nil)
+	dir := e.host.d.RunDir
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dir, "run-01stale.json")
+	if err := os.WriteFile(stale, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(other, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.start(t)
+	Eventually(t, "the stale config removed", func() bool {
+		_, err := os.Stat(stale)
+		return errors.Is(err, os.ErrNotExist)
+	})
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("only run configs are removed: %v", err)
 	}
 }
