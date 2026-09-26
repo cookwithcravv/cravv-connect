@@ -127,6 +127,27 @@ func TestLinkRequestToAnOfferStartsAManagedSession(t *testing.T) {
 	}
 }
 
+// A managed session has no human to ask, so a tasks-ask proposal is
+// granted as messages, never tasks-ask.
+func TestOfferNeverGrantsTasksAsk(t *testing.T) {
+	ctx := context.Background()
+	n, a, b := linkNet(t)
+	gpu := withOffers(t, b)
+	gpu.offer(t, "alice", "trainer", core.PermTasksAuto, nil)
+	lead := shareOn(t, a, 1, "lead", core.Visibility{})
+	out, err := a.links.Connect(ctx, lead.Session.ID, "bob/new:trainer", core.PermTasksAsk, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.pump()
+	if l := b.linkOf(t, a, out.ID); l.State != store.LinkActive || l.PermissionIn != core.PermMessages {
+		t.Fatalf("proposed tasks-ask, the gpu side granted %+v", l)
+	}
+	if l := a.linkOf(t, b, out.ID); l.PermissionOut != core.PermMessages {
+		t.Fatalf("proposed tasks-ask, alice was told %s", l.PermissionOut)
+	}
+}
+
 func TestOfferRequestLimits(t *testing.T) {
 	ctx := context.Background()
 	n, a, b := linkNet(t)

@@ -64,10 +64,21 @@ func (s *LinkService) connectOffer(ctx context.Context, sess store.SharedSession
 	return l, nil
 }
 
+// managedGrant is what a link to a managed session gets: the lower of the
+// proposal and the offer, except that tasks-ask becomes messages, because
+// a managed session has no human to ask.
+func managedGrant(proposed, offer core.Permission) core.Permission {
+	grant := core.MinPermission(proposed, offer)
+	if grant == core.PermTasksAsk {
+		return core.PermMessages
+	}
+	return grant
+}
+
 // acceptOffer answers a link request to an offer (v2 spec 6.2): the host
 // checks the rules, the caps and the concurrency limit and creates the
 // managed session, and the link is accepted at once at the lower of the
-// proposed level and the offer's permission. The password-gated rule was
+// proposed level and the offer's permission (tasks-ask becomes messages). The password-gated rule was
 // the human's approval, so nobody is asked.
 func (s *LinkService) acceptOffer(ctx context.Context, peer store.Peer, b core.LinkRequestBody, from core.SessionRef) error {
 	if s.d.Managed == nil {
@@ -85,7 +96,7 @@ func (s *LinkService) acceptOffer(ctx context.Context, peer store.Peer, b core.L
 	case err != nil:
 		return Retryable(err)
 	}
-	grant := core.MinPermission(b.ProposedPermission, perm)
+	grant := managedGrant(b.ProposedPermission, perm)
 	now := s.d.Clock.Now()
 	l, err := s.d.Links.InsertLink(ctx, store.Link{
 		Peer: peer.MachineID, ID: b.LinkID, Direction: store.LinkInbound, Session: sess.ID,
