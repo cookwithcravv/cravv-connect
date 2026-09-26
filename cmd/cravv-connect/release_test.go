@@ -130,3 +130,15 @@ func TestWorkflowsPinActions(t *testing.T) {
 		}
 	}
 }
+
+// CI checks the formatting of every Go file in the repository (conformance/
+// and scripts/ too), not a list of folders that can fall behind.
+func TestCIFormatsAllGoFiles(t *testing.T) {
+	b, err := os.ReadFile("../../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `run: test -z "$(git ls-files -z '*.go' | xargs -0 gofmt -l)"`; !strings.Contains(string(b), want) {
+		t.Errorf("ci.yml lacks %s", want)
+	}
+}

@@ -29,8 +29,9 @@ jobs:
       - name: Install the PAM headers
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
+      # Tracked files only, so relay-cf/node_modules is never looked at.
       - name: gofmt
-        run: test -z "$(gofmt -l internal e2e cmd)"
+        run: test -z "$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
       - name: Vet
         run: go vet ./...
       - name: Test
