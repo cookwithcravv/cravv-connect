@@ -63,6 +63,16 @@ func TestEnvelopeJSONRoundTrip(t *testing.T) {
 		{KindControlStalePrekey, StalePrekeyBody{MsgID: "M", Prekey: SignedPrekeyWire{ID: "P"}}, &StalePrekeyBody{}},
 		{KindControlDelivered, DeliveredBody{IDs: []string{"a", "b"}}, &DeliveredBody{}},
 		{KindControlRelayMoved, RelayMovedBody{RelayURL: "https://r.example"}, &RelayMovedBody{}},
+		{KindControlUnsupported, UnsupportedBody{MinVersion: ProtocolVersion}, &UnsupportedBody{}},
+		{KindSessionsList, SessionsListBody{ReqID: "R"}, &SessionsListBody{}},
+		{KindSessionsListed, SessionsListedBody{ReqID: "R", Sessions: []ListedSession{{SessionID: "S", Name: "trainer", Kind: SessionLive, Agent: "claude", State: SessionAway}}, Offers: []ListedOffer{{OfferID: "O", Label: "gpu", Agent: "claude", MaxPermission: PermTasksAuto}}}, &SessionsListedBody{}},
+		{KindLinkRequest, LinkRequestBody{LinkID: "L", FromSession: SessionRef{ID: "S", Name: "lead"}, ToSessionID: "T", ProposedPermission: PermTasksAsk, Note: "hi"}, &LinkRequestBody{}},
+		{KindLinkAccepted, LinkAcceptedBody{LinkID: "L", ToSession: SessionRef{ID: "T", Name: "trainer", Purpose: "p"}, GrantedPermission: PermMessages}, &LinkAcceptedBody{}},
+		{KindLinkRejected, LinkRejectedBody{LinkID: "L", Reason: RejectBusy}, &LinkRejectedBody{}},
+		{KindLinkClosed, LinkClosedBody{LinkID: "L", Reason: CloseKilled}, &LinkClosedBody{}},
+		{KindLinkState, LinkStateBody{LinkID: "L", State: LinkStateAway, PermissionIn: PermTasksAuto}, &LinkStateBody{}},
+		{KindPresencePing, PresencePingBody{TS: 5, LinkIDs: []string{"L"}}, &PresencePingBody{}},
+		{KindPresencePong, PresencePongBody{TS: 5, LinkIDsOpen: []string{}}, &PresencePongBody{}},
 	}
 	clock := NewFakeClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 	for _, b := range bodies {
@@ -133,5 +143,22 @@ func TestNewEnvelopeBodyNotHTMLEscaped(t *testing.T) {
 	}
 	if got := string(env.Body); got != `{"text":"<a&b>"}` {
 		t.Fatalf("body = %s", got)
+	}
+}
+
+func TestEnvelopeLinkIDField(t *testing.T) {
+	env := Envelope{V: 1, ID: "I", TS: 7, FromMachine: "f", ToMachine: "t", LinkID: "L", Kind: KindChat, Body: json.RawMessage(`{}`)}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"v":1,"id":"I","ts":7,"from_machine":"f","to_machine":"t","link_id":"L","kind":"chat","body":{}}`
+	if string(raw) != want {
+		t.Fatalf("json = %s\nwant   %s", raw, want)
+	}
+	env.LinkID = ""
+	raw, _ = json.Marshal(env)
+	if strings.Contains(string(raw), "link_id") {
+		t.Fatalf("an empty link_id must be omitted (v1 peers never send one): %s", raw)
 	}
 }

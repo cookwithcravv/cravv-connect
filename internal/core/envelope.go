@@ -19,6 +19,7 @@ type Envelope struct {
 	FromSession string          `json:"from_session,omitempty"`
 	ToMachine   MachineID       `json:"to_machine"`
 	ToSession   string          `json:"to_session,omitempty"`
+	LinkID      string          `json:"link_id,omitempty"` // required on link-scoped kinds (Kind.LinkScoped)
 	Kind        Kind            `json:"kind"`
 	Body        json.RawMessage `json:"body"`
 }

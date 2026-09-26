@@ -32,4 +32,18 @@ const (
 	DefaultPeerQuota   = 1 << 30
 	BackoffMin         = time.Second
 	BackoffMax         = 5 * time.Minute
+
+	// Sessions and links (v2 spec sections 3, 4, 5).
+	MaxSessionName         = 32
+	MaxPurposeRunes        = 120
+	MaxLinkNoteRunes       = 280
+	AwayGrace              = 10 * time.Minute
+	LinkRequestExpiry      = 10 * time.Minute
+	MaxPendingLinkRequests = 5  // per peer, enforced by the receiver
+	DiscoveryPerMinute     = 30 // sessions.list per peer per minute, enforced by the receiver
+	PresenceInterval       = 30 * time.Second
+	PresenceTimeout        = 150 * time.Second
+	PresenceMaxAge         = 120 * time.Second
+	UnknownLinkReplyEvery  = time.Minute // link.closed{unknown_link}: at most one per link
+	UnsupportedReplyEvery  = time.Hour   // control.unsupported: at most one per peer
 )

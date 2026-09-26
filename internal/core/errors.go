@@ -18,4 +18,6 @@ var (
 	ErrPathRefused    = errors.New("path not allowed for sending")
 	ErrQuota          = errors.New("file quota exceeded")
 	ErrNoSession      = errors.New("no session registered on this connection")
+	ErrLinkClosed     = errors.New("link is not active")
+	ErrNotShared      = errors.New("this chat has not shared a session: call session_share first")
 )

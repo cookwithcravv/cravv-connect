@@ -18,6 +18,11 @@ func TestLimitValues(t *testing.T) {
 		{"MailboxQueueFrames", MailboxQueueFrames, 10000},
 		{"LockoutFailures", LockoutFailures, 5},
 		{"DefaultPeerQuota", DefaultPeerQuota, 1073741824},
+		{"MaxSessionName", MaxSessionName, 32},
+		{"MaxPurposeRunes", MaxPurposeRunes, 120},
+		{"MaxLinkNoteRunes", MaxLinkNoteRunes, 280},
+		{"MaxPendingLinkRequests", MaxPendingLinkRequests, 5},
+		{"DiscoveryPerMinute", DiscoveryPerMinute, 30},
 	}
 	for _, tt := range ints {
 		if tt.got != tt.want {
@@ -36,6 +41,13 @@ func TestLimitValues(t *testing.T) {
 		{"ReclaimGrace", ReclaimGrace, 5 * time.Minute},
 		{"MaxWait", MaxWait, 50 * time.Second},
 		{"BackoffMax", BackoffMax, 5 * time.Minute},
+		{"AwayGrace", AwayGrace, 10 * time.Minute},
+		{"LinkRequestExpiry", LinkRequestExpiry, 10 * time.Minute},
+		{"PresenceInterval", PresenceInterval, 30 * time.Second},
+		{"PresenceTimeout", PresenceTimeout, 150 * time.Second},
+		{"PresenceMaxAge", PresenceMaxAge, 120 * time.Second},
+		{"UnknownLinkReplyEvery", UnknownLinkReplyEvery, time.Minute},
+		{"UnsupportedReplyEvery", UnsupportedReplyEvery, time.Hour},
 	}
 	for _, tt := range durs {
 		if tt.got != tt.want {

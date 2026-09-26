@@ -20,15 +20,16 @@ func TestCanTransitionExhaustive(t *testing.T) {
 			allowed[[2]TaskState{from, to}] = true
 		}
 	}
-	allow(TaskSent, TaskAwaitingApproval, TaskQueued, TaskClaimed, TaskRunning,
+	allow(TaskSent, TaskAwaitingApproval, TaskQueued, TaskSeen, TaskClaimed, TaskRunning,
 		TaskDone, TaskFailed, TaskCancelled, TaskRejected, TaskExpired)
-	allow(TaskAwaitingApproval, TaskQueued, TaskRejected, TaskExpired, TaskCancelled)
-	allow(TaskQueued, TaskClaimed, TaskExpired, TaskCancelled, TaskRejected)
+	allow(TaskAwaitingApproval, TaskQueued, TaskRejected, TaskExpired, TaskCancelled, TaskFailed)
+	allow(TaskQueued, TaskClaimed, TaskExpired, TaskCancelled, TaskRejected, TaskFailed)
+	allow(TaskSeen, TaskClaimed, TaskRunning, TaskDone, TaskFailed, TaskCancelled, TaskRejected, TaskExpired)
 	allow(TaskClaimed, TaskRunning, TaskDone, TaskFailed, TaskCancelled)
 	allow(TaskRunning, TaskDone, TaskFailed, TaskCancelled)
 
-	if len(AllTaskStates) != 10 {
-		t.Fatalf("AllTaskStates has %d states, want 10", len(AllTaskStates))
+	if len(AllTaskStates) != 11 {
+		t.Fatalf("AllTaskStates has %d states, want 11", len(AllTaskStates))
 	}
 	for _, from := range AllTaskStates {
 		for _, to := range AllTaskStates {

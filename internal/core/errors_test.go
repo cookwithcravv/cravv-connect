@@ -8,7 +8,7 @@ import (
 
 func TestSentinelErrorsDistinctAndWrappable(t *testing.T) {
 	all := []error{ErrNotFound, ErrNotPermitted, ErrPaused, ErrPausedByPeer, ErrKilled, ErrAuthRequired,
-		ErrLocked, ErrBadPassword, ErrAlreadyClaimed, ErrBadTransition, ErrTooLarge, ErrPathRefused, ErrQuota, ErrNoSession}
+		ErrLocked, ErrBadPassword, ErrAlreadyClaimed, ErrBadTransition, ErrTooLarge, ErrPathRefused, ErrQuota, ErrNoSession, ErrLinkClosed, ErrNotShared}
 	for i, a := range all {
 		wrapped := fmt.Errorf("context: %w", a)
 		if !errors.Is(wrapped, a) {
