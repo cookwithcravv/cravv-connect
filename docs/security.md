@@ -185,7 +185,9 @@ These are the honest limits. Read them before you rely on it.
 - **A relay that drops control messages.** Control messages (such as a pause
   or prekey notice) leave the sender's outbox once the relay has queued them
   and are not resent, so a relay that drops one is not detected. Presence
-  still closes links that stopped answering within 150 seconds.
+  still marks links that stopped answering away within 150 seconds and
+  closes them after the away grace (10 minutes; a managed session's idle
+  timeout).
 - **Secrets pasted into messages.** Free text cannot be policed. An agent can
   still put a secret into a chat message or a task result.
 - **The LAN test relay.** The relay `cravv-connect setup` can start for a

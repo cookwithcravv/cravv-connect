@@ -30,6 +30,8 @@ func newLinkRow(l ipc.LinkView) linkRow {
 		r.StateText = "requested (they decide)"
 	case l.State == "closed":
 		r.StateText = "closed: " + cleanLine(l.Reason)
+	case l.Unreachable:
+		r.StateText = "away (peer machine not answering)"
 	case l.RemoteAway:
 		r.StateText = "active (peer away)"
 	default:

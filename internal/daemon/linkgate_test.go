@@ -38,7 +38,8 @@ func TestPermissionPolicyTable(t *testing.T) {
 type gateCalls struct {
 	inner, rejected      int
 	unknown, unsupported int
-	seen                 int // valid link traffic from the peer
+	seen                 int      // valid link traffic from the peer
+	traffic              []string // links presence was told about
 	link                 store.Link
 	decision             Decision
 }
@@ -68,7 +69,7 @@ func TestLinkGate(t *testing.T) {
 			})
 		}
 		g := LinkGate{Links: b.st, Sessions: b.shared, Replies: c, Inner: record(&c.inner), OnReject: record(&c.rejected),
-			Seen: func(p store.Peer) { c.seen++ }}
+			Seen: func(p store.Peer) { c.seen++ }, Traffic: func(_ context.Context, l store.Link) { c.traffic = append(c.traffic, l.ID) }}
 		env, err := core.NewEnvelope(n.clock, peer.MachineID, b.id, kind, core.ChatBody{Text: "x"})
 		if err != nil {
 			t.Fatal(err)
@@ -82,7 +83,7 @@ func TestLinkGate(t *testing.T) {
 	if c := run(aliceAtBob, core.KindChat, ""); c.unsupported != 1 || c.inner+c.rejected+c.unknown+c.seen != 0 {
 		t.Errorf("link-less chat: %+v", c)
 	}
-	if c := run(aliceAtBob, core.KindChat, core.NewID()); c.unknown != 1 || c.inner+c.seen != 0 {
+	if c := run(aliceAtBob, core.KindChat, core.NewID()); c.unknown != 1 || c.inner+c.seen+len(c.traffic) != 0 {
 		t.Errorf("unknown link: %+v", c)
 	}
 	if c := run(aliceAtBob, core.KindChat, pending.ID); c.unknown != 1 || c.inner+c.seen != 0 {
@@ -92,10 +93,11 @@ func TestLinkGate(t *testing.T) {
 		t.Errorf("another machine using alice's link id: %+v", c)
 	}
 	c := run(aliceAtBob, core.KindChat, l.bLink.ID)
-	if c.inner != 1 || c.seen != 1 || c.decision != DecisionDeliver || c.link.ID != l.bLink.ID || c.link.Session != l.worker.Session.ID {
+	if c.inner != 1 || c.seen != 1 || c.decision != DecisionDeliver || c.link.ID != l.bLink.ID || c.link.Session != l.worker.Session.ID ||
+		len(c.traffic) != 1 || c.traffic[0] != l.bLink.ID {
 		t.Errorf("chat on the active link: %+v", c)
 	}
-	if c := run(aliceAtBob, core.KindTaskCreate, l.bLink.ID); c.rejected != 1 || c.seen != 1 || c.inner != 0 || c.decision != DecisionReject {
+	if c := run(aliceAtBob, core.KindTaskCreate, l.bLink.ID); c.rejected != 1 || c.seen != 1 || len(c.traffic) != 1 || c.inner != 0 || c.decision != DecisionReject {
 		t.Errorf("task on a messages link: %+v", c)
 	}
 	for perm, want := range map[core.Permission]Decision{core.PermTasksAsk: DecisionHold, core.PermTasksAuto: DecisionDeliver} {

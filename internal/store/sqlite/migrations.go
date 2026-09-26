@@ -248,6 +248,11 @@ UPDATE files SET
 	reason = CASE WHEN link_id = '' THEN 'no_link_after_upgrade' ELSE 'held_files_retired' END
 WHERE state = 'held' AND direction = 'in';
 `,
+	// Presence marks a link away when its peer machine stops answering
+	// (0: answering), and closes it only after the away grace.
+	`
+ALTER TABLE links ADD COLUMN presence_away_at INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 // migrate creates schema_migrations and applies every migration whose

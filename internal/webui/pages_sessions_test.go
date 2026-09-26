@@ -25,6 +25,7 @@ var sampleLinkViews = []ipc.LinkView{
 		Wrapped: wrapped("link", "note: please link "+hostile)},
 	{Link: 3, Machine: "gpu-box", Session: "lead", RemoteSession: "old", Direction: "out", State: "closed", Reason: "presence_timeout", PermissionIn: "messages"},
 	{Link: 4, Machine: "gpu-box", Session: "side", RemoteSession: "eval", Direction: "in", State: "active", PermissionIn: "messages", RemoteAway: true},
+	{Link: 6, Machine: "mac", Session: "side", RemoteSession: "far", Direction: "out", State: "active", PermissionIn: "messages", RemoteAway: true, Unreachable: true},
 }
 
 func sessionsDaemon(t *testing.T) *fakeDaemon {
@@ -60,7 +61,7 @@ func TestSessionsPageShowsLocalSessionsAndLinks(t *testing.T) {
 		"<td>1</td><td>lead</td><td>gpu-box/trainer",
 		"<td>active</td><td>tasks-auto</td><td>tasks-ask</td>",
 		`<option value="messages">messages</option><option value="tasks-ask">tasks-ask</option></select><button type="submit" class="secondary">Restrict</button>`,
-		"<td>closed: presence_timeout</td>", "<td>active (peer away)</td>",
+		"<td>closed: presence_timeout</td>", "<td>active (peer away)</td>", "<td>away (peer machine not answering)</td>",
 		"Link requests waiting for you: 1.",
 		`href="/sessions?machine=gpu-box"`, `href="/sessions?machine=mac"`)
 	if strings.Contains(page, `name="link" value="3"`) {

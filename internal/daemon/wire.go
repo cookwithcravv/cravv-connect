@@ -297,6 +297,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 		Inbox: d.inbox, Desktop: d.opts.Desktop, Managed: d.host, Clock: clock, Audit: lg, Log: d.log,
 	})
 	g.presence = NewPresenceService(db, db, g.links, g.outbound, clock, d.log)
+	g.presence.SetGrace(presenceGrace(d.shared, db, offersNow{d}))
 	g.versions = NewVersionNotices()
 	g.prekeys = NewPrekeyManager(db, db, id, g.outbound, clock)
 	g.files = NewFileService(FileDeps{
@@ -342,7 +343,8 @@ func registerHandlers(g *services, inbox *InboxService, sessions SessionLookup, 
 	// without an active link, from the wrong machine, or not permitted on
 	// the link never reaches the service's main handler.
 	gate := func(inner, onReject Handler) Handler {
-		return LinkGate{Links: db, Sessions: sessions, Replies: g.versions.Replier(g.replies), Inner: inner, OnReject: onReject, Seen: g.versions.Seen}
+		return LinkGate{Links: db, Sessions: sessions, Replies: g.versions.Replier(g.replies), Inner: inner, OnReject: onReject, Seen: g.versions.Seen,
+			Traffic: g.presence.Traffic}
 	}
 	r.Register(core.KindChat, gate(NewChatHandler(inbox), nil))
 	r.Register(core.KindTaskCreate, gate(HandlerFunc(g.tasks.HandleCreate), HandlerFunc(g.tasks.RejectCreate)))

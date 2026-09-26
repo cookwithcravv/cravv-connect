@@ -31,6 +31,13 @@ func TestLinksTable(t *testing.T) {
 	}
 }
 
+// A link whose peer machine stopped answering presence is away.
+func TestLinkStateUnreachable(t *testing.T) {
+	if got := linkState(ipc.LinkView{State: "active", RemoteAway: true, Unreachable: true}); got != "away (peer machine not answering)" {
+		t.Fatalf("state %q", got)
+	}
+}
+
 func TestLinksEmpty(t *testing.T) {
 	fd := newFakeDaemon(t)
 	fd.reply(ipc.MethodLinks, ipc.GateNone, ipc.LinksResult{})

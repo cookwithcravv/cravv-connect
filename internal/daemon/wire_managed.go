@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cravv/cravv-connect/internal/audit"
+	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/store"
 )
 
@@ -71,3 +72,14 @@ func (d *Daemon) Offers() *OfferService { return d.offers }
 
 // Host returns the SessionHost.
 func (d *Daemon) Host() *SessionHost { return d.host }
+
+// offersNow looks offers up in the daemon's offer rules, which are built
+// after the identity-bound services.
+type offersNow struct{ d *Daemon }
+
+func (o offersNow) Get(ctx context.Context, id string) (store.Offer, error) {
+	if o.d.offers == nil {
+		return store.Offer{}, core.ErrNotFound
+	}
+	return o.d.offers.Get(ctx, id)
+}

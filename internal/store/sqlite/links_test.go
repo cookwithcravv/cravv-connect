@@ -138,3 +138,24 @@ func TestPurgeClosedLinks(t *testing.T) {
 		t.Fatalf("open link purged: %v", err)
 	}
 }
+
+// A link keeps when its peer machine stopped answering presence (zero
+// while it answers), through insert, update and the upgrade to schema 9.
+func TestLinkPresenceAwayRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	l := linkFixture("m1", "L1")
+	l.State, l.PresenceAway = store.LinkActive, t0.Add(time.Minute)
+	if _, err := db.InsertLink(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := db.GetLink(ctx, "m1", "L1"); err != nil || !got.PresenceAway.Equal(t0.Add(time.Minute)) {
+		t.Fatalf("after insert %v, %v", got.PresenceAway, err)
+	}
+	if _, err := db.UpdateLink(ctx, "m1", "L1", func(x *store.Link) error { x.PresenceAway = time.Time{}; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := db.GetLink(ctx, "m1", "L1"); !got.PresenceAway.IsZero() {
+		t.Fatalf("after clearing %v", got.PresenceAway)
+	}
+}

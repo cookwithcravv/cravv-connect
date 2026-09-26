@@ -43,11 +43,15 @@ type Link struct {
 	Proposed      core.Permission // pending: the level the requester proposed
 	Note          string          // pending inbound: the requester's note
 	State         LinkState
-	RemoteAway    bool   // the peer reported its session away (link.state)
-	Reason        string // closed: the link.closed or link.rejected reason
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	ExpiresAt     time.Time // pending: when the request times out
+	RemoteAway    bool // the peer reported its session away (link.state)
+	// PresenceAway is when the peer machine stopped answering presence on
+	// this active link (zero while it answers). The link closes after the
+	// away grace unless traffic or a fresh pong clears it (v2 spec 5).
+	PresenceAway time.Time
+	Reason       string // closed: the link.closed or link.rejected reason
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	ExpiresAt    time.Time // pending: when the request times out
 }
 
 // Open reports whether the link is pending or active.

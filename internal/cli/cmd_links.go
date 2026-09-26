@@ -28,6 +28,8 @@ func linkState(l ipc.LinkView) string {
 		return "requested (they decide)"
 	case l.State == "closed":
 		return "closed: " + l.Reason
+	case l.Unreachable:
+		return "away (peer machine not answering)"
 	case l.RemoteAway:
 		return "active (peer away)"
 	}

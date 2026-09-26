@@ -40,28 +40,54 @@ func TestPresenceKeepsLiveLinksOpen(t *testing.T) {
 	}
 }
 
-func TestPresenceTimeoutWhenMachineDrops(t *testing.T) {
-	ctx := context.Background()
+// tickAlice advances the clock by d and runs one presence round on alice.
+func tickAlice(t *testing.T, n *v2Net, a *v2Node, d time.Duration) {
+	t.Helper()
+	n.clock.Advance(d)
+	if err := a.presence.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// v2 spec 5: a machine that stops answering makes its links away after the
+// presence timeout; they close (presence_timeout) only after the away
+// grace, and the session is told then.
+func TestPresenceTimeoutMarksAwayThenClosesAfterGrace(t *testing.T) {
 	n, a, b := linkNet(t)
 	l := linkUp(t, n, a, b, core.PermMessages)
 	tickBoth(t, n, a, b) // both sides have fresh evidence at t0
 	n.setDown(b, true)
 	for elapsed := time.Duration(0); elapsed < core.PresenceTimeout; elapsed += core.PresenceInterval {
-		n.clock.Advance(core.PresenceInterval)
-		if err := a.presence.Tick(ctx); err != nil {
-			t.Fatal(err)
-		}
+		tickAlice(t, n, a, core.PresenceInterval)
+	}
+	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkActive || !got.PresenceAway.IsZero() {
+		t.Fatalf("away at exactly the timeout: %+v", got)
+	}
+	notices := len(a.notices(t, l.lead.Session.ID))
+	tickAlice(t, n, a, time.Second)
+	awayAt := n.clock.Now()
+	got := a.linkOf(t, b, l.aLink.ID)
+	if got.State != store.LinkActive || !got.PresenceAway.Equal(awayAt) {
+		t.Fatalf("after the timeout: %+v", got)
+	}
+	// Away links are still pinged, so a machine that comes back is seen.
+	pings := len(n.sent(core.KindPresencePing))
+	for n.clock.Now().Sub(awayAt)+core.PresenceInterval <= core.AwayGrace {
+		tickAlice(t, n, a, core.PresenceInterval)
+	}
+	if len(n.sent(core.KindPresencePing)) == pings {
+		t.Fatal("an away link was not pinged")
 	}
 	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkActive {
-		t.Fatalf("closed at exactly the timeout: %+v", got)
+		t.Fatalf("closed within the away grace: %+v", got)
 	}
-	n.clock.Advance(time.Second)
-	if err := a.presence.Tick(ctx); err != nil {
-		t.Fatal(err)
+	if len(a.notices(t, l.lead.Session.ID)) != notices {
+		t.Fatal("the session was told before the link closed")
 	}
-	got := a.linkOf(t, b, l.aLink.ID)
+	tickAlice(t, n, a, core.PresenceInterval)
+	got = a.linkOf(t, b, l.aLink.ID)
 	if got.State != store.LinkClosed || got.Reason != core.ClosePresenceTimeout {
-		t.Fatalf("after the timeout %+v", got)
+		t.Fatalf("after the away grace %+v", got)
 	}
 	items := a.notices(t, l.lead.Session.ID)
 	if last := items[len(items)-1]; last.Kind != core.KindLinkClosed {
@@ -72,6 +98,117 @@ func TestPresenceTimeoutWhenMachineDrops(t *testing.T) {
 	n.pump()
 	if got := b.linkOf(t, a, l.bLink.ID); got.State != store.LinkClosed || got.Reason != core.ClosePresenceTimeout {
 		t.Fatalf("bob after reconnect %+v", got)
+	}
+}
+
+// markAway takes bob off the network until alice marks the link away.
+func markAway(t *testing.T, n *v2Net, a, b *v2Node, l v2Linked) {
+	t.Helper()
+	tickBoth(t, n, a, b)
+	n.setDown(b, true)
+	for a.linkOf(t, b, l.aLink.ID).PresenceAway.IsZero() {
+		tickAlice(t, n, a, core.PresenceInterval)
+	}
+}
+
+// A fresh pong brings an away link back to active.
+func TestPresencePongClearsAway(t *testing.T) {
+	n, a, b := linkNet(t)
+	l := linkUp(t, n, a, b, core.PermMessages)
+	markAway(t, n, a, b, l)
+	n.setDown(b, false)
+	tickAlice(t, n, a, core.PresenceInterval) // ping
+	n.pump()                                  // bob pongs
+	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkActive || !got.PresenceAway.IsZero() {
+		t.Fatalf("after a fresh pong %+v", got)
+	}
+	// The grace no longer runs: much later the link is still active.
+	for range 30 {
+		tickBoth(t, n, a, b)
+		n.clock.Advance(core.PresenceInterval)
+	}
+	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkActive {
+		t.Fatalf("closed after coming back: %+v", got)
+	}
+}
+
+// Traffic on the link (a ping, or anything the link gate admits) brings
+// an away link back too.
+func TestPresenceTrafficClearsAway(t *testing.T) {
+	ctx := context.Background()
+	n, a, b := linkNet(t)
+	l := linkUp(t, n, a, b, core.PermMessages)
+	markAway(t, n, a, b, l)
+	n.setDown(b, false)
+	a.presence.Traffic(ctx, a.linkOf(t, b, l.aLink.ID))
+	if got := a.linkOf(t, b, l.aLink.ID); !got.PresenceAway.IsZero() {
+		t.Fatalf("after traffic %+v", got)
+	}
+
+	markAway(t, n, a, b, l)
+	n.setDown(b, false)
+	if err := b.presence.Tick(ctx); err != nil { // bob pings alice
+		t.Fatal(err)
+	}
+	n.pump()
+	if got := a.linkOf(t, b, l.aLink.ID); !got.PresenceAway.IsZero() {
+		t.Fatalf("after bob's ping %+v", got)
+	}
+}
+
+// The away grace comes from the daemon: a managed session's link waits for
+// the session's idle timeout instead.
+func TestPresenceAwayGraceIsPerLink(t *testing.T) {
+	n, a, b := linkNet(t)
+	l := linkUp(t, n, a, b, core.PermMessages)
+	a.presence.SetGrace(func(context.Context, store.Link) time.Duration { return 2 * time.Hour })
+	markAway(t, n, a, b, l)
+	for range 4 * 60 / 2 { // an hour, in 30 second rounds
+		tickAlice(t, n, a, core.PresenceInterval)
+	}
+	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkActive {
+		t.Fatalf("closed before its grace: %+v", got)
+	}
+	for range 4*60/2 + 1 {
+		tickAlice(t, n, a, core.PresenceInterval)
+	}
+	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkClosed || got.Reason != core.ClosePresenceTimeout {
+		t.Fatalf("after its grace %+v", got)
+	}
+}
+
+// Local sleep: when far more than a heartbeat passed since the last round
+// (the laptop was asleep), this side has no evidence about anybody. It
+// forgets the old evidence and pings first instead of marking links away,
+// and it does not close away links on that round either.
+func TestPresenceAfterLocalSleepPingsFirst(t *testing.T) {
+	n, a, b := linkNet(t)
+	l := linkUp(t, n, a, b, core.PermMessages)
+	tickBoth(t, n, a, b)
+	pings := len(n.sent(core.KindPresencePing))
+	tickAlice(t, n, a, time.Hour) // alice slept an hour; bob is fine
+	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkActive || !got.PresenceAway.IsZero() {
+		t.Fatalf("after waking %+v", got)
+	}
+	if len(n.sent(core.KindPresencePing)) == pings {
+		t.Fatal("no ping after waking")
+	}
+	n.pump()
+	tickAlice(t, n, a, core.PresenceInterval)
+	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkActive || !got.PresenceAway.IsZero() {
+		t.Fatalf("a round after waking %+v", got)
+	}
+
+	// An away link whose grace ran out during the sleep is pinged first too.
+	markAway(t, n, a, b, l)
+	n.setDown(b, false)
+	tickAlice(t, n, a, 2*core.AwayGrace)
+	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkActive {
+		t.Fatalf("closed on the round after a sleep: %+v", got)
+	}
+	n.pump()
+	if got := a.linkOf(t, b, l.aLink.ID); !got.PresenceAway.IsZero() {
+		t.Fatalf("the pong after waking did not clear away: %+v", got)
 	}
 }
 
@@ -152,7 +289,9 @@ func TestStalePresenceFramesAreIgnored(t *testing.T) {
 		t.Fatal("a stale ping was answered")
 	}
 	n.setDown(b, true)
-	n.clock.Advance(core.PresenceTimeout)
+	for range 5 { // the presence timeout, one heartbeat at a time
+		tickAlice(t, n, a, core.PresenceInterval)
+	}
 	// A stale pong naming the link arrives just before the deadline.
 	stalePong, err := core.NewEnvelope(n.clock, b.id, a.id, core.KindPresencePong, core.PresencePongBody{TS: old, LinkIDsOpen: []string{l.aLink.ID}})
 	if err != nil {
@@ -165,7 +304,7 @@ func TestStalePresenceFramesAreIgnored(t *testing.T) {
 	if err := a.presence.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkClosed {
+	if got := a.linkOf(t, b, l.aLink.ID); got.PresenceAway.IsZero() {
 		t.Fatalf("a stale pong kept the link alive: %+v", got)
 	}
 }
@@ -182,7 +321,54 @@ func TestFirstTickSeedsEvidence(t *testing.T) {
 	if err := fresh.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkActive {
-		t.Fatalf("closed on the first tick after a restart: %+v", got)
+	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkActive || !got.PresenceAway.IsZero() {
+		t.Fatalf("away on the first tick after a restart: %+v", got)
 	}
 }
+
+// The daemon's grace per link: the away grace for a live session's link,
+// the offer's idle timeout for a managed session's (the default when the
+// offer is gone), so presence never closes a managed run's link sooner
+// than idleness would.
+func TestPresenceGraceByKind(t *testing.T) {
+	ctx := context.Background()
+	st := d2Store(t)
+	clock := core.NewFakeClock(d2Epoch)
+	sessions := NewSessionService(st, clock)
+	live, err := sessions.Share(ctx, 1, ShareRequest{Agent: "claude", ProjectDir: "/w/p", Name: "lead"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	managed, err := sessions.CreateManaged(ctx, "trainer-ab12", "", "/w/q")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphan, err := sessions.CreateManaged(ctx, "trainer-cd34", "", "/w/q")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []store.ManagedSession{{SessionID: managed.ID, OfferID: "O1"}, {SessionID: orphan.ID, OfferID: "gone"}} {
+		if err := st.PutManaged(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	offers := offerGetter(func(_ context.Context, id string) (store.Offer, error) {
+		if id == "O1" {
+			return store.Offer{ID: "O1", IdleTimeout: 3 * time.Hour}, nil
+		}
+		return store.Offer{}, core.ErrNotFound
+	})
+	grace := presenceGrace(sessions, st, offers)
+	for _, c := range []struct {
+		session string
+		want    time.Duration
+	}{{live.Session.ID, core.AwayGrace}, {managed.ID, 3 * time.Hour}, {orphan.ID, core.DefaultIdleTimeout}, {"unknown", core.AwayGrace}} {
+		if got := grace(ctx, store.Link{Session: c.session}); got != c.want {
+			t.Errorf("session %s: grace %s, want %s", c.session, got, c.want)
+		}
+	}
+}
+
+type offerGetter func(ctx context.Context, id string) (store.Offer, error)
+
+func (f offerGetter) Get(ctx context.Context, id string) (store.Offer, error) { return f(ctx, id) }

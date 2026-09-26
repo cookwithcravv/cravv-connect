@@ -529,7 +529,8 @@ raising, or accepting at `tasks-auto`, needs the password.
 
 **Close.** A link closes when either session closes, either side
 disconnects it, on pause or unpair of the machine, on the kill switch, or
-on presence timeout, and a closed link never reopens. The side that closes
+when it stays away after a presence timeout for its grace (section 5.7),
+and a closed link never reopens. The side that closes
 sends `link.closed` (except on pause and unpair, where `control.paused` and
 `control.unpaired` already say so) and tells its session. The receiver of
 `link.closed` closes its side and tells its session; it never answers a
@@ -551,16 +552,25 @@ read from the link, and closes a managed session whose link it was.
   (`pending` counts as open, because its `link.accepted` may not have
   arrived yet), echoing `ts`. A ping is also fresh evidence for the links
   it names.
-- A link is dead after 150 seconds without fresh evidence, or as soon as a
-  fresh pong to a recent ping leaves it out. It closes with
-  `presence_timeout` and `link.closed` is queued, so the peer converges
-  when it is reachable again.
+- A link without fresh evidence (a pong, a ping or link traffic) for 150
+  seconds is marked away on that side (nothing is sent). It is still
+  pinged, and a fresh pong or traffic on it makes it active again.
+- An away link closes with `presence_timeout` when it stays away for its
+  grace: 10 minutes for a live session's link, the managed session's idle
+  timeout for a managed one. `link.closed` is queued, so the peer
+  converges when it is reachable again.
+- A fresh pong to a recent ping that leaves a link out closes it at once
+  (`presence_timeout`): the peer no longer has it.
+- A side that finds more than 60 seconds passed since its last heartbeat
+  round (it slept) resets its evidence, pings, and closes nothing in that
+  round.
 - Both kinds are ephemeral (section 4, step 5): a ping or pong older than
   120 seconds, or more than 10 minutes in the future, is ignored.
 
 A session that closes sends `link.closed{session_closed}` on each of its
 links at once, through the outbox, so the peer learns within seconds while
-both machines are online and within 150 seconds when a machine drops.
+both machines are online. When a machine drops, the other side marks its
+links away within 150 seconds and closes them after the grace.
 
 ## 6. Files
 

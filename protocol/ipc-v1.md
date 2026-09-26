@@ -586,7 +586,7 @@ claimed it yet, so a slow session and a stuck one look different.
 // LinkView
 {"link": 2, "machine": "gpu-box", "session": "lead", "remote_session": "trainer",
  "direction": "out", "state": "active", "permission_in": "messages",
- "permission_out": "tasks-auto", "proposed": "", "remote_away": false,
+ "permission_out": "tasks-auto", "proposed": "", "remote_away": false, "unreachable": false,
  "reason": "", "wrapped": "<remote_message ... kind=\"link\">\npurpose: ...\n</remote_message>"}
 
 // SharedSessionView (never an ID)
@@ -644,7 +644,9 @@ claimed it yet, so a slow session and a stuck one look different.
   what the peer may do on this side, `permission_out` what the peer lets
   this side do there, `proposed` what a pending request asks. `state` is
   `pending`, `active` or `closed` (with `reason`); `remote_away` is set
-  while the peer's session is away. The peer's purpose and request note
+  while the peer's session is away, and also, with `unreachable`, while
+  the peer machine does not answer presence (the link closes if that lasts
+  for the away grace). The peer's purpose and request note
   are only in `wrapped`.
 - A session's `state` is `open`, `away` or `closed`; `kind` is `live` (a
   chat) or `managed`. A managed session's `state` in ManagedView is `idle`,

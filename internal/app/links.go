@@ -131,7 +131,11 @@ func (a links) view(ctx context.Context, l store.Link) ipc.LinkView {
 	}
 	v := ipc.LinkView{
 		Link: l.Num, Machine: alias, RemoteSession: l.RemoteName, Direction: string(l.Direction), State: string(l.State),
-		PermissionIn: string(l.PermissionIn), PermissionOut: string(l.PermissionOut), RemoteAway: l.RemoteAway, Reason: l.Reason,
+		PermissionIn: string(l.PermissionIn), PermissionOut: string(l.PermissionOut), Reason: l.Reason,
+	}
+	if l.State == store.LinkActive {
+		v.Unreachable = !l.PresenceAway.IsZero()
+		v.RemoteAway = l.RemoteAway || v.Unreachable
 	}
 	if s, err := a.d.Shared().Get(ctx, l.Session); err == nil {
 		v.Session = s.Name

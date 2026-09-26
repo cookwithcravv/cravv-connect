@@ -142,8 +142,9 @@ func TestSessionCloseReachesPeerWithinFiveSeconds(t *testing.T) {
 	wantKind(t, TryCall(l.B.C, ipc.MethodSessionClose, nil, nil), ipc.KindNotShared)
 }
 
-// v2 success criterion 3: when a machine drops, the link closes on the
-// other side after the presence timeout (150 seconds, on a fake clock).
+// v2 success criterion 3: when a machine drops, the link is away on the
+// other side after the presence timeout (150 seconds, on a fake clock), and
+// closes after the away grace.
 func TestPresenceTimeoutWhenMachineDrops(t *testing.T) {
 	t.Parallel()
 	clock := core.NewFakeClock(time.Now())
@@ -161,15 +162,24 @@ func TestPresenceTimeoutWhenMachineDrops(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := a.Link(l.ANum); got.State != "active" {
-		t.Fatalf("closed before the timeout: %+v", got)
+	if got := a.Link(l.ANum); got.State != "active" || got.Unreachable {
+		t.Fatalf("away before the timeout: %+v", got)
 	}
 	clock.Advance(time.Second)
 	if err := a.Daemon.Presence().Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := a.Link(l.ANum); got.State != "closed" || got.Reason != core.ClosePresenceTimeout {
+	if got := a.Link(l.ANum); got.State != "active" || !got.Unreachable || !got.RemoteAway {
 		t.Fatalf("after the timeout: %+v", got)
+	}
+	for range int(core.AwayGrace/core.PresenceInterval) + 1 {
+		clock.Advance(core.PresenceInterval)
+		if err := a.Daemon.Presence().Tick(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := a.Link(l.ANum); got.State != "closed" || got.Reason != core.ClosePresenceTimeout {
+		t.Fatalf("after the away grace: %+v", got)
 	}
 }
 

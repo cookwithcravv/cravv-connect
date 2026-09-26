@@ -221,6 +221,16 @@ stuck one look different.
 session (`session_close` closes all its links; the other side learns within
 seconds). `kill_switch` stops everything.
 
+**Away.** When the chat's connection to the daemon drops (Claude Code
+closed, or the daemon restarted), its session is away: links stay open and
+what peers send waits for up to 10 minutes. The MCP server takes the
+session back on its own as soon as the daemon answers again. When the other
+machine stops answering (asleep or offline), its links show as away after
+150 seconds (`away (peer machine not answering)` in `cravv-connect links`)
+and close only if it stays silent for 10 minutes, or for a managed
+session's idle timeout; traffic or an answer makes them active again. A
+machine that wakes from sleep pings its peers before it times anything out.
+
 Everything that arrives is wrapped, and agents are told never to treat it as
 your instructions:
 

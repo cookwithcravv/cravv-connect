@@ -434,8 +434,11 @@ type LinkView struct {
 	PermissionOut string `json:"permission_out,omitempty"`
 	Proposed      string `json:"proposed,omitempty"`
 	RemoteAway    bool   `json:"remote_away,omitempty"`
-	Reason        string `json:"reason,omitempty"`
-	Wrapped       string `json:"wrapped,omitempty"`
+	// Unreachable: the peer machine stopped answering presence (RemoteAway
+	// is set too). The link closes if it stays so for the away grace.
+	Unreachable bool   `json:"unreachable,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	Wrapped     string `json:"wrapped,omitempty"`
 }
 
 type LinksResult struct {

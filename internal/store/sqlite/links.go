@@ -11,17 +11,19 @@ import (
 )
 
 const linkCols = `num, peer, link_id, direction, session_id, remote_session, remote_name, remote_purpose,
-	permission_in, permission_out, proposed, note, state, remote_away, reason, created_at, updated_at, expires_at`
+	permission_in, permission_out, proposed, note, state, remote_away, reason, created_at, updated_at, expires_at,
+	presence_away_at`
 
 // InsertLink stores a new link and returns it with Num assigned.
 func (d *DB) InsertLink(ctx context.Context, l store.Link) (store.Link, error) {
 	res, err := d.sql.ExecContext(ctx, `
 INSERT INTO links (peer, link_id, direction, session_id, remote_session, remote_name, remote_purpose,
-	permission_in, permission_out, proposed, note, state, remote_away, reason, created_at, updated_at, expires_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	permission_in, permission_out, proposed, note, state, remote_away, reason, created_at, updated_at, expires_at,
+	presence_away_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(l.Peer), l.ID, string(l.Direction), l.Session, l.RemoteSession, l.RemoteName, l.RemotePurpose,
 		string(l.PermissionIn), string(l.PermissionOut), string(l.Proposed), l.Note, string(l.State),
-		boolInt(l.RemoteAway), l.Reason, toMS(l.CreatedAt), toMS(l.UpdatedAt), toMS(l.ExpiresAt))
+		boolInt(l.RemoteAway), l.Reason, toMS(l.CreatedAt), toMS(l.UpdatedAt), toMS(l.ExpiresAt), toMS(l.PresenceAway))
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return store.Link{}, store.ErrLinkExists
@@ -107,11 +109,11 @@ func (d *DB) UpdateLink(ctx context.Context, peer core.MachineID, id string, mut
 		_, err = tx.ExecContext(ctx, `
 UPDATE links SET direction = ?, session_id = ?, remote_session = ?, remote_name = ?, remote_purpose = ?,
 	permission_in = ?, permission_out = ?, proposed = ?, note = ?, state = ?, remote_away = ?, reason = ?,
-	created_at = ?, updated_at = ?, expires_at = ?
+	created_at = ?, updated_at = ?, expires_at = ?, presence_away_at = ?
 WHERE peer = ? AND link_id = ?`,
 			string(l.Direction), l.Session, l.RemoteSession, l.RemoteName, l.RemotePurpose,
 			string(l.PermissionIn), string(l.PermissionOut), string(l.Proposed), l.Note, string(l.State),
-			boolInt(l.RemoteAway), l.Reason, toMS(l.CreatedAt), toMS(l.UpdatedAt), toMS(l.ExpiresAt),
+			boolInt(l.RemoteAway), l.Reason, toMS(l.CreatedAt), toMS(l.UpdatedAt), toMS(l.ExpiresAt), toMS(l.PresenceAway),
 			string(peer), id)
 		if err != nil {
 			return err
@@ -140,9 +142,10 @@ func scanLink(s rowScanner) (store.Link, error) {
 		peer, dir, pin, pout, proposed, state string
 		away                                  int
 		createdAt, updatedAt, expiresAt       int64
+		presenceAway                          int64
 	)
 	if err := s.Scan(&l.Num, &peer, &l.ID, &dir, &l.Session, &l.RemoteSession, &l.RemoteName, &l.RemotePurpose,
-		&pin, &pout, &proposed, &l.Note, &state, &away, &l.Reason, &createdAt, &updatedAt, &expiresAt); err != nil {
+		&pin, &pout, &proposed, &l.Note, &state, &away, &l.Reason, &createdAt, &updatedAt, &expiresAt, &presenceAway); err != nil {
 		return store.Link{}, notFound(err)
 	}
 	l.Peer = core.MachineID(peer)
@@ -155,5 +158,6 @@ func scanLink(s rowScanner) (store.Link, error) {
 	l.CreatedAt = fromMS(createdAt)
 	l.UpdatedAt = fromMS(updatedAt)
 	l.ExpiresAt = fromMS(expiresAt)
+	l.PresenceAway = fromMS(presenceAway)
 	return l, nil
 }

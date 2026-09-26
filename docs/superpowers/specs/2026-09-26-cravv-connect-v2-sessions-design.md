@@ -110,7 +110,7 @@ A link connects two sessions on two different machines.
   - Raising, or granting `tasks-auto` at accept time, needs the password (section 10).
 - **Lifecycle.**
   - States are `pending`, then `active`, then `closed`.
-  - A link closes when either session closes, when either side calls `disconnect`, on pause or unpair of the machine, on the kill switch, or on presence timeout.
+  - A link closes when either session closes, when either side calls `disconnect`, on pause or unpair of the machine, on the kill switch, or when it stays away after a presence timeout for its away grace (section 5).
   - Closed links are never reopened.
 - **On close:**
   - Tasks in `queued`, `claimed` or `running` state on that link become `failed: link_closed`, and the sender is told when reachable.
@@ -149,9 +149,12 @@ These are new envelope kinds, sealed as in v1. The v1 kinds `chat`, `task.*` and
 1. **Local close.** When a session closes locally, the daemon immediately sends `link.closed` for each of its links, through the outbox so it survives a brief disconnect.
 2. **Away.** When a session goes away or comes back, the daemon sends `link.state` to each linked peer.
 3. **Heartbeat.**
-   - While at least one link to a peer is open, each daemon sends `presence.ping` every 30 seconds.
-   - A link counts as dead after 150 seconds without a fresh pong, or as soon as a fresh pong leaves it out.
-   - Either way it becomes `closed(presence_timeout)` on that side, and the session is told.
+   - While at least one link to a peer is open, each daemon sends `presence.ping` every 30 seconds, naming the active links (away ones too).
+   - **Presence timeout marks away; closes after the away grace.** A link without fresh evidence (a fresh pong, a ping or traffic on it) for 150 seconds is marked `away` on that side, so the local session and the human see the peer as away (both sides do this on their own when the machines lose each other). Sends on it queue as for an away session.
+   - An away link becomes `closed(presence_timeout)`, and the session is told, only when it stays away for its grace: the away grace of 10 minutes for a live session, or the managed session's `idle_timeout` for a managed one (a managed run is never stopped because its peer is away; it finishes and its answer queues).
+   - Traffic on the link or a fresh pong returns it to `active` and stops the grace.
+   - A fresh pong that leaves a link out still closes it at once (`presence_timeout`): the peer no longer has it.
+   - **Local sleep.** If more than two ping intervals passed since the last heartbeat round (by the wall clock or the monotonic clock: this machine slept or was stopped), the daemon forgets its evidence, gives every link the full 150 seconds from now, closes nothing in that round and pings first.
 4. **Split brain.** If one side considers a link closed and the other still sends on it, the `link.closed{unknown_link}` reply converges them.
 5. **Offline sends.** Sending on a link that is not active (or away) returns `link_closed` at once.
 
