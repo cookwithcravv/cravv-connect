@@ -24,6 +24,17 @@ const (
 	errOffline      = "relay offline" // SendDirect error text
 )
 
+// PairingGrace is how long after pairing a relay not_allowed is taken to mean
+// that the peer has not finished pairing (its human is still answering the
+// prompts, so it has not allowed us on the relay yet) rather than a pause. In
+// that window items are retried every PairingGraceRetry at most and the peer
+// is not marked as pausing us; the peer's control.resumed, sent when it
+// finalizes, clears any pause set before.
+const (
+	PairingGrace      = 30 * time.Minute
+	PairingGraceRetry = 5 * time.Second
+)
+
 // ErrOffline is returned by SendDirect when there is no live mailbox.
 var ErrOffline = errors.New(errOffline)
 
@@ -236,6 +247,11 @@ func (o *Outbound) attempt(ctx context.Context, mb transport.Mailbox, it store.O
 		// then, SendDue moves the item back to pending and it is sent again.
 		return o.outbox.SetStatus(ctx, it.ID, store.OutboxQueued, it.Attempts+1, o.clock.Now().Add(core.RelayTTL))
 	case transport.SendNotAllowed:
+		if o.clock.Now().Sub(peer.PairedAt) < PairingGrace {
+			attempts := it.Attempts + 1
+			delay := min(backoffDelay(attempts), PairingGraceRetry)
+			return o.outbox.SetStatus(ctx, it.ID, store.OutboxPending, attempts, o.clock.Now().Add(delay))
+		}
 		if err := o.markPausedByPeer(ctx, peer); err != nil {
 			return err
 		}

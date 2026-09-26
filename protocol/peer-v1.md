@@ -231,7 +231,7 @@ The relay's answer to `send` decides what happens:
 | Relay status | Sender action |
 |---|---|
 | `queued` | Non-control kinds: mark `queued`; if no `control.delivered` arrives within 7 days (the relay queue TTL), the item goes back to `pending` and is sent again. Control kinds: delete the item (they are never confirmed) |
-| `not_allowed` | The peer paused this machine: mark the peer "paused by peer" and hold every non-control item for it until `control.resumed`. Control items keep retrying with backoff |
+| `not_allowed` | Within 30 minutes of pairing: the peer has most likely not finalized yet (it has not allowed this machine on the relay); retry with backoff capped at 5 seconds and mark nothing. Later: the peer paused this machine: mark the peer "paused by peer" and hold every non-control item for it until `control.resumed`. Control items keep retrying with backoff |
 | `too_large`, `unknown_mailbox` | Drop the item and report it in `status` (items for a peer that is no longer paired are dropped the same way) |
 | `queue_full`, `rate_limited`, network error | Back off: 1 second, doubling per attempt, at most 5 minutes |
 
@@ -353,7 +353,7 @@ note. No `task.update` is sent back; unknown or finished tasks are ignored.
 | `control.stale_prekey` | `{"msg_id": "...", "prekey": signed prekey}` | A frame arrived sealed to an unknown or purged prekey (once per sender and message ID) |
 | `control.delivered` | `{"ids": ["...", "..."]}` | Non-control messages were stored (4, step 8) |
 | `control.paused` | `{}` | This machine paused the peer (sent directly, then the peer is denied on the relay) |
-| `control.resumed` | `{}` | This machine resumed the peer |
+| `control.resumed` | `{}` | This machine resumed the peer, or finalized pairing with it |
 | `control.unpaired` | `{}` | This machine unpaired the peer (sent directly, best effort) |
 | `control.relay_moved` | `{"relay_url": "https://..."}` | Reserved for relay changes. v1 daemons accept and store it (only `https` URLs, or `http` for `localhost`, `127.0.0.1` and `::1`) but do not send it |
 
@@ -561,7 +561,10 @@ with a letter or digit) and the trust level. `pair.finalize` then:
    from A's payload and waits for the connection;
 2. stores the peer: IK, machine ID, alias, trust, prekey, relay URL;
 3. adds the peer's IK to the relay allow-list;
-4. writes an audit entry (`pair`, with the role `creator` or `joiner`).
+4. queues `control.resumed` to the peer: the side that finalized first may
+   already have sent and been told `not_allowed`, and this clears any pause it
+   recorded and releases what it held;
+5. writes an audit entry (`pair`, with the role `creator` or `joiner`).
 
 A pending pairing lives 10 minutes; a successful exchange gets a fresh 10
 minutes for the human to finalize. There is no fingerprint comparison step:

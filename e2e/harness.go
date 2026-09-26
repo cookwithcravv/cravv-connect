@@ -372,6 +372,13 @@ type PairOptions struct {
 // knows a by a.Name.
 func Pair(t *testing.T, a, b *Node, o PairOptions) {
 	t.Helper()
+	PairBetween(t, a, b, o, nil)
+}
+
+// PairBetween is Pair with between (when not nil) run after b finalized and
+// before a does, the window in which b knows a but a does not know b yet.
+func PairBetween(t *testing.T, a, b *Node, o PairOptions, between func()) {
+	t.Helper()
 	if o.ATrustsB == 0 {
 		o.ATrustsB = core.TrustAskFirst
 	}
@@ -411,6 +418,9 @@ func Pair(t *testing.T, a, b *Node, o PairOptions) {
 	var fb ipc.PairFinalizeResult
 	Call(t, cb, ipc.MethodPairFinalize, ipc.PairFinalizeParams{
 		PendingID: joined.PendingID, Alias: a.Name, Trust: o.BTrustsA.String()}, &fb)
+	if between != nil {
+		between()
+	}
 	var fa ipc.PairFinalizeResult
 	Call(t, ca, ipc.MethodPairFinalize, ipc.PairFinalizeParams{
 		PendingID: got.res.PendingID, Alias: b.Name, Trust: o.ATrustsB.String()}, &fa)

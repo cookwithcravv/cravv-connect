@@ -79,6 +79,7 @@ type PairingService struct {
 	pake      pake.Factory
 	peers     store.PeerStore
 	prekeys   PrekeyProvider
+	sender    EnvelopeSender // may be nil: no control.resumed after finalize
 	registrar Registrar
 	cfg       PairingConfig
 	clock     core.Clock
@@ -94,12 +95,12 @@ type PairingService struct {
 
 // NewPairingService wires a PairingService.
 func NewPairingService(id *keys.Identity, rooms transport.Rooms, mailboxes MailboxProvider, pf pake.Factory,
-	peers store.PeerStore, prekeys PrekeyProvider, registrar Registrar, cfg PairingConfig,
+	peers store.PeerStore, prekeys PrekeyProvider, sender EnvelopeSender, registrar Registrar, cfg PairingConfig,
 	clock core.Clock, lg audit.Logger) *PairingService {
 	base, stop := context.WithCancel(context.Background())
 	return &PairingService{
 		identity: id, rooms: rooms, mailboxes: mailboxes, pake: pf, peers: peers, prekeys: prekeys,
-		registrar: registrar, cfg: cfg, clock: clock, audit: lg,
+		sender: sender, registrar: registrar, cfg: cfg, clock: clock, audit: lg,
 		base: base, stop: stop,
 		pending: make(map[string]*pendingPair),
 	}
@@ -269,6 +270,13 @@ func (s *PairingService) Finalize(ctx context.Context, pendingID, alias string, 
 	}
 	if mb, ok := s.mailboxes.Mailbox(); ok {
 		_ = mb.Allow(ctx, peer.IK) // otherwise SyncAllowList allows it on the next connect
+	}
+	// If the peer finalized first and sent before we allowed it, its relay
+	// said not_allowed. Tell it we are here: control.resumed clears any pause
+	// it recorded and releases what it held. Through the outbox, so it is
+	// retried until the peer's relay accepts it (best effort otherwise).
+	if s.sender != nil {
+		_, _ = s.sender.SendEnvelope(ctx, peer.MachineID, core.KindControlResumed, "", "", core.EmptyBody{})
 	}
 	s.forget(pendingID)
 	_ = s.audit.Record(audit.Event{TS: s.clock.Now(), Type: audit.EvPair, Peer: peer.MachineID, Alias: clean,

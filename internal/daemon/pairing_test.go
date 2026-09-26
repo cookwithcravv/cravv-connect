@@ -172,14 +172,15 @@ func (r *fakeRegistrar) EnsureRegistered(_ context.Context, invite string) error
 }
 
 type pairSide struct {
-	svc   *PairingService
-	id    *keys.Identity
-	peers *memPeers
-	mb    *fakeMailbox
-	slot  *mailboxSlot
-	reg   *fakeRegistrar
-	audit *recordingAudit
-	clock *core.FakeClock
+	svc    *PairingService
+	id     *keys.Identity
+	peers  *memPeers
+	mb     *fakeMailbox
+	slot   *mailboxSlot
+	reg    *fakeRegistrar
+	sender *recordingSender
+	audit  *recordingAudit
+	clock  *core.FakeClock
 }
 
 func newPairSide(t *testing.T, rooms *memRooms, name string, online bool) *pairSide {
@@ -195,7 +196,8 @@ func newPairSide(t *testing.T, rooms *memRooms, name string, online bool) *pairS
 		s.slot.set(&roomMailbox{fakeMailbox: s.mb, rooms: rooms})
 	}
 	prekeys := NewPrekeyManager(newMemPrekeys(), s.peers, id, &recordingSender{}, s.clock)
-	s.svc = NewPairingService(id, rooms, s.slot, pake.SPAKE2{}, s.peers, prekeys, s.reg,
+	s.sender = &recordingSender{}
+	s.svc = NewPairingService(id, rooms, s.slot, pake.SPAKE2{}, s.peers, prekeys, s.sender, s.reg,
 		PairingConfig{DeviceName: name, RelayURL: "https://relay.test"}, s.clock, s.audit)
 	return s
 }
@@ -260,6 +262,19 @@ func TestPairingFullExchange(t *testing.T) {
 	}
 	if !a.mb.isAllowed(b.id.Public()) {
 		t.Fatal("creator did not allow the new peer on its mailbox")
+	}
+	// Each side tells the other it is ready, clearing a pause the other may
+	// have recorded when it sent before this side allowed it.
+	for _, c := range []struct {
+		s  *pairSide
+		to core.MachineID
+	}{{a, b.id.MachineID()}, {b, a.id.MachineID()}} {
+		c.s.sender.mu.Lock()
+		envs := append([]sentEnvelope(nil), c.s.sender.envs...)
+		c.s.sender.mu.Unlock()
+		if len(envs) != 1 || envs[0].Kind != core.KindControlResumed || envs[0].To != c.to {
+			t.Fatalf("sent after finalize = %+v, want one control.resumed", envs)
+		}
 	}
 	for _, s := range []*pairSide{a, b} {
 		if ev := s.audit.last(); ev.Type != audit.EvPair {

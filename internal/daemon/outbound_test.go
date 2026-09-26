@@ -39,6 +39,7 @@ func newOutboundFixture(t *testing.T) *outboundFixture {
 	f.slot.set(f.mb)
 	f.o = NewOutbound(me, f.peers, f.outbox, f.slot, f.clock, func() bool { return f.killed }, nil)
 	f.gpu = newTestPeer(t, "gpu-box", core.TrustAskFirst)
+	f.gpu.rec.PairedAt = testEpoch.Add(-time.Hour) // past the pairing grace period
 	mustPut(t, f.peers, f.gpu.rec)
 	return f
 }
@@ -523,5 +524,37 @@ func TestOutboundLargeAngleBracketChatSeals(t *testing.T) {
 	var body core.ChatBody
 	if err := json.Unmarshal(env.Body, &body); err != nil || body.Text != text {
 		t.Fatalf("body mismatch (%v)", err)
+	}
+}
+
+// Right after pairing, not_allowed usually means the other side has not
+// finished pairing (its human is still choosing an alias), not a pause: retry
+// soon, and do not mark the peer as pausing us.
+func TestOutboundNotAllowedJustAfterPairingIsTransient(t *testing.T) {
+	f := newOutboundFixture(t)
+	f.gpu.rec.PairedAt = testEpoch.Add(-time.Minute)
+	mustPut(t, f.peers, f.gpu.rec)
+	id := f.send(t, "early")
+	for range 8 { // many refusals: the retry delay stays short
+		f.mb.statuses = []transport.SendStatus{transport.SendNotAllowed}
+		f.pass(t)
+		it, ok := f.outbox.item(id)
+		if !ok || it.Status != store.OutboxPending {
+			t.Fatalf("item after not_allowed in grace = %+v, %v; want pending", it, ok)
+		}
+		if d := it.NextAttempt.Sub(f.clock.Now()); d <= 0 || d > PairingGraceRetry {
+			t.Fatalf("retry in %v, want at most %v", d, PairingGraceRetry)
+		}
+		f.clock.Advance(PairingGraceRetry)
+	}
+	if mustGetPeer(t, f.peers, f.gpu.rec.MachineID).PausedByPeer {
+		t.Fatal("peer marked as pausing us during the pairing grace period")
+	}
+	// After the grace period, not_allowed means paused again.
+	f.clock.Advance(f.gpu.rec.PairedAt.Add(PairingGrace + time.Second).Sub(f.clock.Now()))
+	f.mb.statuses = []transport.SendStatus{transport.SendNotAllowed}
+	f.pass(t)
+	if !mustGetPeer(t, f.peers, f.gpu.rec.MachineID).PausedByPeer {
+		t.Fatal("not_allowed after the grace period did not mark the peer")
 	}
 }

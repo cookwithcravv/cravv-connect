@@ -270,7 +270,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	g.peers.AddCutOffObserver(g.tasks)
 	g.peers.AddCutOffObserver(g.files)
 	g.inbound = NewInbound(id, db, db, g.prekeys, g.registry, g.outbound, clock, d.kill.Killed, d.log)
-	g.pairing = NewPairingService(id, d.rooms(), d, pake.SPAKE2{}, db, g.prekeys, d,
+	g.pairing = NewPairingService(id, d.rooms(), d, pake.SPAKE2{}, db, g.prekeys, g.outbound, d,
 		PairingConfig{DeviceName: d.opts.Config.DeviceName, RelayURL: d.opts.Config.RelayURL}, clock, lg)
 	registerHandlers(g, d.inbox, db)
 	g.status = NewStatusService(StatusDeps{
