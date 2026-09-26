@@ -40,9 +40,10 @@ const AdminToken = "e2e-admin-token"
 // the same address with the same backend, like a relay restart that keeps
 // its storage.
 type Relay struct {
-	t    *testing.T
-	addr string
-	srv  *relayserver.Server
+	t      *testing.T
+	addr   string
+	origin string // the URL clients use, when it is not http://addr
+	srv    *relayserver.Server
 
 	mu    sync.Mutex
 	hs    *http.Server
@@ -57,11 +58,33 @@ func NewRelay(t *testing.T) *Relay { t.Helper(); return NewRelayWith(t, nil) }
 // not nil), so a test can observe or slow down what the relay stores.
 func NewRelayWith(t *testing.T, wrap func(relayserver.Backend) relayserver.Backend) *Relay {
 	t.Helper()
+	return newRelay(t, wrap, "")
+}
+
+// LANRelayHost is the host name of NewLANRelay's URL.
+const LANRelayHost = "cravv-relay.local"
+
+// NewLANRelay is NewRelay under the kind of URL a LAN test relay has,
+// http://cravv-relay.local:<port>: a private-network address that join
+// codes accept and setup does not treat as reachable only from this
+// machine. Nothing resolves the name; clients reach the relay through
+// HTTPClient.
+func NewLANRelay(t *testing.T) *Relay {
+	t.Helper()
+	return newRelay(t, nil, LANRelayHost)
+}
+
+func newRelay(t *testing.T, wrap func(relayserver.Backend) relayserver.Backend, host string) *Relay {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := &Relay{t: t, addr: ln.Addr().String()}
+	if host != "" {
+		_, port, _ := net.SplitHostPort(r.addr)
+		r.origin = "http://" + net.JoinHostPort(host, port)
+	}
 	var backend relayserver.Backend = relayserver.NewMemoryBackend(core.SystemClock{})
 	if wrap != nil {
 		backend = wrap(backend)
@@ -82,7 +105,23 @@ func NewRelayWith(t *testing.T, wrap func(relayserver.Backend) relayserver.Backe
 }
 
 // URL is the relay base URL daemons are configured with.
-func (r *Relay) URL() string { return "http://" + r.addr }
+func (r *Relay) URL() string {
+	if r.origin != "" {
+		return r.origin
+	}
+	return "http://" + r.addr
+}
+
+// HTTPClient reaches the relay at its listening address whatever host its
+// URL names.
+func (r *Relay) HTTPClient() *http.Client {
+	var d net.Dialer
+	return &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return d.DialContext(ctx, network, r.addr)
+		},
+	}}
+}
 
 func (r *Relay) serve(ln net.Listener) {
 	r.mu.Lock()
