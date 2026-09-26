@@ -157,13 +157,17 @@ func (in *Inbound) process(ctx context.Context, d transport.Delivery) error {
 		in.drop("bad timestamp", d, err)
 		return nil
 	}
+	if env.Kind.Ephemeral() {
+		in.processEphemeral(ctx, peer, env, d)
+		return nil
+	}
 	seen, err := in.dedup.Seen(ctx, env.ID)
 	if err != nil {
 		in.logger.Error("dedup store failed", "id", env.ID, "err", err)
 		return err
 	}
 	if seen {
-		if !env.Kind.IsControl() {
+		if env.Kind.Receipted() {
 			in.queueReceipt(peer.MachineID, env.ID)
 		}
 		return nil
@@ -185,10 +189,28 @@ func (in *Inbound) process(ctx context.Context, d transport.Delivery) error {
 	if _, err := in.dedup.SeenOrMark(ctx, env.ID, in.clock.Now()); err != nil {
 		in.logger.Error("dedup mark failed", "id", env.ID, "err", err)
 	}
-	if !env.Kind.IsControl() {
+	if env.Kind.Receipted() {
 		in.queueReceipt(peer.MachineID, env.ID)
 	}
 	return nil
+}
+
+// processEphemeral handles presence and discovery frames: dropped when older
+// than core.PresenceMaxAge (the relay may have queued them while this machine
+// was offline), never deduplicated, receipted or retried.
+func (in *Inbound) processEphemeral(ctx context.Context, peer store.Peer, env core.Envelope, d transport.Delivery) {
+	if in.clock.Now().Sub(time.UnixMilli(env.TS)) > core.PresenceMaxAge {
+		in.drop("stale "+string(env.Kind), d, nil)
+		return
+	}
+	h, ok := in.registry.Lookup(env.Kind)
+	if !ok {
+		in.drop("no handler for kind "+string(env.Kind), d, nil)
+		return
+	}
+	if err := h.Handle(ctx, peer, env); err != nil {
+		in.logger.Info("ephemeral handler failed", "kind", env.Kind, "id", env.ID, "err", err)
+	}
 }
 
 func (in *Inbound) checkTimestamp(env core.Envelope) error {

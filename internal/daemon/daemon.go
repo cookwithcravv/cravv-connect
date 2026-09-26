@@ -47,6 +47,7 @@ type services struct {
 	outbound *Outbound
 	inbound  *Inbound
 	peers    *PeerService
+	discover *Discovery
 	prekeys  *PrekeyManager
 	pairing  *PairingService
 	tasks    *TaskService
@@ -481,6 +482,7 @@ func (d *Daemon) Inbox() *InboxService          { return d.inbox }
 func (d *Daemon) Tasks() *TaskService           { return d.svc.Load().tasks }
 func (d *Daemon) Files() *FileService           { return d.svc.Load().files }
 func (d *Daemon) Peers() *PeerService           { return d.svc.Load().peers }
+func (d *Daemon) Discovery() *Discovery         { return d.svc.Load().discover }
 func (d *Daemon) Pairing() *PairingService      { return d.svc.Load().pairing }
 func (d *Daemon) Status() *StatusService        { return d.svc.Load().status }
 func (d *Daemon) Outbound() *Outbound           { return d.svc.Load().outbound }

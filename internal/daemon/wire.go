@@ -287,6 +287,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	// as soon as Kill starts (Killed).
 	g.outbound = NewOutbound(id, db, db, d, clock, func() bool { return !d.kill.SendingAllowed() }, d.log)
 	g.peers = NewPeerService(db, d, g.outbound, lg, clock)
+	g.discover = NewDiscovery(d.shared, g.peers, g.outbound, clock, d.log)
 	g.prekeys = NewPrekeyManager(db, db, id, g.outbound, clock)
 	g.files = NewFileService(FileDeps{
 		Blobs: func() transport.BlobStore { return d.blobs(id) }, Peers: db, Files: db, Inbox: d.inbox,
@@ -327,10 +328,13 @@ func registerHandlers(g *services, inbox *InboxService, peers store.PeerStore) {
 	r.Register(core.KindFileOffer, PolicyGate{
 		Inner: HandlerFunc(g.files.HandleOffer), OnReject: HandlerFunc(g.files.RejectOffer)})
 	RegisterControlHandlers(r, peers, g.peers, g.outbound)
+	r.Register(core.KindSessionsList, HandlerFunc(g.discover.HandleList))
+	r.Register(core.KindSessionsListed, HandlerFunc(g.discover.HandleListed))
 	g.activity.WrapAll(r,
 		core.KindChat, core.KindTaskCreate, core.KindTaskUpdate, core.KindTaskCancel, core.KindFileOffer,
 		core.KindControlPrekey, core.KindControlStalePrekey, core.KindControlDelivered, core.KindControlPaused,
-		core.KindControlResumed, core.KindControlUnpaired, core.KindControlRelayMoved)
+		core.KindControlResumed, core.KindControlUnpaired, core.KindControlRelayMoved,
+		core.KindSessionsList, core.KindSessionsListed)
 }
 
 // authErrors reports a verifier that cannot check passwords (set by New).

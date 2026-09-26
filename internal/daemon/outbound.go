@@ -84,6 +84,9 @@ func NewOutbound(id *keys.Identity, peers store.PeerStore, outbox store.OutboxSt
 // stored as held and goes out after control.resumed. Control kinds are never held: a
 // held control.resumed would deadlock two peers that paused each other.
 func (o *Outbound) SendEnvelope(ctx context.Context, to core.MachineID, kind core.Kind, fromSession, toSession string, body any) (string, error) {
+	if kind.Ephemeral() {
+		return "", fmt.Errorf("%s is sent directly, never through the outbox", kind)
+	}
 	peer, err := o.peers.GetPeer(ctx, to)
 	if err != nil {
 		return "", err
