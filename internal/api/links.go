@@ -14,7 +14,9 @@ func (h *handlers) registerLinks(s *ipc.Server) {
 	s.Register(ipc.MethodLinkDisconnect, ipc.Typed(h.linkDisconnect), ipc.GateNone)
 	s.Register(ipc.MethodLinkRestrict, ipc.Typed(h.linkRestrict), ipc.GateNone)
 	s.Register(ipc.MethodLinkPermit, ipc.Typed(h.linkPermit), ipc.GateUnlock)
-	// Rejecting needs nothing; accepting needs the password (checked by the daemon).
+	// Rejecting needs nothing; accepting needs the password (checked by the
+	// daemon). Like every link method it acts only within the connection's
+	// scope: its own session's requests, or any for a human connection.
 	s.Register(ipc.MethodLinkDecide, ipc.Typed(h.linkDecide), ipc.GateNone)
 }
 
@@ -108,5 +110,9 @@ func (h *handlers) linkDecide(ctx context.Context, cs *ipc.ConnState, p ipc.Link
 	if err := linkNumber(p.Link); err != nil {
 		return nil, err
 	}
-	return h.p.Links.Decide(ctx, p.Link, p.Accept, p.Permission, cs.Unlocked())
+	scope, err := h.scope(ctx, cs)
+	if err != nil {
+		return nil, err
+	}
+	return h.p.Links.Decide(ctx, scope, p.Link, p.Accept, p.Permission, cs.Unlocked())
 }

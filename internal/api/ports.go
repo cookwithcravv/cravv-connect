@@ -52,9 +52,9 @@ type LinkPort interface {
 	Restrict(ctx context.Context, sessionID string, link int64, permission string) (ipc.LinkView, error)
 	// Permit sets any level; raising needs unlocked (the password).
 	Permit(ctx context.Context, link int64, permission string, unlocked bool) (ipc.LinkView, error)
-	// Decide accepts or rejects a pending request. Accepting needs unlocked
-	// (Phase 1 has only the password path).
-	Decide(ctx context.Context, link int64, accept bool, permission string, unlocked bool) (ipc.LinkView, error)
+	// Decide accepts or rejects a pending request to sessionID ("" for any).
+	// Accepting needs unlocked (the password path).
+	Decide(ctx context.Context, sessionID string, link int64, accept bool, permission string, unlocked bool) (ipc.LinkView, error)
 }
 
 // ChatPort sends chat on link number link of the shared session sessionID.

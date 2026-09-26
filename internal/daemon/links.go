@@ -300,6 +300,15 @@ func (s *LinkService) Decide(ctx context.Context, num int64, accept bool, perm c
 	return l, nil
 }
 
+// DecideFor is Decide limited to requests to sessionID ("" allows any, for
+// the human's CLI). Another session's request looks missing.
+func (s *LinkService) DecideFor(ctx context.Context, sessionID string, num int64, accept bool, perm core.Permission, auth Authority) (store.Link, error) {
+	if _, err := s.owned(ctx, sessionID, num); err != nil {
+		return store.Link{}, err
+	}
+	return s.Decide(ctx, num, accept, perm, auth)
+}
+
 // DecideVia asks the human through d (Phase 2: elicitation or a
 // confirmation code) and applies the answer with AuthChat.
 func (s *LinkService) DecideVia(ctx context.Context, d Decider, num int64) (store.Link, error) {

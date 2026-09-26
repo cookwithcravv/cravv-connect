@@ -190,7 +190,7 @@ func (a links) Permit(ctx context.Context, num int64, perm string, unlocked bool
 	return a.result(ctx)(a.d.Links().SetPermission(ctx, "", num, p, authority(unlocked)))
 }
 
-func (a links) Decide(ctx context.Context, num int64, accept bool, perm string, unlocked bool) (ipc.LinkView, error) {
+func (a links) Decide(ctx context.Context, sessionID string, num int64, accept bool, perm string, unlocked bool) (ipc.LinkView, error) {
 	var p core.Permission
 	if perm != "" {
 		var err error
@@ -198,5 +198,5 @@ func (a links) Decide(ctx context.Context, num int64, accept bool, perm string, 
 			return ipc.LinkView{}, err
 		}
 	}
-	return a.result(ctx)(a.d.Links().Decide(ctx, num, accept, p, authority(unlocked)))
+	return a.result(ctx)(a.d.Links().DecideFor(ctx, sessionID, num, accept, p, authority(unlocked)))
 }

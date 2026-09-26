@@ -516,3 +516,37 @@ func TestPeerCutOffAndKillCloseLinks(t *testing.T) {
 		t.Fatalf("pending request at kill %+v", got)
 	}
 }
+
+// link.decide acts only within the caller's session: another session's
+// request looks missing and stays pending; the human's CLI ("") may decide
+// any.
+func TestDecideForIsScopedToTheSession(t *testing.T) {
+	ctx := context.Background()
+	n, a, b := linkNet(t)
+	lead := shareOn(t, a, 1, "lead", core.Visibility{})
+	trainer := shareOn(t, b, 1, "trainer", core.Visibility{Mode: core.VisibilityAllPeers})
+	other := shareOn(t, b, 2, "other", core.Visibility{})
+	out, err := a.links.Connect(ctx, lead.Session.ID, "bob/trainer", core.PermMessages, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.pump()
+	in := b.linkOf(t, a, out.ID)
+	if _, err := b.links.DecideFor(ctx, other.Session.ID, in.Num, false, "", AuthNone); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("another session rejected the request: %v", err)
+	}
+	if got := b.linkOf(t, a, out.ID); got.State != store.LinkPending {
+		t.Fatalf("state %s, want pending", got.State)
+	}
+	if l, err := b.links.DecideFor(ctx, trainer.Session.ID, in.Num, false, "", AuthNone); err != nil || l.State != store.LinkClosed {
+		t.Fatalf("the owning session rejects: %+v, %v", l, err)
+	}
+	out2, err := a.links.Connect(ctx, lead.Session.ID, "bob/trainer", core.PermMessages, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.pump()
+	if l, err := b.links.DecideFor(ctx, "", b.linkOf(t, a, out2.ID).Num, true, "", AuthPassword); err != nil || l.State != store.LinkActive {
+		t.Fatalf("the human's CLI accepts: %+v, %v", l, err)
+	}
+}

@@ -212,3 +212,27 @@ func TestAwayGraceExpiryClosesLinks(t *testing.T) {
 	c, _ := b.Session("claude")
 	wantKind(t, TryCall(c, ipc.MethodSessionReattach, ipc.SessionReattachParams{ReattachToken: l.B.Res.ReattachToken}, nil), ipc.KindNotFound)
 }
+
+// link.decide is scoped like the other link methods: an unshared agent gets
+// not_shared, another shared session sees nothing to decide, the human's
+// CLI connection decides any request.
+func TestLinkDecideIsScoped(t *testing.T) {
+	t.Parallel()
+	_, a, b := NewPair(t)
+	lead := a.Share("claude", "lead", "private")
+	b.Share("claude", "trainer", "all-peers")
+	other := b.Share("codex", "other", "private")
+	Connect(t, lead, "bob/trainer", "messages", "")
+	in := b.WaitLink(wait, "request", func(l ipc.LinkView) bool { return l.State == "pending" && l.Direction == "in" })
+	unshared, _ := b.Session("codex")
+	wantKind(t, TryCall(unshared, ipc.MethodLinkDecide, ipc.LinkDecideParams{Link: in.Link}, nil), ipc.KindNotShared)
+	wantKind(t, TryCall(other.C, ipc.MethodLinkDecide, ipc.LinkDecideParams{Link: in.Link}, nil), ipc.KindNotFound)
+	if got := b.Link(in.Link); got.State != "pending" {
+		t.Fatalf("state %s, want pending", got.State)
+	}
+	var v ipc.LinkView
+	Call(t, b.Conn(), ipc.MethodLinkDecide, ipc.LinkDecideParams{Link: in.Link}, &v)
+	if v.State != "closed" {
+		t.Fatalf("the human's reject: %+v", v)
+	}
+}

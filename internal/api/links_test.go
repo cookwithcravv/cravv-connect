@@ -97,14 +97,14 @@ func TestLinkMethodsScopeAndGates(t *testing.T) {
 	if err := human.Call(bg, ipc.MethodLinkDecide, ipc.LinkDecideParams{Link: 3, Accept: true}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := lw.last(); got != "decide 3 true  false" {
+	if got := lw.last(); got != `decide "" 3 true  false` {
 		t.Fatalf("decide before unlock %q", got)
 	}
 	unlock(t, human)
 	if err := human.Call(bg, ipc.MethodLinkDecide, ipc.LinkDecideParams{Link: 3, Accept: true, Permission: "tasks-auto"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := lw.last(); got != "decide 3 true tasks-auto true" {
+	if got := lw.last(); got != `decide "" 3 true tasks-auto true` {
 		t.Fatalf("decide after unlock %q", got)
 	}
 	var sl ipc.SessionsListResult
@@ -137,6 +137,9 @@ func TestUnsharedAgentGetsNoLinks(t *testing.T) {
 		if err := c.Call(bg, ipc.MethodLinkRestrict, ipc.LinkPermissionParams{Link: 3, Permission: "messages"}, nil); !errors.Is(err, core.ErrNotShared) {
 			t.Fatalf("restrict %s: %v", when, err)
 		}
+		if err := c.Call(bg, ipc.MethodLinkDecide, ipc.LinkDecideParams{Link: 3}, nil); !errors.Is(err, core.ErrNotShared) {
+			t.Fatalf("decide %s: %v", when, err)
+		}
 	}
 	agent := h.session(t)
 	check(agent, "before sharing")
@@ -149,8 +152,20 @@ func TestUnsharedAgentGetsNoLinks(t *testing.T) {
 	lw.mu.Lock()
 	defer lw.mu.Unlock()
 	for _, call := range lw.calls {
-		if strings.HasPrefix(call, "links") || strings.HasPrefix(call, "disconnect") || strings.HasPrefix(call, "restrict") {
+		if strings.HasPrefix(call, "links") || strings.HasPrefix(call, "disconnect") || strings.HasPrefix(call, "restrict") || strings.HasPrefix(call, "decide") {
 			t.Fatalf("an unshared agent reached the link service: %q", call)
 		}
+	}
+}
+
+// A shared agent decides only its own session's requests.
+func TestSharedAgentDecidesItsOwnRequests(t *testing.T) {
+	h := newHarness(t)
+	c := h.shared(t)
+	if err := c.Call(bg, ipc.MethodLinkDecide, ipc.LinkDecideParams{Link: 3}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.w.lw.last(); got != `decide "S1" 3 false  false` {
+		t.Fatalf("decide %q", got)
 	}
 }

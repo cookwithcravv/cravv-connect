@@ -136,7 +136,7 @@ func (f fLinks) Permit(_ context.Context, link int64, perm string, unlocked bool
 	return ipc.LinkView{Link: link}, nil
 }
 
-func (f fLinks) Decide(_ context.Context, link int64, accept bool, perm string, unlocked bool) (ipc.LinkView, error) {
-	f.record("decide %d %v %s %v", link, accept, perm, unlocked)
+func (f fLinks) Decide(_ context.Context, sessionID string, link int64, accept bool, perm string, unlocked bool) (ipc.LinkView, error) {
+	f.record("decide %q %d %v %s %v", sessionID, link, accept, perm, unlocked)
 	return ipc.LinkView{Link: link}, nil
 }
