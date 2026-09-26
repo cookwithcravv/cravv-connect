@@ -91,6 +91,9 @@ func Serve(ctx context.Context, d *daemon.Daemon, ln net.Listener, clock core.Cl
 	defer ui.close()
 	api.RegisterUI(srv, UIPorts(d, ui.launcher))
 	api.RegisterManaged(srv, ManagedPorts(d))
+	// A process inside a managed run may only bind with its run token
+	// (defense in depth for shell runs; docs/security.md).
+	srv.SetRunPeer(d.Host().InRun)
 	errc := make(chan error, 2)
 	go func() { errc <- d.Run(ctx) }()
 	go func() { errc <- srv.Serve(ctx, ln) }()

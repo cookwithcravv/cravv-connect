@@ -32,3 +32,27 @@ func peerUID(c net.Conn) (int, error) {
 	}
 	return int(cred.Uid), nil
 }
+
+// peerPID returns the PID of the process at the other end of a unix socket
+// (LOCAL_PEERPID).
+func peerPID(c net.Conn) (int, error) {
+	uc, ok := c.(*net.UnixConn)
+	if !ok {
+		return -1, errNotUnix
+	}
+	raw, err := uc.SyscallConn()
+	if err != nil {
+		return -1, err
+	}
+	var pid int
+	var serr error
+	if err := raw.Control(func(fd uintptr) {
+		pid, serr = unix.GetsockoptInt(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERPID)
+	}); err != nil {
+		return -1, err
+	}
+	if serr != nil {
+		return -1, serr
+	}
+	return pid, nil
+}

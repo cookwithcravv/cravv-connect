@@ -67,3 +67,42 @@ func (h *SessionHost) killRecordedGroups() {
 		_ = os.Remove(f)
 	}
 }
+
+// maxAncestry bounds InRun's walk up the process tree.
+const maxAncestry = 64
+
+// InRun reports whether process pid is inside a live managed run: in a
+// run's process group, or a descendant of a process that is (its agent
+// leads the group). pid -1 (the peer is unknown) is inside a run whenever
+// one is live. The IPC server uses it to let such a process only bind with
+// its run token. A process that both left the group and was reparented
+// (setsid plus a double fork) is not found: this is defense in depth, not
+// a boundary (docs/security.md).
+func (h *SessionHost) InRun(pid int) bool {
+	h.mu.Lock()
+	live := make(map[int]bool, len(h.groups))
+	for _, g := range h.groups {
+		live[g] = true
+	}
+	h.mu.Unlock()
+	if len(live) == 0 {
+		return false
+	}
+	if pid < 0 {
+		return true
+	}
+	for p, i := pid, 0; p > 1 && i < maxAncestry; i++ {
+		if live[p] {
+			return true
+		}
+		ppid, pgid, err := h.d.ProcParent(p)
+		if err != nil {
+			return false
+		}
+		if live[pgid] {
+			return true
+		}
+		p = ppid
+	}
+	return false
+}

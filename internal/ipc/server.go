@@ -27,6 +27,9 @@ type Options struct {
 	// accepts any bound session.
 	CheckShared func(cs *ConnState) error
 	Logger      *slog.Logger
+	// PeerPID returns the PID of the process at the other end of conn.
+	// nil reads the unix socket's peer credentials; tests set it.
+	PeerPID func(conn net.Conn) (int, error)
 }
 
 type method struct {
@@ -38,6 +41,7 @@ type method struct {
 // here, centrally, so no handler can forget them.
 type Server struct {
 	opts    Options
+	runPeer atomic.Pointer[func(pid int) bool]
 	mu      sync.RWMutex
 	methods map[string]method
 	conns   sync.WaitGroup
@@ -53,6 +57,41 @@ func NewServer(opts Options) *Server {
 		opts.Logger = slog.New(slog.DiscardHandler)
 	}
 	return &Server{opts: opts, methods: map[string]method{}}
+}
+
+// SetRunPeer installs the check that tells whether a process is inside a
+// managed run (in a run's process group or a descendant of its agent). A
+// connection from such a process may only register and bind with its run
+// token (session.run_bind); every other method is refused until it binds.
+// This is defense in depth: the run's own MCP server binds, and a shell
+// run's commands cannot use the daemon's human methods. pid is -1 when the
+// peer PID of a unix socket could not be read.
+func (s *Server) SetRunPeer(f func(pid int) bool) {
+	s.runPeer.Store(&f)
+}
+
+// classify marks cs when the peer of conn is inside a managed run.
+// Connections that are not unix sockets (in-process pipes) have no peer
+// process and are never marked, unless a test sets Options.PeerPID.
+func (s *Server) classify(conn net.Conn, cs *ConnState) {
+	f := s.runPeer.Load()
+	if f == nil {
+		return
+	}
+	lookup := s.opts.PeerPID
+	if lookup == nil {
+		lookup = peerPID
+	}
+	pid, err := lookup(conn)
+	if errors.Is(err, errNotUnix) {
+		return
+	}
+	if err != nil {
+		pid = -1
+	}
+	if (*f)(pid) {
+		cs.setFromRun()
+	}
 }
 
 // Register adds a method. Registering the same name twice panics, because it
@@ -121,6 +160,7 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) {
 	cctx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(cctx, func() { conn.Close() })
 	cs := NewConnState(s.opts.Clock)
+	s.classify(conn, cs)
 	var (
 		wmu      sync.Mutex
 		inflight sync.WaitGroup
@@ -280,6 +320,10 @@ func (s *Server) dispatch(ctx context.Context, cs *ConnState, req Request) (resp
 	}
 	if cs.RunBound() && !RunMethods[req.Method] {
 		resp.Error = toWire(ErrRunRefused)
+		return resp
+	}
+	if cs.FromRun() && !cs.RunBound() && req.Method != MethodSessionRegister && req.Method != MethodSessionRunBind {
+		resp.Error = toWire(ErrRunUnbound)
 		return resp
 	}
 	if err := s.checkGate(cs, m.gate); err != nil {

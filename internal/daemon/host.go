@@ -70,9 +70,12 @@ type HostDeps struct {
 	StateDir string          // CRAVV_HOME for the run's MCP server
 	Env      func() []string // the child's environment (default os.Environ)
 	Killed   func() bool
-	Clock    core.Clock
-	Audit    audit.Logger
-	Log      *slog.Logger
+	// ProcParent returns a process's parent and process group (default
+	// the OS process table); InRun walks it.
+	ProcParent func(pid int) (ppid, pgid int, err error)
+	Clock      core.Clock
+	Audit      audit.Logger
+	Log        *slog.Logger
 }
 
 // SessionHost starts and runs managed sessions (v2 spec 6.2). A link
@@ -113,6 +116,9 @@ func NewSessionHost(d HostDeps) *SessionHost {
 	}
 	if d.Killed == nil {
 		d.Killed = func() bool { return false }
+	}
+	if d.ProcParent == nil {
+		d.ProcParent = procParent
 	}
 	return &SessionHost{
 		d: d, tokens: runTokens{byHash: map[string]runGrant{}}, poke: make(chan struct{}, 1),

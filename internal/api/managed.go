@@ -67,7 +67,7 @@ func (m managedHandlers) runBind(ctx context.Context, cs *ipc.ConnState, p ipc.R
 		return nil, err
 	}
 	cs.SetShared(id)
-	cs.SetRunBound()
+	cs.SetRunBound("")
 	return view, nil
 }
 

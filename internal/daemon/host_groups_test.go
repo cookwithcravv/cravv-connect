@@ -136,3 +136,42 @@ func TestHostStopDuringStartupWindow(t *testing.T) {
 		})
 	}
 }
+
+// InRun tells the IPC server whether a peer process is inside a live run:
+// in a run's process group, or a descendant of its agent (by the injected
+// process table).
+func TestHostInRun(t *testing.T) {
+	type proc struct{ ppid, pgid int }
+	table := map[int]proc{
+		100: {1, 100},   // a run's agent: the group leader
+		150: {100, 100}, // its MCP server
+		160: {150, 160}, // a descendant that left the group
+		170: {1, 100},   // reparented but still in the group
+		300: {1, 300},   // the user's own chat
+		310: {300, 300},
+	}
+	h := NewSessionHost(HostDeps{ProcParent: func(pid int) (int, int, error) {
+		p, ok := table[pid]
+		if !ok {
+			return 0, 0, syscall.ESRCH
+		}
+		return p.ppid, p.pgid, nil
+	}})
+	for _, pid := range []int{-1, 100, 150, 160, 170, 300, 999} {
+		if h.InRun(pid) {
+			t.Fatalf("no run is live, but %d is in one", pid)
+		}
+	}
+	h.mu.Lock()
+	h.groups["S1"] = 100
+	h.mu.Unlock()
+	for pid, want := range map[int]bool{-1: true, 100: true, 150: true, 160: true, 170: true, 300: false, 310: false, 999: false} {
+		if got := h.InRun(pid); got != want {
+			t.Errorf("InRun(%d) = %v, want %v", pid, got, want)
+		}
+	}
+	// The real process table: this test process is in no run.
+	if (NewSessionHost(HostDeps{})).InRun(os.Getpid()) {
+		t.Fatal("the test process is not in a run")
+	}
+}

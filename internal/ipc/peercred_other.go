@@ -12,3 +12,7 @@ import (
 func peerUID(net.Conn) (int, error) {
 	return -1, errors.New("peer credentials are not supported on this OS")
 }
+
+func peerPID(net.Conn) (int, error) {
+	return -1, errors.New("peer credentials are not supported on this OS")
+}

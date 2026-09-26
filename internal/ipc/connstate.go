@@ -22,6 +22,8 @@ type ConnState struct {
 	shared        string
 	unlockedUntil time.Time
 	run           bool     // the shared session is a managed run's (run token)
+	runFolder     string   // that managed session's folder
+	fromRun       bool     // the peer process is inside a managed run
 	closers       []func() // run when the connection ends
 }
 
@@ -103,11 +105,27 @@ func (c *ConnState) Unlocked() bool {
 }
 
 // SetRunBound marks the connection as a managed run's: its shared session
-// came from a run token, and only RunMethods may be called on it.
-func (c *ConnState) SetRunBound() {
+// came from a run token, and only RunMethods may be called on it. folder
+// is the managed session's folder.
+func (c *ConnState) SetRunBound(folder string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.run = true
+	c.run, c.runFolder = true, folder
+}
+
+// FromRun reports whether the process at the other end is inside a
+// managed run (by its peer PID). Until it binds with a run token, such a
+// connection may only register and bind.
+func (c *ConnState) FromRun() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.fromRun
+}
+
+func (c *ConnState) setFromRun() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.fromRun = true
 }
 
 // RunBound reports whether the connection belongs to a managed run.

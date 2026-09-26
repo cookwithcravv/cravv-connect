@@ -40,6 +40,10 @@ var RunMethods = map[string]bool{
 // ErrRunRefused is returned for any other method on a run's connection.
 var ErrRunRefused = fmt.Errorf("%w: a managed run may only use its own session's inbox, messages, tasks, files and link", core.ErrNotPermitted)
 
+// ErrRunUnbound is returned to a process inside a managed run that calls
+// anything but session.register and session.run_bind before binding.
+var ErrRunUnbound = fmt.Errorf("%w: a process inside a managed run may only bind with its run token", core.ErrNotPermitted)
+
 // RunBindParams binds this connection to the managed session of the run
 // holding the token (the child's cravv-connect mcp reads it from
 // CRAVV_RUN_TOKEN).

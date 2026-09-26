@@ -52,6 +52,21 @@ func act(probe bool, token, prompt string) map[string]string {
 	}
 	defer c.Close()
 	dir, _ := os.Getwd()
+	if probe {
+		// A process inside the run that does not bind first is refused.
+		if u, err := ipc.DialContext(ctx, os.Getenv(EnvSocket)); err == nil {
+			res["unbound_status"] = "ok"
+			if err := u.Call(ctx, ipc.MethodStatus, nil, nil); err != nil {
+				var re *ipc.RemoteError
+				if errors.As(err, &re) {
+					res["unbound_status"] = re.Kind
+				} else {
+					res["unbound_status"] = err.Error()
+				}
+			}
+			u.Close()
+		}
+	}
 	call := func(name, method string, params any) {
 		res[name] = "ok"
 		if err := c.Call(ctx, method, params, nil); err != nil {

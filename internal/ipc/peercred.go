@@ -1,10 +1,15 @@
 package ipc
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
 )
+
+// errNotUnix is peerPID's answer for a connection that is not a unix
+// socket (an in-process pipe): it has no peer process.
+var errNotUnix = errors.New("not a unix socket")
 
 // selfUID is the daemon's UID; a variable so tests can pretend to be someone else.
 var selfUID = os.Getuid
