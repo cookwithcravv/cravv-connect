@@ -109,8 +109,11 @@ func TestInboundTaskByPermission(t *testing.T) {
 				t.Fatal("update not sent on the task's link")
 			}
 			items, _ := e.inbox.Check(ctx, e.session.ID, 10)
-			if c.inInbox != (len(items) == 1) {
+			if c.inInbox != (len(items) == 1 && items[0].Kind == "task") {
 				t.Fatalf("inbox items = %+v", items)
+			}
+			if c.state == core.TaskAwaitingApproval && (len(items) != 1 || items[0].Kind != "approval" || strings.Contains(items[0].Wrapped, "deploy it")) {
+				t.Fatalf("held task: inbox items = %+v, want only the approval notice", items)
 			}
 			if c.inInbox && (items[0].Kind != "task" || items[0].Item.TaskID != id || !strings.Contains(items[0].Wrapped, "deploy it") ||
 				!strings.Contains(items[0].Wrapped, `permission="tasks-auto"`)) {
@@ -139,6 +142,32 @@ func TestInboundTaskDuplicateIgnored(t *testing.T) {
 	}
 	if items, _ := e.inbox.Check(ctx, e.session.ID, 10); len(items) != 1 {
 		t.Fatalf("duplicate task.create shown %d times", len(items))
+	}
+}
+
+// A redelivered task.create for a held task adds no second approval notice,
+// and once the task is approved it is not delivered twice.
+func TestHeldTaskDuplicateIgnored(t *testing.T) {
+	ctx := context.Background()
+	e := d2Tasks(t, core.PermTasksAsk)
+	id := core.NewID()
+	env := d2Env(t, e.peer, core.KindTaskCreate, e.link.ID, core.TaskCreateBody{TaskID: id, Instructions: "x"})
+	for range 2 {
+		if err := e.handle(t, env); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if items, _ := e.inbox.Check(ctx, e.session.ID, 10); len(items) != 1 || items[0].Kind != "approval" {
+		t.Fatalf("inbox %+v", items)
+	}
+	if err := e.tasks.Decide(ctx, id, true, AuthChat); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.handle(t, env); err != nil {
+		t.Fatal(err)
+	}
+	if items, _ := e.inbox.Check(ctx, e.session.ID, 10); len(items) != 1 || items[0].Kind != "task" {
+		t.Fatalf("after approval %+v", items)
 	}
 }
 
@@ -299,7 +328,13 @@ func TestApprovalFlow(t *testing.T) {
 		t.Fatalf("denied = %+v", tk)
 	}
 	items, _ := e.inbox.Check(ctx, e.session.ID, 10)
-	if len(items) != 1 || items[0].Item.TaskID != approveID {
+	var delivered []InboxEntry
+	for _, it := range items {
+		if it.Kind != "approval" { // the notices of the two held tasks
+			delivered = append(delivered, it)
+		}
+	}
+	if len(items) != 3 || len(delivered) != 1 || delivered[0].Item.TaskID != approveID {
 		t.Fatalf("inbox after decisions = %+v", items)
 	}
 	if len(e.audit.ofType(audit.EvApprove)) != 1 || len(e.audit.ofType(audit.EvDeny)) != 1 {

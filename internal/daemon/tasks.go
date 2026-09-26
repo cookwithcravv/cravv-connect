@@ -31,6 +31,17 @@ type ActiveLinks interface {
 	Active(ctx context.Context, sessionID string, num int64) (store.Link, error)
 }
 
+// KindApprovalNotice is a local inbox item (never sent to a peer): a task
+// on a tasks-ask link waits for a human decision. It carries no
+// instructions, only the link number, and wakes the session's listener so
+// the agent can call review_pending.
+const KindApprovalNotice core.Kind = "local.approval"
+
+// ApprovalNotice is the body of a KindApprovalNotice item.
+type ApprovalNotice struct {
+	Link int64 `json:"link"`
+}
+
 // ReasonLinkClosed is the failure reason of a task whose link closed.
 const ReasonLinkClosed = "link_closed"
 
@@ -218,23 +229,44 @@ func (s *TaskService) handleCreate(ctx context.Context, peer store.Peer, l store
 		if s.d.Desktop != nil {
 			s.d.Desktop.Notify("cravv-connect", fmt.Sprintf("cravv-connect: 1 task awaiting approval from %s", peer.Alias))
 		}
+		return Retryable(s.tellHeld(ctx, t, l, env.ID))
 	default:
 		s.sendUpdate(ctx, t, core.TaskUpdateBody{TaskID: t.ID, State: core.TaskRejected, Note: "not permitted"})
 	}
 	return nil
 }
 
+// tellHeld delivers the approval notice for a held task to its session.
+func (s *TaskService) tellHeld(ctx context.Context, t store.Task, l store.Link, msgID string) error {
+	body, err := json.Marshal(ApprovalNotice{Link: l.Num})
+	if err != nil {
+		return err
+	}
+	_, err = s.d.Inbox.Deliver(ctx, store.InboxItem{
+		MsgID: msgID, From: t.Peer, FromSession: t.FromSession, ToSession: t.ToSession, LinkID: t.LinkID,
+		Kind: KindApprovalNotice, Body: body,
+	})
+	return err
+}
+
 // redeliverCreate handles a task.create whose task already exists. When it is
-// a redelivery of the message that created a queued task and the earlier
-// attempt failed after storing the task, the inbox item is written now.
-// Anything else (a duplicate, or an ID naming another task) is ignored.
+// a redelivery of the message that created a queued or held task and the
+// earlier attempt failed after storing the task, the inbox item (the task,
+// or a held task's approval notice) is written now. Anything else (a
+// duplicate, or an ID naming another task) is ignored.
 func (s *TaskService) redeliverCreate(ctx context.Context, cur store.Task, l store.Link, msgID string) error {
-	if cur.Direction != store.TaskInbound || cur.Peer != l.Peer || cur.LinkID != l.ID || cur.State != core.TaskQueued {
+	if cur.Direction != store.TaskInbound || cur.Peer != l.Peer || cur.LinkID != l.ID {
+		return nil
+	}
+	if cur.State != core.TaskQueued && cur.State != core.TaskAwaitingApproval {
 		return nil
 	}
 	done, err := s.d.Inbox.Delivered(ctx, msgID)
 	if err != nil || done {
 		return err
+	}
+	if cur.State == core.TaskAwaitingApproval {
+		return s.tellHeld(ctx, cur, l, msgID)
 	}
 	return s.deliverTask(ctx, cur, msgID)
 }

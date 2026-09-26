@@ -334,10 +334,25 @@ type SessionListenParams struct {
 	TimeoutS  int    `json:"timeout_s,omitempty"`
 }
 
-// ListenResult is counts only: never bodies, names or IDs.
+// ListenResult is counts plus local names only (aliases and link
+// numbers): never bodies, peer-chosen names or IDs. Closed means the
+// session closed while listening.
 type ListenResult struct {
-	Unread   int `json:"unread"`
-	Requests int `json:"requests"`
+	Unread    int            `json:"unread"`
+	Requests  int            `json:"requests"`
+	Approvals int            `json:"approvals,omitempty"`
+	Pending   []PendingCount `json:"pending,omitempty"`
+	Closed    bool           `json:"closed,omitempty"`
+}
+
+// PendingCount is Count unread items of Kind (message, task, task_update,
+// file, link, request or approval) on local link Link from the machine the
+// user calls Machine.
+type PendingCount struct {
+	Link    int64  `json:"link"`
+	Machine string `json:"machine"`
+	Kind    string `json:"kind"`
+	Count   int    `json:"count"`
 }
 
 type MachineParams struct {

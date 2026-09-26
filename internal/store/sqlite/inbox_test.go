@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -151,5 +152,41 @@ func TestSessionItemsAreScopedToOneSession(t *testing.T) {
 	}
 	if total, _, _ := db.SessionUnread(ctx, "S1", 0); total != 1 {
 		t.Fatalf("unread after delete = %d", total)
+	}
+}
+
+func TestSessionUnreadGroups(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	add := func(from core.MachineID, to, link string, kind core.Kind) int64 {
+		seq, err := db.AddItem(ctx, store.InboxItem{MsgID: core.NewID(), From: from, ToSession: to, LinkID: link,
+			Kind: kind, Body: []byte(`{}`), ReceivedAt: t0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return seq
+	}
+	first := add("m1", "S1", "L1", core.KindChat)
+	add("m2", "S1", "L2", core.KindTaskCreate)
+	add("m1", "S1", "L1", core.KindChat)
+	add("m1", "S2", "L9", core.KindChat) // another session
+	last := add("m1", "S1", "L1", core.KindTaskUpdate)
+	got, err := db.SessionUnreadGroups(ctx, "S1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []store.UnreadGroup{
+		{Peer: "m1", LinkID: "L1", Kind: core.KindChat, Count: 2, MaxSeq: first + 2},
+		{Peer: "m2", LinkID: "L2", Kind: core.KindTaskCreate, Count: 1, MaxSeq: first + 1},
+		{Peer: "m1", LinkID: "L1", Kind: core.KindTaskUpdate, Count: 1, MaxSeq: last},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("groups\n got %+v\nwant %+v", got, want)
+	}
+	if got, _ := db.SessionUnreadGroups(ctx, "S1", first+2); len(got) != 1 || got[0].Kind != core.KindTaskUpdate {
+		t.Fatalf("after the cursor: %+v", got)
+	}
+	if got, _ := db.SessionUnreadGroups(ctx, "", 0); len(got) != 0 {
+		t.Fatalf("empty session matched %+v", got)
 	}
 }

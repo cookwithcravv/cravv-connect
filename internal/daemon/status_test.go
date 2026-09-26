@@ -61,7 +61,7 @@ func TestStatusReportsCounts(t *testing.T) {
 	if s := strings.Join(got.Sessions, ","); len(got.Sessions) != 2 || !strings.Contains(s, "lead (away)") || !strings.Contains(s, away.Name+" (away)") {
 		t.Fatalf("sessions = %v", got.Sessions)
 	}
-	if got.InboxUnread != 2 || got.PendingApprovals != 1 { // held tasks are not in the inbox
+	if got.InboxUnread != 3 || got.PendingApprovals != 1 { // a held task is in the inbox as its approval notice only
 		t.Fatalf("unread %d approvals %d", got.InboxUnread, got.PendingApprovals)
 	}
 	if got.OutboxPending != 2 || got.OutboxHeld != 1 {

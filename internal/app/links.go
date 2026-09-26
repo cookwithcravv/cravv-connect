@@ -71,7 +71,16 @@ func (a shared) Detach(ctx context.Context, id string, conn uint64) error {
 
 func (a shared) Listen(ctx context.Context, token string, timeout time.Duration) (ipc.ListenResult, error) {
 	c, err := a.d.Attention().Listen(ctx, token, timeout)
-	return ipc.ListenResult{Unread: c.Unread, Requests: c.Requests}, err
+	return listenResult(c), err
+}
+
+// listenResult maps daemon counts to the wire view.
+func listenResult(c daemon.Counts) ipc.ListenResult {
+	r := ipc.ListenResult{Unread: c.Unread, Requests: c.Requests, Approvals: c.Approvals, Closed: c.Closed}
+	for _, g := range c.Groups {
+		r.Pending = append(r.Pending, ipc.PendingCount{Link: g.Link, Machine: g.Machine, Kind: g.Kind, Count: g.Count})
+	}
+	return r
 }
 
 // discovery adapts the daemon's Discovery to api.DiscoveryPort.

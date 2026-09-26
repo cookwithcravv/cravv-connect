@@ -105,6 +105,33 @@ WHERE to_session = ? AND seq > ? GROUP BY from_machine`, session, after)
 	return total, per, rows.Err()
 }
 
+// SessionUnreadGroups counts the session's items after the cursor per
+// sender, link and kind, oldest group first.
+func (d *DB) SessionUnreadGroups(ctx context.Context, session string, after int64) ([]store.UnreadGroup, error) {
+	if session == "" {
+		return nil, nil
+	}
+	rows, err := d.sql.QueryContext(ctx, `SELECT from_machine, link_id, kind, COUNT(*), MAX(seq) FROM inbox
+WHERE to_session = ? AND seq > ? GROUP BY from_machine, link_id, kind ORDER BY MIN(seq)`, session, after)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []store.UnreadGroup
+	for rows.Next() {
+		var (
+			g          store.UnreadGroup
+			from, kind string
+		)
+		if err := rows.Scan(&from, &g.LinkID, &kind, &g.Count, &g.MaxSeq); err != nil {
+			return nil, err
+		}
+		g.Peer, g.Kind = core.MachineID(from), core.Kind(kind)
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 // DeleteSessionItems drops the session's unread items from one link.
 func (d *DB) DeleteSessionItems(ctx context.Context, session, linkID string, after int64) (int, error) {
 	if session == "" || linkID == "" {

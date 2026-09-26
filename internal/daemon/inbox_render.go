@@ -67,14 +67,15 @@ func DefaultRenderers() *RendererRegistry {
 	r.Register(core.KindTaskCreate, renderTaskCreate)
 	r.Register(core.KindTaskUpdate, renderTaskUpdate)
 	r.Register(core.KindFileOffer, renderFileNotice)
+	r.Register(KindApprovalNotice, renderApprovalNotice)
 	for _, k := range []core.Kind{core.KindLinkRequest, core.KindLinkAccepted, core.KindLinkRejected, core.KindLinkClosed} {
 		r.Register(k, renderLinkNotice)
 	}
 	return r
 }
 
-// renderLinkNotice shows a link event. Humans decide requests with the CLI
-// (Phase 2 adds the chat decision path).
+// renderLinkNotice shows a link event. Humans decide requests in the chat
+// (review_pending) or with the CLI.
 func renderLinkNotice(it store.InboxItem) Rendered {
 	n, err := decodeEnvBody[LinkNotice](it.Body)
 	if err != nil {
@@ -87,7 +88,7 @@ func renderLinkNotice(it store.InboxItem) Rendered {
 		if n.Note != "" {
 			fmt.Fprintf(&sb, "\nnote: %s", n.Note)
 		}
-		fmt.Fprintf(&sb, "\nA human decides with: cravv-connect link accept %d (or cravv-connect link reject %d)", n.Link, n.Link)
+		fmt.Fprintf(&sb, "\nOnly a human decides: call review_pending to ask yours, or they run cravv-connect link accept %d (or cravv-connect link reject %d).", n.Link, n.Link)
 	case "accepted":
 		fmt.Fprintf(&sb, "accepted link %d. On their session you may: %s.", n.Link, n.Permission)
 	case "rejected":
@@ -96,6 +97,17 @@ func renderLinkNotice(it store.InboxItem) Rendered {
 		fmt.Fprintf(&sb, "link %d closed: %s.", n.Link, n.Reason)
 	}
 	return Rendered{ViewKind: "link", Text: sb.String()}
+}
+
+// renderApprovalNotice says a task waits for a human decision. It never
+// shows the task's instructions: agents read only approved tasks.
+func renderApprovalNotice(it store.InboxItem) Rendered {
+	n, err := decodeEnvBody[ApprovalNotice](it.Body)
+	if err != nil {
+		return Rendered{ViewKind: "approval", Text: "(unreadable approval notice)"}
+	}
+	return Rendered{ViewKind: "approval", Text: fmt.Sprintf(
+		"sent a task on link %d that waits for a human decision here. Call review_pending to ask your human; you see the task once they approve it.", n.Link)}
 }
 
 func renderChat(it store.InboxItem) Rendered {

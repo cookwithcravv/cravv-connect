@@ -112,8 +112,21 @@ type InboxStore interface {
 	SessionItems(ctx context.Context, session string, after int64, limit int) ([]InboxItem, error)
 	// SessionUnread counts SessionItems(session, after), in total and per sender.
 	SessionUnread(ctx context.Context, session string, after int64) (int, map[core.MachineID]int, error)
+	// SessionUnreadGroups counts SessionItems(session, after) per sender,
+	// link and kind, in the order each group's first item arrived.
+	SessionUnreadGroups(ctx context.Context, session string, after int64) ([]UnreadGroup, error)
 	// DeleteSessionItems deletes the session's items from one link with seq > after.
 	DeleteSessionItems(ctx context.Context, session, linkID string, after int64) (int, error)
+}
+
+// UnreadGroup counts a session's unread items from one sender on one link
+// and of one kind. MaxSeq is the newest item's seq.
+type UnreadGroup struct {
+	Peer   core.MachineID
+	LinkID string
+	Kind   core.Kind
+	Count  int
+	MaxSeq int64
 }
 
 type SessionRecord struct {

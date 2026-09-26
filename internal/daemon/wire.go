@@ -239,7 +239,8 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 	d.shared.AddObserver(sessionLinks{d})
 	d.inbox = NewInboxService(db, d.shared, db, db, opts.Clock)
 	d.inbox.AddReadObserver(taskReader{d})
-	d.attend = NewAttentionService(d.shared, db, db, d.inbox)
+	d.attend = NewAttentionService(AttentionDeps{Sessions: d.shared, Inbox: db, Links: db, Tasks: db, Peers: db, Changes: d.inbox})
+	d.shared.AddObserver(d.attend)
 	d.svc.Store(d.build(identity))
 	// No connection survives a restart: every open session is away until
 	// its client reattaches (links stay open for the away grace).
