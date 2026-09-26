@@ -44,7 +44,7 @@ func newWorld() *world {
 
 func (w *world) ports() Ports {
 	return Ports{
-		Sessions: fSessions{w}, Shared: fShared{w.lw}, Discovery: fDiscovery{w.lw}, Links: fLinks{w.lw}, Chat: fChat{w}, Inbox: fInbox{w}, Tasks: fTasks{w}, Files: fFiles{w},
+		Sessions: fSessions{w}, Shared: fShared{w.lw}, Discovery: fDiscovery{w.lw}, Links: fLinks{w.lw}, Review: fReview{w.lw}, Chat: fChat{w}, Inbox: fInbox{w}, Tasks: fTasks{w}, Files: fFiles{w},
 		Peers: fPeers{w}, Pairing: fPairing{w}, Control: fControl{w}, Status: fStatus{w},
 		Audit: fAudit{w}, Hook: fHook{w}, Auth: fAuth{w},
 	}

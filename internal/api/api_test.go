@@ -140,6 +140,9 @@ func TestEveryMethodRegisteredWithGate(t *testing.T) {
 		ipc.MethodLinkRestrict:    ipc.GateNone,
 		ipc.MethodLinkPermit:      ipc.GateUnlock,
 		ipc.MethodLinkDecide:      ipc.GateNone,
+		ipc.MethodReviewList:      ipc.GateShared,
+		ipc.MethodReviewDecide:    ipc.GateShared,
+		ipc.MethodReviewCode:      ipc.GateShared,
 	}
 	got := srv.Methods()
 	if len(got) != len(want) {

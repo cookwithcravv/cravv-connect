@@ -55,6 +55,7 @@ func Register(s *ipc.Server, p Ports, clock core.Clock) {
 		h.registerShared,
 		h.registerDiscovery,
 		h.registerLinks,
+		h.registerReview,
 		h.registerAuth,
 		h.registerChat,
 		h.registerInbox,

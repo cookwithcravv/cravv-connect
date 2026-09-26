@@ -140,3 +140,20 @@ func (f fLinks) Decide(_ context.Context, sessionID string, link int64, accept b
 	f.record("decide %q %d %v %s %v", sessionID, link, accept, perm, unlocked)
 	return ipc.LinkView{Link: link}, nil
 }
+
+type fReview struct{ *linkWorld }
+
+func (f fReview) List(_ context.Context, sessionID string) ([]ipc.ReviewItemView, error) {
+	f.record("review.list %s", sessionID)
+	return []ipc.ReviewItemView{{Item: "link-3", Kind: "link", Link: 3, Machine: "gpu-box", Session: "trainer", Permission: "tasks-ask"}}, nil
+}
+
+func (f fReview) Decide(_ context.Context, sessionID string, p ipc.ReviewDecideParams) (ipc.ReviewDecideResult, error) {
+	f.record("review.decide %s %s %v %s %s", sessionID, p.Item, p.Accept, p.Permission, p.Code)
+	return ipc.ReviewDecideResult{Item: p.Item, Outcome: "accepted", Link: 3, Permission: "tasks-ask"}, nil
+}
+
+func (f fReview) ShowCode(_ context.Context, sessionID, item string) error {
+	f.record("review.code %s %s", sessionID, item)
+	return nil
+}

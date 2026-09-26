@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -149,13 +150,14 @@ func (r *Relay) Start() {
 // Node is one machine: a daemon, its IPC server, and helpers to open IPC
 // connections (each connection is one agent session or one CLI run).
 type Node struct {
-	t      *testing.T
-	Name   string
-	Dir    string // CRAVV_HOME-style state directory
-	Proj   string // a project folder named "proj" for sessions
-	Paths  config.Paths
-	Daemon *daemon.Daemon
-	Clock  core.Clock
+	t       *testing.T
+	Name    string
+	Dir     string // CRAVV_HOME-style state directory
+	Proj    string // a project folder named "proj" for sessions
+	Paths   config.Paths
+	Daemon  *daemon.Daemon
+	Clock   core.Clock
+	Desktop *Desktop
 
 	opts   daemon.Options
 	cancel context.CancelFunc
@@ -168,11 +170,49 @@ type NodeOptions struct {
 	AdminToken string
 	// Clock replaces the system clock for the daemon and its IPC server.
 	Clock core.Clock
+	// Headless nodes cannot show desktop notifications.
+	Headless bool
 }
 
-type nopDesktop struct{}
+// Desktop records the node's desktop notifications, where the human reads
+// confirmation codes. A headless one shows nothing (like Linux over SSH).
+type Desktop struct {
+	Headless bool
 
-func (nopDesktop) Notify(string, string) {}
+	mu     sync.Mutex
+	titles []string
+	texts  []string
+}
+
+// Notify records a notification.
+func (d *Desktop) Notify(title, text string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.titles, d.texts = append(d.titles, title), append(d.texts, text)
+}
+
+// Available reports whether notifications reach a human.
+func (d *Desktop) Available() bool { return !d.Headless }
+
+// Last returns the newest notification's title and text.
+func (d *Desktop) Last() (title, text string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.titles) == 0 {
+		return "", ""
+	}
+	return d.titles[len(d.titles)-1], d.texts[len(d.texts)-1]
+}
+
+// Code returns the confirmation code in the newest notification ("" if none).
+func (d *Desktop) Code() string {
+	title, _ := d.Last()
+	code, ok := strings.CutPrefix(title, "cravv-connect code ")
+	if !ok {
+		return ""
+	}
+	return code
+}
 
 // NewNode builds a daemon configured for relay r, stores the admin token the
 // way `cravv-connect init --relay-token` does, and serves the real IPC API on
@@ -207,12 +247,13 @@ func NewNode(t *testing.T, r *Relay, name string, o NodeOptions) *Node {
 	if err := config.Save(paths, cfg); err != nil {
 		t.Fatal(err)
 	}
+	desk := &Desktop{Headless: o.Headless}
 	opts := daemon.Options{
 		Paths:    paths,
 		Config:   cfg,
 		Clock:    clock,
 		Verifier: auth.Fake{Password: Password},
-		Desktop:  nopDesktop{},
+		Desktop:  desk,
 		Username: "tester",
 		IdentityStore: func(s store.SettingsStore) daemon.IdentityStore {
 			return daemon.SettingsIdentityStore{Settings: s}
@@ -230,7 +271,7 @@ func NewNode(t *testing.T, r *Relay, name string, o NodeOptions) *Node {
 			t.Fatal(err)
 		}
 	}
-	n := &Node{t: t, Name: name, Dir: dir, Proj: proj, Paths: paths, Daemon: d, Clock: clock, opts: opts}
+	n := &Node{t: t, Name: name, Dir: dir, Proj: proj, Paths: paths, Daemon: d, Clock: clock, Desktop: desk, opts: opts}
 	n.start()
 	return n
 }

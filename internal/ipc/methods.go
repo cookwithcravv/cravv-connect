@@ -60,6 +60,11 @@ const (
 	MethodLinkRestrict    = "link.restrict"
 	MethodLinkPermit      = "link.permit"
 	MethodLinkDecide      = "link.decide"
+
+	// v2 Phase 2: decisions in chat (review_pending).
+	MethodReviewList   = "review.list"
+	MethodReviewDecide = "review.decide"
+	MethodReviewCode   = "review.code"
 )
 
 // Empty is the params or result of methods that carry nothing ({}).
@@ -419,4 +424,49 @@ type LinkView struct {
 
 type LinksResult struct {
 	Links []LinkView `json:"links"`
+}
+
+// ReviewItemView is one decision waiting for the human of the session
+// shared on this connection. Item is "link-<number>" or "task-<task id>".
+// Session is the remote session name (validated); Permission is what a
+// link request asks for, or what a task's link allows. Wrapped holds the
+// peer's text for the human's form only (a link's purpose and note, a
+// task's instructions): the MCP server never shows a task's to the model.
+type ReviewItemView struct {
+	Item       string `json:"item"`
+	Kind       string `json:"kind"` // link | task
+	Link       int64  `json:"link"`
+	Machine    string `json:"machine"`
+	Session    string `json:"session"`
+	Permission string `json:"permission"`
+	Wrapped    string `json:"wrapped,omitempty"`
+}
+
+type ReviewListResult struct {
+	Items []ReviewItemView `json:"items"`
+}
+
+// ReviewDecideParams applies the human's answer. With Code empty it is an
+// answer from an elicitation form; with Code set, the confirmation code
+// the human typed (needed to accept, not to reject). Permission is the
+// level granted when accepting a link ("" means what was asked, at most
+// tasks-ask for a code).
+type ReviewDecideParams struct {
+	Item       string `json:"item"`
+	Accept     bool   `json:"accept"`
+	Permission string `json:"permission,omitempty"`
+	Code       string `json:"code,omitempty"`
+}
+
+// ReviewDecideResult says what happened: accepted or rejected (links),
+// approved or denied (tasks). Permission is what an accepted link allows.
+type ReviewDecideResult struct {
+	Item       string `json:"item"`
+	Outcome    string `json:"outcome"`
+	Link       int64  `json:"link"`
+	Permission string `json:"permission,omitempty"`
+}
+
+type ReviewItemParams struct {
+	Item string `json:"item"`
 }

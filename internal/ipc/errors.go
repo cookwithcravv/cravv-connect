@@ -41,6 +41,13 @@ const (
 	KindBadRequest     = "bad_request"
 	KindBusy           = "busy"
 	KindInternal       = "internal"
+
+	// Decisions in chat (registered by internal/app for the daemon's errors).
+	KindBadCode     = "bad_code"
+	KindCodeLocked  = "code_locked"
+	KindNoDesktop   = "no_desktop"
+	KindNoDecision  = "no_decision"
+	KindRateLimited = "rate_limited"
 )
 
 type errorKind struct {

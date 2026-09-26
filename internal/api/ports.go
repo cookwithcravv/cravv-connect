@@ -57,6 +57,15 @@ type LinkPort interface {
 	Decide(ctx context.Context, sessionID string, link int64, accept bool, permission string, unlocked bool) (ipc.LinkView, error)
 }
 
+// ReviewPort serves review_pending for the shared session sessionID: the
+// decisions waiting for its human, applied with the chat tier (never
+// tasks-auto), and confirmation codes shown on the desktop only.
+type ReviewPort interface {
+	List(ctx context.Context, sessionID string) ([]ipc.ReviewItemView, error)
+	Decide(ctx context.Context, sessionID string, p ipc.ReviewDecideParams) (ipc.ReviewDecideResult, error)
+	ShowCode(ctx context.Context, sessionID, item string) error
+}
+
 // ChatPort sends chat on link number link of the shared session sessionID.
 type ChatPort interface {
 	Send(ctx context.Context, sessionID string, link int64, text string) (string, error)
@@ -160,6 +169,7 @@ type Ports struct {
 	Shared    SharedPort
 	Discovery DiscoveryPort
 	Links     LinkPort
+	Review    ReviewPort
 	Chat      ChatPort
 	Inbox     InboxPort
 	Tasks     TaskPort
