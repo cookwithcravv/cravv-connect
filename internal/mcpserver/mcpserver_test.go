@@ -85,11 +85,12 @@ func (d *daemonFake) registrations() []ipc.SessionRegisterParams {
 // a client session named clientName.
 func connect(t *testing.T, d *daemonFake, clientName string) (*mcp.ClientSession, *Session) {
 	t.Helper()
-	return connectWith(t, d, clientName, Options{}, nil)
+	return connectWith(t, d, clientName, Options{}, nil, "")
 }
 
-// connectWith is connect with extra server options and client options.
-func connectWith(t *testing.T, d *daemonFake, clientName string, opts Options, copts *mcp.ClientOptions) (*mcp.ClientSession, *Session) {
+// connectWith is connect with extra server options, client options and a
+// protocol version ("" for the SDK's latest).
+func connectWith(t *testing.T, d *daemonFake, clientName string, opts Options, copts *mcp.ClientOptions, proto string) (*mcp.ClientSession, *Session) {
 	t.Helper()
 	ctx := context.Background()
 	opts.Dial = func(ctx context.Context) (Conn, error) { return ipc.DialContext(ctx, d.sock) }
@@ -101,7 +102,7 @@ func connectWith(t *testing.T, d *daemonFake, clientName string, opts Options, c
 		t.Fatal(err)
 	}
 	client := mcp.NewClient(&mcp.Implementation{Name: clientName, Version: "1"}, copts)
-	cs, err := client.Connect(ctx, ct, nil)
+	cs, err := client.Connect(ctx, ct, &mcp.ClientSessionOptions{ProtocolVersion: proto})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +175,7 @@ func TestToolListAndDescriptions(t *testing.T) {
 		}
 	}
 	want := []string{"cancel_task", "check_inbox", "claim_task", "complete_task", "connect", "create_task", "disconnect",
-		"fail_task", "get_task", "kill_switch", "links", "machines", "restrict", "send_file", "send_message",
+		"fail_task", "get_task", "kill_switch", "links", "machines", "restrict", "review_pending", "send_file", "send_message",
 		"session_close", "session_set", "session_share", "sessions", "update_task", "wait_for_message"}
 	slices.Sort(names)
 	if !slices.Equal(names, want) {
@@ -497,7 +498,7 @@ func TestShareWritesAPrivateWakeFile(t *testing.T) {
 	d.handle(ipc.MethodSessionClose, ipc.GateSession, func(*ipc.ConnState, json.RawMessage) (any, error) { return nil, nil })
 	d.start()
 	dir := filepath.Join(t.TempDir(), "wake")
-	cs, sess := connectWith(t, d, "claude-code", Options{WakeDir: dir, ListenerProgram: "/opt/my tools/cravv-connect"}, nil)
+	cs, sess := connectWith(t, d, "claude-code", Options{WakeDir: dir, ListenerProgram: "/opt/my tools/cravv-connect"}, nil, "")
 	text, isErr := callTool(t, cs, "session_share", map[string]any{"name": "lead"})
 	var out shareOut
 	if err := json.Unmarshal([]byte(text), &out); isErr || err != nil || strings.Contains(text, "WAKE-SECRET") || out.WakeToken != "" || out.Next != ListenerNext {

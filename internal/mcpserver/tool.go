@@ -20,7 +20,7 @@ func Tools() []ToolRegistrar {
 	return []ToolRegistrar{
 		sessionShareTool{}, sessionCloseTool{}, sessionSetTool{},
 		machinesTool{}, sessionsTool{}, connectTool{}, linksTool{}, disconnectTool{}, restrictTool{},
-		checkInboxTool{}, waitForMessageTool{},
+		checkInboxTool{}, waitForMessageTool{}, reviewPendingTool{},
 		sendMessageTool{},
 		createTaskTool{}, getTaskTool{}, claimTaskTool{}, updateTaskTool{},
 		completeTaskTool{}, failTaskTool{}, cancelTaskTool{},
