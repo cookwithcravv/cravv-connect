@@ -36,7 +36,7 @@ func newFilesCmd(env *Env) *cobra.Command {
 	}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "accept <file-id>",
-		Short: "Download a held file from a chat-only peer (asks for your password)",
+		Short: "Download a file held for a human before the upgrade to v2 (asks for your password)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
