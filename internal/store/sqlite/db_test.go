@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/store"
 )
 
@@ -230,5 +231,78 @@ VALUES ('m1', x'01', 'gpu-box', 3, '{}', 'https://relay.example.com', 0, 0, 1000
 	}
 	if links, err := db.ListLinks(ctx, store.LinkFilter{}); err != nil || len(links) != 0 {
 		t.Fatalf("an upgraded pairing carries links: %+v, %v", links, err)
+	}
+}
+
+// v1 left tasks and queued envelopes without a link. Upgrading fails the
+// unfinished v1 tasks locally (nothing is sent: the peer drops link-less
+// traffic) and deletes queued link-scoped envelopes that carry no link_id.
+func TestUpgradeFailsV1TasksAndDropsLinklessOutbox(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "store.db")
+	raw := openAtVersion(t, path, 5)
+	task := func(id, state, link string) {
+		if _, err := raw.ExecContext(ctx, `INSERT INTO tasks (id, direction, peer, from_session, to_session, instructions, state,
+claimed_by, notes_json, result, result_files_json, files_json, created_at, updated_at, expires_at, link_id)
+VALUES (?, 'in', 'm1', '', '', 'x', ?, '', '[]', '', '[]', '[]', 1000, 1000, 5000, ?)`, id, state, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, st := range []string{"sent", "awaiting_approval", "queued", "seen", "claimed", "running"} {
+		task("v1-"+st, st, "")
+	}
+	task("v1-done", "done", "")
+	task("v2-queued", "queued", "L1")
+	outbox := func(id, envelope string) {
+		if _, err := raw.ExecContext(ctx, `INSERT INTO outbox (id, to_machine, envelope, status, attempts, next_attempt, created_at)
+VALUES (?, 'm1', ?, 'pending', 0, 0, 0)`, id, []byte(envelope)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outbox("chat-v1", `{"v":1,"id":"chat-v1","kind":"chat","body":{}}`)
+	outbox("chat-empty", `{"v":1,"id":"chat-empty","kind":"chat","link_id":"","body":{}}`)
+	outbox("task-v1", `{"v":1,"id":"task-v1","kind":"task.update","body":{}}`)
+	outbox("offer-v1", `{"v":1,"id":"offer-v1","kind":"file.offer","body":{}}`)
+	outbox("chat-v2", `{"v":1,"id":"chat-v2","kind":"chat","link_id":"L1","body":{}}`)
+	outbox("closed", `{"v":1,"id":"closed","kind":"link.closed","body":{}}`)
+	outbox("receipt", `{"v":1,"id":"receipt","kind":"control.delivered","body":{}}`)
+	outbox("junk", `not json`)
+	raw.Close()
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	defer db.Close()
+	for _, st := range []string{"sent", "awaiting_approval", "queued", "seen", "claimed", "running"} {
+		got, err := db.GetTask(ctx, "v1-"+st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.State != core.TaskFailed || !got.ExpiresAt.IsZero() || len(got.Notes) != 1 || got.Notes[0].Text != "no_link_after_upgrade" || got.Notes[0].At.IsZero() {
+			t.Errorf("v1 task in %s after upgrade: %+v", st, got)
+		}
+	}
+	if got, _ := db.GetTask(ctx, "v1-done"); got.State != core.TaskDone || len(got.Notes) != 0 {
+		t.Errorf("finished v1 task changed: %+v", got)
+	}
+	if got, _ := db.GetTask(ctx, "v2-queued"); got.State != core.TaskQueued {
+		t.Errorf("linked task changed: %+v", got)
+	}
+	var left []string
+	rows, err := db.sql.QueryContext(ctx, `SELECT id FROM outbox ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		left = append(left, id)
+	}
+	if strings.Join(left, ",") != "chat-v2,closed,junk,receipt" {
+		t.Fatalf("outbox after upgrade: %v", left)
 	}
 }

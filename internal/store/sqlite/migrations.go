@@ -175,6 +175,26 @@ CREATE INDEX tasks_link ON tasks(link_id);
 	`
 ALTER TABLE peers DROP COLUMN trust_in;
 `,
+	// v1 leftovers: tasks and queued envelopes from before links carry no
+	// link. Unfinished v1 tasks fail here with a note and are never sent
+	// again (a v2 peer drops link-less traffic), and queued chat, task.* and
+	// file.offer envelopes without a link_id are deleted.
+	`
+UPDATE tasks SET
+	state = 'failed',
+	expires_at = 0,
+	updated_at = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER),
+	notes_json = json_insert(CASE WHEN json_valid(notes_json) THEN notes_json ELSE '[]' END, '$[#]',
+		json_object('at', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'text', 'no_link_after_upgrade'))
+WHERE link_id = '' AND state IN ('sent', 'awaiting_approval', 'queued', 'seen', 'claimed', 'running');
+DELETE FROM outbox WHERE id IN (
+	SELECT id FROM (
+		SELECT id, CASE WHEN json_valid(CAST(envelope AS TEXT)) THEN CAST(envelope AS TEXT) END AS env FROM outbox
+	) WHERE env IS NOT NULL
+		AND json_extract(env, '$.kind') IN ('chat', 'task.create', 'task.update', 'task.cancel', 'file.offer')
+		AND COALESCE(json_extract(env, '$.link_id'), '') = ''
+);
+`,
 }
 
 // migrate creates schema_migrations and applies every migration whose
