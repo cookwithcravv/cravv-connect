@@ -29,6 +29,40 @@ func (f *fakeInstaller) Install(_ context.Context, bin string) error {
 }
 func (f *fakeInstaller) Uninstall(context.Context) error { f.removed = true; return nil }
 
+// fakeOptInstaller takes install options, as the Claude Code installer does.
+type fakeOptInstaller struct {
+	fakeInstaller
+	opts []install.Options
+}
+
+func (f *fakeOptInstaller) InstallWith(_ context.Context, bin string, o install.Options) error {
+	f.installed = bin
+	f.opts = append(f.opts, o)
+	return nil
+}
+
+func TestInstallAllowSend(t *testing.T) {
+	fd := newFakeDaemon(t)
+	claude := &fakeOptInstaller{fakeInstaller: fakeInstaller{name: "claude", detected: true}}
+	codex := &fakeInstaller{name: "codex"}
+	env, out, errb := fd.env(&fakePrompter{}, "")
+	env.Agents = install.NewRegistry(claude, codex)
+	env.Executable = func() (string, error) { return "/usr/local/bin/cravv-connect", nil }
+	if code := Main([]string{"install", "claude"}, env); code != 0 || !strings.Contains(out.String(), "allows them too") {
+		t.Fatalf("%d %q %q", code, out.String(), errb.String())
+	}
+	out.Reset()
+	if code := Main([]string{"install", "claude", "--allow-send"}, env); code != 0 || strings.Contains(out.String(), "still ask") {
+		t.Fatalf("%d %q", code, out.String())
+	}
+	if len(claude.opts) != 2 || claude.opts[0].AllowSend || !claude.opts[1].AllowSend {
+		t.Fatalf("options %+v", claude.opts)
+	}
+	if code := Main([]string{"install", "codex", "--allow-send"}, env); code != 1 || !strings.Contains(errb.String(), "applies to Claude Code only") || codex.installed != "" {
+		t.Fatalf("%d %q", code, errb.String())
+	}
+}
+
 type fakeSetup struct{ installed, removed string }
 
 func (f *fakeSetup) Install(_ context.Context, bin string) error { f.installed = bin; return nil }

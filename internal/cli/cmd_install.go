@@ -35,10 +35,15 @@ func agentInstaller(env *Env, name string) (install.Installer, error) {
 }
 
 func newInstallCmd(env *Env) *cobra.Command {
-	return &cobra.Command{
+	var allowSend bool
+	cmd := &cobra.Command{
 		Use:   "install [agent]",
 		Short: "Add cravv-connect to a coding agent (claude, codex); no argument lists agents",
-		Args:  cobra.MaximumNArgs(1),
+		Long: "Adds the MCP server to the agent. For Claude Code it also adds the Stop and UserPromptSubmit hooks, " +
+			"the /cravv skill and allow rules for the tools that only read or act within an existing link and for " +
+			"the listener; connect, create_task and send_file still ask unless you pass --allow-send. " +
+			"Running it again changes nothing; `cravv-connect uninstall <agent>` removes what it added.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return listAgents(env)
@@ -51,13 +56,27 @@ func newInstallCmd(env *Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := i.Install(cmd.Context(), bin); err != nil {
+			oi, withOptions := i.(install.OptionInstaller)
+			switch {
+			case withOptions:
+				err = oi.InstallWith(cmd.Context(), bin, install.Options{AllowSend: allowSend})
+			case allowSend:
+				return fmt.Errorf("--allow-send applies to Claude Code only, not %s", i.Name())
+			default:
+				err = i.Install(cmd.Context(), bin)
+			}
+			if err != nil {
 				return err
 			}
 			fmt.Fprintf(env.Stdout, "Installed cravv-connect for %s. Restart the agent so it loads the MCP server.\n", i.Name())
+			if withOptions && !allowSend {
+				fmt.Fprintln(env.Stdout, "connect, create_task and send_file still ask each time; `cravv-connect install claude --allow-send` allows them too.")
+			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&allowSend, "allow-send", false, "also allow connect, create_task and send_file without a prompt (Claude Code)")
+	return cmd
 }
 
 func listAgents(env *Env) error {

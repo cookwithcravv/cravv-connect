@@ -41,6 +41,19 @@ type Installer interface {
 	Detect() bool
 }
 
+// Options tune an install.
+type Options struct {
+	// AllowSend also allows, without a prompt, the tools that open new flows
+	// or send local files (connect, create_task, send_file).
+	AllowSend bool
+}
+
+// OptionInstaller is an Installer that takes Options (Claude Code).
+type OptionInstaller interface {
+	Installer
+	InstallWith(ctx context.Context, bin string, o Options) error
+}
+
 // Registry holds installers by name. New agents register; nothing else changes.
 type Registry struct {
 	byName map[string]Installer

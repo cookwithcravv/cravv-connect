@@ -439,3 +439,125 @@ func TestClaudeSettingsNotHTMLEscaped(t *testing.T) {
 		t.Fatalf("settings rewritten with HTML escapes:\n%s", b)
 	}
 }
+
+func allowList(t *testing.T, path string) []string {
+	t.Helper()
+	perms, _ := readJSON(t, path)["permissions"].(map[string]any)
+	var out []string
+	for _, r := range perms["allow"].([]any) {
+		out = append(out, r.(string))
+	}
+	return out
+}
+
+// v2 spec 7.4: the default allow rules, --allow-send, idempotent and
+// reversible, other rules untouched.
+func TestClaudeAllowRules(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".claude", "settings.json")
+	os.MkdirAll(filepath.Dir(path), 0o700)
+	os.WriteFile(path, []byte(existingSettings), 0o600)
+	c := &Claude{Home: home, Run: &fakeRunner{}, LookPath: found}
+	if err := c.Install(bg, bin); err != nil {
+		t.Fatal(err)
+	}
+	allow := allowList(t, path)
+	for _, want := range []string{"Bash(ls)", "mcp__cravv-connect__check_inbox", "mcp__cravv-connect__complete_task", "mcp__cravv-connect__review_pending",
+		"mcp__cravv-connect__session_share", "Bash(cravv-connect listen:*)", "Bash(" + bin + " listen:*)"} {
+		if !slices.Contains(allow, want) {
+			t.Errorf("allow lacks %s: %v", want, allow)
+		}
+	}
+	for _, not := range []string{"mcp__cravv-connect__connect", "mcp__cravv-connect__create_task", "mcp__cravv-connect__send_file", "mcp__cravv-connect__kill_switch"} {
+		if slices.Contains(allow, not) {
+			t.Errorf("%s is allowed by default", not)
+		}
+	}
+	if allow[0] != "Bash(ls)" || len(allow) != 1+len(claudeAllowedTools)+2 {
+		t.Fatalf("allow %v", allow)
+	}
+	if err := c.InstallWith(bg, bin, Options{AllowSend: true}); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := os.ReadFile(path)
+	if err := c.InstallWith(bg, bin, Options{AllowSend: true}); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := os.ReadFile(path)
+	if string(first) != string(second) {
+		t.Fatalf("not idempotent:\n%s\n---\n%s", first, second)
+	}
+	if allow := allowList(t, path); !slices.Contains(allow, "mcp__cravv-connect__connect") || !slices.Contains(allow, "mcp__cravv-connect__send_file") {
+		t.Fatalf("--allow-send: %v", allow)
+	}
+	if err := c.Install(bg, bin); err != nil {
+		t.Fatal(err)
+	}
+	if allow := allowList(t, path); slices.Contains(allow, "mcp__cravv-connect__connect") {
+		t.Fatalf("installing without --allow-send keeps the send rules: %v", allow)
+	}
+	if err := c.Uninstall(bg); err != nil {
+		t.Fatal(err)
+	}
+	if allow := allowList(t, path); !slices.Equal(allow, []string{"Bash(ls)"}) {
+		t.Fatalf("after uninstall %v", allow)
+	}
+}
+
+func TestIsOurAllowRule(t *testing.T) {
+	for rule, want := range map[string]bool{
+		"mcp__cravv-connect__links":                     true,
+		"mcp__cravv-connect__connect":                   true,
+		"mcp__cravv-connect__something_else":            false,
+		"mcp__other__links":                             false,
+		"Bash(cravv-connect listen:*)":                  true,
+		"Bash(/usr/local/bin/cravv-connect listen:*)":   true,
+		"Bash('/Apps/My Tools/cravv-connect' listen:*)": true,
+		"Bash(cravv-connect status:*)":                  false,
+		"Bash(ls)":                                      false,
+	} {
+		if got := isOurAllowRule(rule); got != want {
+			t.Errorf("isOurAllowRule(%q) = %v", rule, got)
+		}
+	}
+}
+
+// The /cravv skill is written by install and removed by uninstall; a skill
+// the user wrote under the same name is never touched.
+func TestClaudeSkill(t *testing.T) {
+	home := t.TempDir()
+	c := &Claude{Home: home, Run: &fakeRunner{}, LookPath: found}
+	if err := c.Install(bg, bin); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, ".claude", "skills", "cravv", "SKILL.md")
+	b, err := os.ReadFile(path)
+	if err != nil || string(b) != CravvSkill || !strings.HasPrefix(string(b), "---\nname: cravv\ndescription: ") {
+		t.Fatalf("skill %q %v", b, err)
+	}
+	for _, must := range []string{"session_share", "run_in_background", "check_inbox", "review_pending", "Start the listener again", "connect(", "disconnect(", "machines()", "sessions(machine)", "Never guess a code"} {
+		if !strings.Contains(CravvSkill, must) {
+			t.Errorf("skill lacks %q", must)
+		}
+	}
+	if strings.ContainsRune(CravvSkill, '\u2014') {
+		t.Error("em dash in the skill")
+	}
+	if err := c.Uninstall(bg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatalf("skill folder left: %v", err)
+	}
+	os.MkdirAll(filepath.Dir(path), 0o700)
+	os.WriteFile(path, []byte("my own cravv skill"), 0o600)
+	if err := c.Install(bg, bin); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Uninstall(bg); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "my own cravv skill" {
+		t.Fatalf("the user's skill was changed: %q", b)
+	}
+}

@@ -19,7 +19,8 @@ var claudeHookEvents = []string{"UserPromptSubmit", "Stop"}
 const claudeHookTimeout = 5
 
 // Claude installs into Claude Code: the MCP server through the `claude` CLI
-// (user scope) and the notice hooks in ~/.claude/settings.json.
+// (user scope), the Stop and UserPromptSubmit hooks and the allow rules in
+// ~/.claude/settings.json, and the /cravv skill in ~/.claude/skills/cravv.
 type Claude struct {
 	Home     string
 	Run      Runner
@@ -37,11 +38,18 @@ func (c *Claude) Detect() bool {
 	return dirExists(filepath.Join(c.Home, ".claude"))
 }
 
-// Install registers the MCP server and merges the hooks. It adds the server
-// first; only if that fails (usually because an entry already exists, for
-// example with an old binary path) does it remove the entry and add it again,
-// so a working registration is never removed when adding is impossible.
+// Install is InstallWith the default options.
 func (c *Claude) Install(ctx context.Context, bin string) error {
+	return c.InstallWith(ctx, bin, Options{})
+}
+
+// InstallWith registers the MCP server, merges the hooks and allow rules
+// and writes the /cravv skill. It adds the server first; only if that fails
+// (usually because an entry already exists, for example with an old binary
+// path) does it remove the entry and add it again, so a working
+// registration is never removed when adding is impossible. Running it again
+// with the same options changes nothing.
+func (c *Claude) InstallWith(ctx context.Context, bin string, o Options) error {
 	if _, err := c.LookPath("claude"); err != nil {
 		return errors.New("claude CLI not found on PATH; install Claude Code first, or see docs/agents.md for manual setup")
 	}
@@ -55,7 +63,13 @@ func (c *Claude) Install(ctx context.Context, bin string) error {
 				"run `claude %s` yourself, then run this install again", ServerName, err, strings.Join(add, " "))
 		}
 	}
-	return c.editSettings(func(s map[string]any) { setClaudeHooks(s, shellQuote(bin)+" hook") })
+	if err := c.editSettings(func(s map[string]any) {
+		setClaudeHooks(s, shellQuote(bin)+" hook")
+		setClaudeAllow(s, claudeAllowRules(bin, o.AllowSend))
+	}); err != nil {
+		return err
+	}
+	return c.writeSkill()
 }
 
 // Uninstall removes the MCP server and only our hook entries.
@@ -63,10 +77,16 @@ func (c *Claude) Uninstall(ctx context.Context) error {
 	if _, err := c.LookPath("claude"); err == nil {
 		_, _ = c.Run.Run(ctx, "claude", "mcp", "remove", "--scope", "user", ServerName)
 	}
+	if err := c.removeSkill(); err != nil {
+		return err
+	}
 	if _, err := os.Stat(c.settingsPath()); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	return c.editSettings(removeClaudeHooks)
+	return c.editSettings(func(s map[string]any) {
+		removeClaudeHooks(s)
+		removeClaudeAllow(s)
+	})
 }
 
 // editSettings loads settings.json (or {}), applies fn, and writes it back.
