@@ -513,7 +513,7 @@ whitespace fail with `bad_request`; `result` and `reason` may be empty.
 | Method | Params | Result |
 |---|---|---|
 | `offers.list` | `{machine?}` | `{offers: [OfferView]}` |
-| `offers.set` | `{machine, label, folder, permission, run_mode?, shell_confirm?, agent?, max_concurrent?, idle_timeout_s?, max_turns_per_run?, run_timeout_s?, runs_per_hour?, runs_per_day?}` | `OfferView` |
+| `offers.set` | `{machine, label, folder, permission, run_mode?, shell_confirm?, agent?, max_concurrent?, idle_timeout_s?, max_turns_per_run?, run_timeout_s?, runs_per_hour?, runs_per_day?, force?}` | `OfferView` |
 | `offers.remove` | `{machine, label}` | `{}` |
 | `managed.list` | `{}` | `{sessions: [ManagedView]}` |
 | `managed.open` | `{name}` | `{name, machine, folder, command}` |
@@ -537,6 +537,10 @@ All of these are for human connections only (section 3.1).
   `shell_confirm: "shell"`. Zero numbers take the defaults: 2 open
   sessions, 2 hours idle, 40 turns (recorded only), 30 minutes a run, 30
   runs an hour per link, 200 runs a day per machine. `agent` is `claude`.
+  It fails with `bad_request` "claude not found by the daemon: set
+  CRAVV_CLAUDE in the daemon's service environment" when the daemon cannot
+  find a `claude` executable (`$CRAVV_CLAUDE`, its `PATH`, the usual
+  install places), unless `force` is set.
 - **`offers.remove`** removes the offer and closes its managed sessions.
 - **`managed.open`** holds the session's queue for as long as this
   connection stays open, and returns the command that opens its

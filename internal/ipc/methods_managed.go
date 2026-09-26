@@ -100,6 +100,8 @@ type OfferSetParams struct {
 	RunTimeoutS    int    `json:"run_timeout_s,omitempty"`
 	RunsPerHour    int    `json:"runs_per_hour,omitempty"`
 	RunsPerDay     int    `json:"runs_per_day,omitempty"`
+	// Force sets the offer even when the daemon cannot find claude now.
+	Force bool `json:"force,omitempty"`
 }
 
 type OfferRemoveParams struct {

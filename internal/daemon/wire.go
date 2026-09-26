@@ -44,6 +44,9 @@ type Options struct {
 	// StatPAMConfig stats the PAM configuration file for the self-test cache
 	// key; default os.Stat.
 	StatPAMConfig func(path string) (os.FileInfo, error)
+	// ClaudeCheck says whether managed runs could start claude, checked
+	// when an offer is set; default: ResolveClaude finds an executable.
+	ClaudeCheck func() error
 }
 
 // New is the composition root: it opens the store, loads or creates the

@@ -21,6 +21,7 @@ func init() {
 		{daemon.ErrShellNotConfirmed, ipc.KindBadRequest},
 		{store.ErrOfferLabelTaken, ipc.KindBadRequest},
 		{daemon.ErrManagedBusy, KindBusy},
+		{daemon.ErrClaudeNotFound, ipc.KindBadRequest},
 	} {
 		ipc.RegisterErrorKind(e.err, e.kind)
 	}
@@ -70,7 +71,7 @@ func (a offers) Set(ctx context.Context, p ipc.OfferSetParams, unlocked bool) (i
 		}
 	}
 	o, err := a.d.Offers().Set(ctx, daemon.OfferInput{
-		Peer: p.Machine, Label: p.Label, Folder: p.Folder, Agent: p.Agent, Permission: perm, RunMode: mode, ShellConfirm: p.ShellConfirm,
+		Peer: p.Machine, Label: p.Label, Folder: p.Folder, Agent: p.Agent, Permission: perm, RunMode: mode, ShellConfirm: p.ShellConfirm, Force: p.Force,
 		MaxConcurrent: p.MaxConcurrent, IdleTimeout: time.Duration(p.IdleTimeoutS) * time.Second, MaxTurnsPerRun: p.MaxTurnsPerRun,
 		RunTimeout: time.Duration(p.RunTimeoutS) * time.Second, RunsPerHour: p.RunsPerHour, RunsPerDay: p.RunsPerDay,
 	}, authority(unlocked))

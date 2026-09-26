@@ -74,6 +74,7 @@ func newOffersSetCmd(env *Env) *cobra.Command {
 		idle, runTimeout              time.Duration
 		folder, perm, mode            string
 		maxOpen, turns, perHr, perDay int
+		force                         bool
 	)
 	cmd := &cobra.Command{
 		Use:   "set <machine> <label>",
@@ -90,7 +91,7 @@ func newOffersSetCmd(env *Env) *cobra.Command {
 			p := ipc.OfferSetParams{
 				Machine: args[0], Label: args[1], Folder: abs, Permission: perm, RunMode: mode,
 				MaxConcurrent: maxOpen, IdleTimeoutS: int(idle / time.Second), MaxTurnsPerRun: turns,
-				RunTimeoutS: int(runTimeout / time.Second), RunsPerHour: perHr, RunsPerDay: perDay,
+				RunTimeoutS: int(runTimeout / time.Second), RunsPerHour: perHr, RunsPerDay: perDay, Force: force,
 			}
 			if mode == "shell" {
 				fmt.Fprintln(env.Stdout, shellWarning)
@@ -126,6 +127,7 @@ func newOffersSetCmd(env *Env) *cobra.Command {
 	f.IntVar(&turns, "max-turns", 0, "turns per run, recorded for agents that support a limit (default 40)")
 	f.IntVar(&perHr, "runs-per-hour", 0, "runs per link per hour (default 30)")
 	f.IntVar(&perDay, "runs-per-day", 0, "runs per day for this machine (default 200)")
+	f.BoolVar(&force, "force", false, "set it even if the daemon cannot find claude now (runs fail until it can)")
 	_ = cmd.MarkFlagRequired("folder")
 	_ = cmd.MarkFlagRequired("permission")
 	return cmd

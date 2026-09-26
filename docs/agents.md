@@ -292,7 +292,10 @@ over the link. Run modes, containment and limits are in
   `~/.local/bin/claude`, `~/.claude/local/claude`,
   `/opt/homebrew/bin/claude` and `/usr/local/bin/claude`. A daemon started
   by launchd or systemd has a short `PATH`, so set `CRAVV_CLAUDE` in its
-  service environment if `claude` lives somewhere else.
+  service environment if `claude` lives somewhere else. `offers set` checks
+  this when you make the offer and refuses ("claude not found by the
+  daemon: set CRAVV_CLAUDE in the daemon's service environment") unless you
+  pass `--force`.
 - Only Claude Code can run managed sessions in this version.
 
 ## Agents without MCP

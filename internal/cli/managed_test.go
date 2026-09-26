@@ -73,6 +73,21 @@ func TestOffersSetConfirmsShellAndAsksForThePassword(t *testing.T) {
 	}
 }
 
+// --force sets an offer although the daemon cannot find claude now.
+func TestOffersSetForce(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.handle(ipc.MethodOffersSet, ipc.GateUnlock, func(_ *ipc.ConnState, raw json.RawMessage) (any, error) {
+		var p ipc.OfferSetParams
+		json.Unmarshal(raw, &p)
+		return ipc.OfferView{Machine: p.Machine, Label: p.Label, Folder: p.Folder, RunMode: "read-only", Permission: p.Permission}, nil
+	})
+	fd.start()
+	r := fd.run(&fakePrompter{passwords: []string{"pw"}}, "offers", "set", "mac", "trainer", "--folder", "train", "--permission", "messages", "--force")
+	if r.code != 0 || fd.params(ipc.MethodOffersSet) != `{"machine":"mac","label":"trainer","folder":"/work/glow-v2/train","permission":"messages","run_mode":"read-only","force":true}` {
+		t.Fatalf("code %d %q params %s", r.code, r.stderr, fd.params(ipc.MethodOffersSet))
+	}
+}
+
 func TestOffersRemove(t *testing.T) {
 	fd := newFakeDaemon(t)
 	fd.handle(ipc.MethodOffersRemove, ipc.GateUnlock, func(*ipc.ConnState, json.RawMessage) (any, error) { return nil, nil })

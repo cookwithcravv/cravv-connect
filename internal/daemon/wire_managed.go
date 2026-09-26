@@ -22,6 +22,16 @@ func (d *Daemon) assembleManaged(db store.Store, lg audit.Logger) {
 		self = "cravv-connect"
 	}
 	d.offers = NewOfferService(db, currentPeers{d}, FolderRules{Home: home, StateDir: d.opts.Paths.Home}, d.clock, lg)
+	check := d.opts.ClaudeCheck
+	if check == nil {
+		check = func() error {
+			if _, ok := ResolveClaude(os.Getenv, exec.LookPath, home); !ok {
+				return ErrClaudeNotFound
+			}
+			return nil
+		}
+	}
+	d.offers.SetClaudeCheck(check)
 	d.host = NewSessionHost(HostDeps{
 		Offers: d.offers, Store: db, Sessions: d.shared, Inbox: d.inbox, Links: db, Peers: db,
 		Tasks:  func() HostTasks { return d.svc.Load().tasks },

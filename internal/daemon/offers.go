@@ -39,6 +39,7 @@ type OfferInput struct {
 	Permission     core.Permission
 	RunMode        core.RunMode
 	ShellConfirm   string // must be "shell" when RunMode is shell
+	Force          bool   // set it even when the daemon cannot find claude now
 	MaxConcurrent  int
 	IdleTimeout    time.Duration
 	MaxTurnsPerRun int
@@ -124,8 +125,17 @@ type OfferService struct {
 	clock   core.Clock
 	audit   audit.Logger
 
-	mu        sync.Mutex
-	observers []OfferObserver
+	mu          sync.Mutex
+	observers   []OfferObserver
+	claudeCheck func() error // nil: not checked
+}
+
+// SetClaudeCheck sets how Set checks that the daemon can run the offer's
+// agent (claude); it returns ErrClaudeNotFound when it cannot.
+func (s *OfferService) SetClaudeCheck(check func() error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.claudeCheck = check
 }
 
 // NewOfferService builds the service.
@@ -222,6 +232,15 @@ func (s *OfferService) Set(ctx context.Context, in OfferInput, auth Authority) (
 	o, err := s.build(in, peer)
 	if err != nil {
 		return o, err
+	}
+	s.mu.Lock()
+	check := s.claudeCheck
+	s.mu.Unlock()
+	if check != nil && !in.Force {
+		// An offer the daemon cannot run would fail every task sent to it.
+		if err := check(); err != nil {
+			return store.Offer{}, err
+		}
 	}
 	now := s.clock.Now()
 	o.ID, o.CreatedAt, o.UpdatedAt = core.NewIDAt(s.clock), now, now

@@ -299,7 +299,10 @@ func NewNode(t *testing.T, r *Relay, name string, o NodeOptions) *Node {
 		IdentityStore: func(s store.SettingsStore) daemon.IdentityStore {
 			return daemon.SettingsIdentityStore{Settings: s}
 		},
-		ReconnectMin:     50 * time.Millisecond,
+		ReconnectMin: 50 * time.Millisecond,
+		// Offers are refused when the daemon cannot find claude; the tests
+		// that run managed sessions point CRAVV_CLAUDE at a fake one.
+		ClaudeCheck:      func() error { return nil },
 		MaintenanceEvery: time.Hour, // tests call Maintain explicitly
 		FileRetryDelay:   100 * time.Millisecond,
 	}

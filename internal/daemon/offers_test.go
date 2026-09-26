@@ -222,3 +222,69 @@ func TestOfferRemoveAndUnpair(t *testing.T) {
 		t.Fatalf("observers saw %v", ev.removed)
 	}
 }
+
+// An offer is refused when the daemon cannot find claude, the only agent
+// it could run, unless forced; nothing is stored then.
+func TestOfferSetNeedsClaude(t *testing.T) {
+	ctx := context.Background()
+	svc, _, _, proj := newOfferSvc(t)
+	svc.SetClaudeCheck(func() error { return ErrClaudeNotFound })
+	in := OfferInput{Peer: "mac", Label: "trainer", Folder: proj, Permission: core.PermTasksAuto}
+	_, err := svc.Set(ctx, in, AuthPassword)
+	if !errors.Is(err, ErrClaudeNotFound) || err.Error() != "claude not found by the daemon: set CRAVV_CLAUDE in the daemon's service environment" {
+		t.Fatalf("without claude: %v", err)
+	}
+	if list, _ := svc.List(ctx, ""); len(list) != 0 {
+		t.Fatalf("stored %+v", list)
+	}
+	in.Force = true
+	if _, err := svc.Set(ctx, in, AuthPassword); err != nil {
+		t.Fatalf("forced: %v", err)
+	}
+	// Invalid rules are still refused first, forced or not.
+	in.Label = "Bad Label"
+	if _, err := svc.Set(ctx, in, AuthPassword); !errors.Is(err, ErrBadOffer) {
+		t.Fatalf("bad label: %v", err)
+	}
+}
+
+// ResolveClaude finds claude as FindClaude does, and says whether it did.
+func TestResolveClaude(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "claude")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	noenv := func(string) string { return "" }
+	env := func(v string) func(string) string {
+		return func(k string) string {
+			if k == EnvClaude {
+				return v
+			}
+			return ""
+		}
+	}
+	nowhere := func(string) (string, error) { return "", errors.New("not found") }
+	onPath := func(string) (string, error) { return exe, nil }
+	for _, c := range []struct {
+		name   string
+		getenv func(string) string
+		look   func(string) (string, error)
+		home   string
+		want   string
+		ok     bool
+	}{
+		{"CRAVV_CLAUDE", env(exe), nowhere, "", exe, true},
+		{"CRAVV_CLAUDE missing", env(filepath.Join(dir, "gone")), onPath, "", filepath.Join(dir, "gone"), false},
+		{"PATH", noenv, onPath, "", exe, true},
+		{"nowhere", noenv, nowhere, t.TempDir(), "claude", false},
+	} {
+		got, ok := ResolveClaude(c.getenv, c.look, c.home)
+		if got != c.want || ok != c.ok {
+			t.Errorf("%s: %q %v, want %q %v", c.name, got, ok, c.want, c.ok)
+		}
+		if FindClaude(c.getenv, c.look, c.home) != got {
+			t.Errorf("%s: FindClaude differs", c.name)
+		}
+	}
+}

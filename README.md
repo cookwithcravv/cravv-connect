@@ -258,8 +258,10 @@ example so a Mac chat can drive training runs on a GPU box. On the GPU box:
 cravv-connect offers set mac trainer --folder ~/work/wakeword --permission tasks-auto --mode edit-in-folder
 ```
 
-It asks for your password (and for `shell`, that you type `shell`). The
-Mac's chat then sees the offer in `sessions("gpu-box")` and connects to
+It asks for your password (and for `shell`, that you type `shell`), and it
+refuses when the daemon cannot find `claude`: "claude not found by the
+daemon: set CRAVV_CLAUDE in the daemon's service environment" (`--force`
+sets it anyway). The Mac's chat then sees the offer in `sessions("gpu-box")` and connects to
 `gpu-box/new:trainer`: the GPU box starts a managed session named
 `trainer-<4 characters>`, accepts the link at once at the lower of what was
 asked and the offer (a request for `tasks-ask` gets `messages`, because
@@ -355,7 +357,7 @@ any local process can run the CLI's.
 | `approvals` | Review tasks waiting for approval interactively (password once; again after 10 minutes) |
 | `approve <task-id>` / `deny <task-id>` | Decide one held task (password) |
 | `offers` / `offers list [machine]` | List managed-session offers (to one machine, or to all) |
-| `offers set <machine> <label> --folder <dir> --permission <messages\|tasks-auto> [--mode <read-only\|edit-in-folder\|shell>] [--max-concurrent N] [--runs-per-hour N] [--runs-per-day N] [--run-timeout D] [--idle-timeout D] [--max-turns N]` | Create or change an offer (password; `shell` asks you to type shell) |
+| `offers set <machine> <label> --folder <dir> --permission <messages\|tasks-auto> [--mode <read-only\|edit-in-folder\|shell>] [--max-concurrent N] [--runs-per-hour N] [--runs-per-day N] [--run-timeout D] [--idle-timeout D] [--max-turns N] [--force]` | Create or change an offer (password; `shell` asks you to type shell). Refused when the daemon cannot find `claude` (set `CRAVV_CLAUDE` in its service environment); `--force` sets it anyway |
 | `offers remove <machine> <label>` | Remove an offer and close its managed sessions (password) |
 | `session list` | Managed sessions running here |
 | `session open <name>` | Continue a managed session's conversation in this terminal (its queue waits until you exit) |

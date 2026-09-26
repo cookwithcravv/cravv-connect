@@ -170,7 +170,7 @@ Offer rules are set per peer machine and are **password-gated** (web UI or CLI).
 |---|---|
 | `label` | |
 | `folder` | Absolute path. Must not be `$HOME` or contain `~/.cravv-connect`. It is re-checked on every run (it must still exist, not be a symlink that moved, and stay inside the allowed tree). |
-| `agent` | `claude` in v2. Adapters are behind an `AgentAdapter` interface. |
+| `agent` | `claude` in v2. Adapters are behind an `AgentAdapter` interface. Setting an offer checks that the daemon can find the agent's executable (`$CRAVV_CLAUDE`, its `PATH`, the usual install places) and refuses otherwise: "claude not found by the daemon: set CRAVV_CLAUDE in the daemon's service environment" (`--force` / `force` sets it anyway). |
 | `permission` | `messages` or `tasks-auto`. `tasks-ask` is not offered, because a managed session has no human to ask. |
 | `run_mode` | See below |
 | `max_concurrent` | Default 2 |
