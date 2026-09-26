@@ -2,24 +2,52 @@ package ipc
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cravv/cravv-connect/internal/core"
 )
 
-// ConnState is the per-connection state: the registered session and the
-// password unlock window. It is safe for concurrent use because requests on one
+// ConnState is the per-connection state: the registered session (the
+// attachment), the shared session bound to this connection, and the password
+// unlock window. It is safe for concurrent use because requests on one
 // connection are handled concurrently.
 type ConnState struct {
+	id            uint64
 	mu            sync.Mutex
 	clock         core.Clock
 	session       string
 	projectDir    string
+	shared        string
 	unlockedUntil time.Time
 }
 
+// connIDs numbers connections; an ID is never reused within a process.
+var connIDs atomic.Uint64
+
 // NewConnState returns an empty state that reads time from clock.
-func NewConnState(clock core.Clock) *ConnState { return &ConnState{clock: clock} }
+func NewConnState(clock core.Clock) *ConnState {
+	return &ConnState{id: connIDs.Add(1), clock: clock}
+}
+
+// ID identifies this connection for the lifetime of the process. The daemon
+// binds a shared session to it, so identity comes from the connection and
+// never from a request argument.
+func (c *ConnState) ID() uint64 { return c.id }
+
+// Shared returns the ID of the shared session bound to this connection, or "".
+func (c *ConnState) Shared() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.shared
+}
+
+// SetShared records the shared session bound to this connection ("" unbinds).
+func (c *ConnState) SetShared(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.shared = id
+}
 
 // Session returns the registered session name, or "" if none.
 func (c *ConnState) Session() string {

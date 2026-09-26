@@ -45,7 +45,7 @@ type echoParams struct {
 }
 
 func testServer(disconnected chan string) *Server {
-	s := NewServer(Options{OnDisconnect: func(name string) { disconnected <- name }})
+	s := NewServer(Options{OnDisconnect: func(cs *ConnState) { disconnected <- cs.Session() }})
 	s.Register("register", Typed(func(_ context.Context, cs *ConnState, p SessionRegisterParams) (any, error) {
 		cs.SetSession(p.Agent+"@x", p.ProjectDir)
 		return SessionRegisterResult{Name: p.Agent + "@x"}, nil
@@ -250,5 +250,31 @@ func TestListenRefusesNonSocket(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(sock); string(b) != "x" {
 		t.Fatal("regular file was modified")
+	}
+}
+
+func TestDisconnectCallbackForSharedOnlyConnection(t *testing.T) {
+	disc := make(chan string, 1)
+	s := NewServer(Options{OnDisconnect: func(cs *ConnState) { disc <- cs.Shared() }})
+	s.Register("share", func(_ context.Context, cs *ConnState, _ json.RawMessage) (any, error) {
+		cs.SetShared("S1")
+		return nil, nil
+	}, GateNone)
+	sock := startServer(t, s)
+	c, err := Dial(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Call(context.Background(), "share", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	select {
+	case id := <-disc:
+		if id != "S1" {
+			t.Fatalf("OnDisconnect saw shared %q", id)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("OnDisconnect not called for a connection with only a shared session")
 	}
 }

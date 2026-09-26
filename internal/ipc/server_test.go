@@ -145,3 +145,36 @@ func TestTypedDecodesAndRejectsBadParams(t *testing.T) {
 		t.Fatalf("bad params: %v", err)
 	}
 }
+
+func TestSharedGate(t *testing.T) {
+	clock := core.NewFakeClock(time.Unix(1_700_000_000, 0))
+	stale := errors.New("session moved to another connection")
+	var bound uint64
+	s := NewServer(Options{Clock: clock, CheckShared: func(cs *ConnState) error {
+		if cs.ID() != bound {
+			return stale
+		}
+		return nil
+	}})
+	s.Register("shared", func(context.Context, *ConnState, json.RawMessage) (any, error) { return nil, nil }, GateShared)
+	a, b := NewConnState(clock), NewConnState(clock)
+	if a.ID() == b.ID() || a.ID() == 0 {
+		t.Fatalf("connection IDs %d and %d must be distinct and non-zero", a.ID(), b.ID())
+	}
+	if err := call(s, a, "shared"); !errors.Is(err, core.ErrNotShared) {
+		t.Fatalf("unshared connection: err = %v, want ErrNotShared", err)
+	}
+	a.SetShared("S1")
+	bound = a.ID()
+	if err := call(s, a, "shared"); err != nil {
+		t.Fatalf("bound connection: %v", err)
+	}
+	b.SetShared("S1")
+	if err := call(s, b, "shared"); err == nil || err.Error() != stale.Error() {
+		t.Fatalf("connection that is not bound: err = %v", err)
+	}
+	bound = b.ID() // b reattached: a loses the session
+	if err := call(s, a, "shared"); err == nil {
+		t.Fatal("the old connection still acts as the session after a reattach")
+	}
+}

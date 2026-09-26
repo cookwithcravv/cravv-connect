@@ -23,6 +23,9 @@ const (
 	GateUnlock Gate = 1 << 1
 	// GateAllowWhenKilled lets the method run while the kill switch is on.
 	GateAllowWhenKilled Gate = 1 << 2
+	// GateShared requires a shared session bound to this connection that the
+	// daemon still binds to it (Options.CheckShared).
+	GateShared Gate = 1 << 3
 )
 
 // Typed adapts a function taking decoded params into a Handler. Empty or null

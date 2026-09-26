@@ -17,10 +17,16 @@ import (
 
 // Options configures a Server.
 type Options struct {
-	Clock        core.Clock
-	Killed       func() bool          // reports the kill switch; nil means never killed
-	OnDisconnect func(session string) // called after a connection with a session closes
-	Logger       *slog.Logger
+	Clock  core.Clock
+	Killed func() bool // reports the kill switch; nil means never killed
+	// OnDisconnect is called after a connection that registered a session or
+	// bound a shared session closes.
+	OnDisconnect func(cs *ConnState)
+	// CheckShared confirms that the shared session on cs is still bound to
+	// this connection (another connection may have reattached it). nil
+	// accepts any bound session.
+	CheckShared func(cs *ConnState) error
+	Logger      *slog.Logger
 }
 
 type method struct {
@@ -208,8 +214,8 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) {
 	inflight.Wait()
 	stop()
 	conn.Close()
-	if name := cs.Session(); name != "" && s.opts.OnDisconnect != nil {
-		s.opts.OnDisconnect(name)
+	if (cs.Session() != "" || cs.Shared() != "") && s.opts.OnDisconnect != nil {
+		s.opts.OnDisconnect(cs)
 	}
 }
 
@@ -292,13 +298,23 @@ func (s *Server) dispatch(ctx context.Context, cs *ConnState, req Request) (resp
 	return resp
 }
 
-// checkGate enforces, in order: kill switch, session, unlock.
+// checkGate enforces, in order: kill switch, session, shared session, unlock.
 func (s *Server) checkGate(cs *ConnState, g Gate) error {
 	if g&GateAllowWhenKilled == 0 && s.opts.Killed != nil && s.opts.Killed() {
 		return core.ErrKilled
 	}
 	if g&GateSession != 0 && cs.Session() == "" {
 		return core.ErrNoSession
+	}
+	if g&GateShared != 0 {
+		if cs.Shared() == "" {
+			return core.ErrNotShared
+		}
+		if s.opts.CheckShared != nil {
+			if err := s.opts.CheckShared(cs); err != nil {
+				return err
+			}
+		}
 	}
 	if g&GateUnlock != 0 && !cs.Unlocked() {
 		return core.ErrAuthRequired

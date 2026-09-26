@@ -24,9 +24,11 @@ func NewServer(p Ports, clock core.Clock, logger *slog.Logger) *ipc.Server {
 	s := ipc.NewServer(ipc.Options{
 		Clock:  clock,
 		Killed: p.Control.Killed,
-		OnDisconnect: func(name string) {
-			if err := p.Sessions.Disconnect(context.Background(), name); err != nil {
-				logger.Warn("session disconnect", "session", name, "err", err)
+		OnDisconnect: func(cs *ipc.ConnState) {
+			if name := cs.Session(); name != "" {
+				if err := p.Sessions.Disconnect(context.Background(), name); err != nil {
+					logger.Warn("session disconnect", "session", name, "err", err)
+				}
 			}
 		},
 		Logger: logger,

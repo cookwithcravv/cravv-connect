@@ -36,6 +36,8 @@ const (
 	KindPathRefused    = "path_refused"
 	KindQuota          = "quota"
 	KindNoSession      = "no_session"
+	KindNotShared      = "not_shared"
+	KindLinkClosed     = "link_closed"
 	KindBadRequest     = "bad_request"
 	KindBusy           = "busy"
 	KindInternal       = "internal"
@@ -65,6 +67,8 @@ var (
 		{KindPathRefused, core.ErrPathRefused},
 		{KindQuota, core.ErrQuota},
 		{KindNoSession, core.ErrNoSession},
+		{KindNotShared, core.ErrNotShared},
+		{KindLinkClosed, core.ErrLinkClosed},
 		{KindBadRequest, ErrBadRequest},
 		{KindBusy, ErrBusy},
 	}
