@@ -22,6 +22,7 @@ func TestLimitValues(t *testing.T) {
 		{"MaxPurposeRunes", MaxPurposeRunes, 120},
 		{"MaxLinkNoteRunes", MaxLinkNoteRunes, 280},
 		{"MaxPendingLinkRequests", MaxPendingLinkRequests, 5},
+		{"LinkRequestsPerMinute", LinkRequestsPerMinute, 10},
 		{"DiscoveryPerMinute", DiscoveryPerMinute, 30},
 	}
 	for _, tt := range ints {

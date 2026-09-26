@@ -185,6 +185,61 @@ func TestRejectBusyAndDeclined(t *testing.T) {
 	}
 }
 
+// A peer may send at most core.LinkRequestsPerMinute link.requests a
+// minute, even when it keeps under the pending limit by cancelling or being
+// declined. The excess is rejected busy and never reaches the session.
+func TestLinkRequestRateLimited(t *testing.T) {
+	ctx := context.Background()
+	n, a, b := linkNet(t)
+	trainer := shareOn(t, b, 1, "trainer", core.Visibility{Mode: core.VisibilityAllPeers})
+	request := func() string {
+		t.Helper()
+		id := core.NewID()
+		body := core.LinkRequestBody{LinkID: id, FromSession: core.SessionRef{ID: core.NewID(), Name: "lead"},
+			ToSessionID: trainer.Session.ID, ProposedPermission: core.PermMessages}
+		if _, err := a.sender.SendEnvelope(ctx, b.id, core.KindLinkRequest, "", body); err != nil {
+			t.Fatal(err)
+		}
+		n.pump()
+		return id
+	}
+	for i := range core.LinkRequestsPerMinute {
+		l := b.linkOf(t, a, request())
+		if _, err := b.links.Decide(ctx, l.Num, false, "", AuthNone); err != nil {
+			t.Fatalf("decline %d: %v", i, err)
+		}
+		n.pump()
+	}
+	requests := func() int {
+		var c int
+		for _, it := range b.notices(t, trainer.Session.ID) {
+			if it.Kind == core.KindLinkRequest {
+				c++
+			}
+		}
+		return c
+	}
+	if got := requests(); got != core.LinkRequestsPerMinute {
+		t.Fatalf("%d request notices, want %d", got, core.LinkRequestsPerMinute)
+	}
+	desk := len(b.desktop.all())
+	over := request()
+	if _, err := b.st.GetLink(ctx, a.id, over); !errors.Is(err, core.ErrNotFound) {
+		t.Fatal("a request over the rate must not be stored")
+	}
+	rej := n.sent(core.KindLinkRejected)
+	if last := v2Body[core.LinkRejectedBody](t, rej[len(rej)-1]); last.LinkID != over || last.Reason != core.RejectBusy {
+		t.Fatalf("over the rate: %+v, want busy", last)
+	}
+	if requests() != core.LinkRequestsPerMinute || len(b.desktop.all()) != desk {
+		t.Fatal("a request over the rate notified the human")
+	}
+	n.clock.Advance(time.Minute)
+	if l := b.linkOf(t, a, request()); l.State != store.LinkPending {
+		t.Fatalf("after a minute %+v, want pending", l)
+	}
+}
+
 // Review focus: a session the asker cannot see answers exactly like one
 // that does not exist, so a peer cannot probe for private sessions.
 func TestUnseenSessionLooksMissing(t *testing.T) {

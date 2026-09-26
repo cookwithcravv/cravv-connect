@@ -39,6 +39,7 @@ const (
 	AwayGrace              = 10 * time.Minute
 	LinkRequestExpiry      = 10 * time.Minute
 	MaxPendingLinkRequests = 5  // per peer, enforced by the receiver
+	LinkRequestsPerMinute  = 10 // link.request per peer per minute, enforced by the receiver
 	DiscoveryPerMinute     = 30 // sessions.list per peer per minute, enforced by the receiver
 	PresenceInterval       = 30 * time.Second
 	PresenceTimeout        = 150 * time.Second

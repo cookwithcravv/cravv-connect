@@ -79,7 +79,8 @@ type LinkDeps struct {
 // LinkService owns session-to-session links (v2 spec 3.4 and 4): requests,
 // the tiered accept gate, permission changes, close and its effects.
 type LinkService struct {
-	d LinkDeps
+	d        LinkDeps
+	requests *RateLimiter // inbound link.request per peer
 
 	mu     sync.Mutex
 	closes []LinkCloseObserver
@@ -94,7 +95,7 @@ func NewLinkService(d LinkDeps) *LinkService {
 	if d.Log == nil {
 		d.Log = slog.New(slog.DiscardHandler)
 	}
-	return &LinkService{d: d}
+	return &LinkService{d: d, requests: NewRateLimiter(d.Clock, core.LinkRequestsPerMinute, time.Minute)}
 }
 
 // AddCloseObserver registers o for closed active links.
@@ -175,8 +176,8 @@ func (s *LinkService) Connect(ctx context.Context, sessionID, target string, pro
 }
 
 // HandleRequest records a link.request as pending for a human decision, or
-// rejects it: busy past core.MaxPendingLinkRequests pending requests from
-// the peer, not_found for a session that is missing, closed or not visible
+// rejects it: busy past core.LinkRequestsPerMinute new requests a minute or
+// core.MaxPendingLinkRequests pending requests from the peer, not_found for a session that is missing, closed or not visible
 // to the peer (these look identical), timeout for a request older than
 // core.LinkRequestExpiry, policy for a malformed one.
 func (s *LinkService) HandleRequest(ctx context.Context, peer store.Peer, env core.Envelope) error {
@@ -191,6 +192,9 @@ func (s *LinkService) HandleRequest(ctx context.Context, peer store.Peer, env co
 		return nil // a duplicate: already pending or decided
 	} else if !errors.Is(err, core.ErrNotFound) {
 		return Retryable(err)
+	}
+	if !s.requests.Allow(string(peer.MachineID)) {
+		return s.reject(ctx, peer, b.LinkID, core.RejectBusy)
 	}
 	from, ok := cleanSessionRef(b.FromSession)
 	if !ok || !b.ProposedPermission.Valid() || !core.ValidNote(b.Note) {
