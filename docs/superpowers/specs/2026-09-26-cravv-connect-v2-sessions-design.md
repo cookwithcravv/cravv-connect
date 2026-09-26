@@ -236,7 +236,7 @@ Every run also:
   - accept at `tasks-auto`;
   - raise a permission;
   - edit offer rules;
-  - pair or unpair.
+  - pair.
 
   For those, the form says "needs your password: run `cravv-connect approve <id>` or open the UI". This is the tiered gate from section 10.
 - **After approval.** A task accepted through elicitation is not asked about again. The MCP instructions state that accepted tasks were approved by the human.
@@ -344,7 +344,8 @@ Inbox, tasks and files are scoped by `(session_id, link_id)`.
 | Decision | Gate |
 |---|---|
 | Accept a link at `messages` or `tasks-ask`; approve a single `tasks-ask` task; lower anything | Elicitation in chat, or password in the CLI or UI |
-| Accept or raise to `tasks-auto`; edit offer rules; pair or unpair; raise a machine-level setting | Password (CLI or UI) only |
+| Accept or raise to `tasks-auto`; edit offer rules; pair; raise a machine-level setting | Password (CLI or UI) only |
+| Unpair, pause, disconnect, restrict, kill switch | No gate (cutting off must stay easy, a v1 user decision) |
 
 **What elicitation protects against.** It is human-only relative to the model in that chat. It is **not** proof against other local processes running as the same user, which could drive their own MCP client. The damage such a process can do is bounded: it can accept a link or a single task, never grant automatic execution or edit rules. The docs state this plainly.
 
