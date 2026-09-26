@@ -30,8 +30,8 @@ type d2Blobs struct {
 	blobs    map[string]map[uint32][]byte
 	deleted  map[string]bool
 	getCalls map[uint32]int
-	failGet  map[uint32]int // chunk -> remaining transient failures
-	onGet    func(n uint32) // called before GetChunk serves chunk n (outside the lock)
+	failGet  map[uint32]int                            // chunk -> remaining transient failures
+	onGet    func(n uint32)                            // called before GetChunk serves chunk n (outside the lock)
 	onPut    func(ctx context.Context, n uint32) error // called before PutChunk stores chunk n
 	puts     map[uint32]int
 }
