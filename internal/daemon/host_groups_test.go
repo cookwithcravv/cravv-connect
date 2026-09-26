@@ -9,9 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/cravv/cravv-connect/internal/core"
 )
 
 // sleeper starts `sleep 300` in a process group of its own.
@@ -93,6 +96,42 @@ func TestHostStopKillsTheRecordedGroup(t *testing.T) {
 			Eventually(t, "the group record removed", func() bool {
 				left, _ := filepath.Glob(filepath.Join(e.host.d.RunDir, "*.group"))
 				return len(left) == 0
+			})
+		})
+	}
+}
+
+// A stop (kill switch, shutdown, Close) that lands between the host's
+// checks and the start of the agent must still stop the run: it never
+// starts.
+func TestHostStopDuringStartupWindow(t *testing.T) {
+	for _, how := range []string{"stop-all", "close"} {
+		t.Run(how, func(t *testing.T) {
+			e := newHostEnv(t, "ok", nil)
+			var ran atomic.Bool
+			e.runner = runnerFunc(func(ctx context.Context, c AgentCommand, env []string, d time.Duration) RunOutcome {
+				ran.Store(true)
+				return ExecRunner{}.Run(ctx, c, env, d)
+			})
+			e.host.beforeStart = func() {
+				if how == "stop-all" {
+					e.host.StopAll()
+				} else if err := e.host.Close(context.Background(), e.sess.ID, "test"); err != nil {
+					t.Error(err)
+				}
+			}
+			e.start(t)
+			tk := e.finished(t, e.task(t, "never runs"))
+			if ran.Load() {
+				t.Fatal("the agent started after the stop")
+			}
+			// Closing the session closes its link, which fails the task first.
+			if want := map[string]string{"stop-all": ReasonStopped, "close": ReasonLinkClosed}[how]; tk.State != core.TaskFailed || lastNote(tk) != want {
+				t.Fatalf("task %+v, want failed %s", tk, want)
+			}
+			Eventually(t, "the stopped run audited", func() bool {
+				ev := e.audit.ofType(EvManagedRun)
+				return len(ev) == 1 && ev[0].Detail["outcome"] == "stopped"
 			})
 		})
 	}

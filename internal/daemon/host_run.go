@@ -99,13 +99,18 @@ func (h *SessionHost) dispatch(ctx context.Context) {
 	}
 }
 
+// open reports whether the session is open.
+func (h *SessionHost) open(ctx context.Context, id string) bool {
+	s, err := h.d.Sessions.Get(ctx, id)
+	return err == nil && s.State == core.SessionOpen
+}
+
 // mayRun reports whether the session is open and nothing holds its queue.
 func (h *SessionHost) mayRun(ctx context.Context, id string) bool {
 	if h.d.Killed() || h.held(id) {
 		return false
 	}
-	s, err := h.d.Sessions.Get(ctx, id)
-	return err == nil && s.State == core.SessionOpen
+	return h.open(ctx, id)
 }
 
 // work runs the session's queued items one at a time until none is left.
@@ -143,6 +148,9 @@ func (h *SessionHost) work(ctx context.Context, id string) {
 // handle runs one queued item: a message or a task starts a run; a file
 // notice goes into the next run's prompt; other notices need no run.
 func (h *SessionHost) handle(ctx context.Context, id string, e InboxEntry) {
+	h.mu.Lock()
+	stops := h.stops // a StopAll from now on stops this item's run
+	h.mu.Unlock()
 	switch e.Kind {
 	case "chat", "task":
 	case "file":
@@ -202,7 +210,7 @@ func (h *SessionHost) handle(ctx context.Context, id string, e InboxEntry) {
 			return // cancelled, expired or failed meanwhile
 		}
 	}
-	h.run(ctx, m, o, sess, l, e, taskID)
+	h.run(ctx, m, o, sess, l, e, taskID, stops)
 }
 
 // refuse fails a task the host will not run, or tells the sender of a
@@ -235,7 +243,7 @@ func (h *SessionHost) refuse(ctx context.Context, sess store.SharedSession, l st
 // run runs the agent once for item e and finishes the bookkeeping: the
 // run's token and binding end with it, and a task the agent did not finish
 // fails with the reason the run ended.
-func (h *SessionHost) run(ctx context.Context, m store.ManagedSession, o store.Offer, sess store.SharedSession, l store.Link, e InboxEntry, taskID string) {
+func (h *SessionHost) run(ctx context.Context, m store.ManagedSession, o store.Offer, sess store.SharedSession, l store.Link, e InboxEntry, taskID string, stops uint64) {
 	now := h.d.Clock.Now()
 	runID := core.NewIDAt(h.d.Clock)
 	if err := h.d.Store.AddRun(ctx, store.ManagedRun{ID: runID, SessionID: sess.ID, Peer: m.Peer, LinkID: l.ID, StartedAt: now}); err != nil {
@@ -256,10 +264,24 @@ func (h *SessionHost) run(ctx context.Context, m store.ManagedSession, o store.O
 		cmd := adapter.Command(spec, runPrompt(sess, l, h.alias(ctx, l.Peer), e, taskID, notes))
 		cmd.OnStart = func(pgid int) { h.startGroup(sess.ID, runID, pgid) }
 		rctx, cancel := context.WithCancel(ctx)
+		if h.beforeStart != nil {
+			h.beforeStart()
+		}
+		// The run starts only if nothing stopped it since its checks: no
+		// kill switch, shutdown or StopAll, and the session still open.
+		// Registering the cancel under the same lock means every stop from
+		// here on reaches it.
 		h.mu.Lock()
-		h.cancel[sess.ID] = cancel
+		start := ctx.Err() == nil && !h.d.Killed() && h.stops == stops && h.open(ctx, sess.ID)
+		if start {
+			h.cancel[sess.ID] = cancel
+		}
 		h.mu.Unlock()
-		out = h.d.Runner.Run(rctx, cmd, append(h.env(), cmd.Env...), o.RunTimeout)
+		if start {
+			out = h.d.Runner.Run(rctx, cmd, append(h.env(), cmd.Env...), o.RunTimeout)
+		} else {
+			out = RunOutcome{Stopped: true, ExitCode: -1}
+		}
 		cancel()
 		h.endGroup(sess.ID, runID)
 		res = adapter.Result(out.Stdout)
@@ -380,6 +402,7 @@ func (h *SessionHost) stop(id string) {
 // StopAll ends every run (kill switch, shutdown). Their process groups are killed.
 func (h *SessionHost) StopAll() {
 	h.mu.Lock()
+	h.stops++
 	cancels := make([]context.CancelFunc, 0, len(h.cancel))
 	for _, c := range h.cancel {
 		cancels = append(cancels, c)

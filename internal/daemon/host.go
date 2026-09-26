@@ -91,10 +91,13 @@ type SessionHost struct {
 	busy    map[string]bool               // sessions with a worker
 	cancel  map[string]context.CancelFunc // sessions with a run: stops it
 	groups  map[string]int                // sessions with a run: its process group
+	stops   uint64                        // StopAll calls: a run checked before one never starts
 	notes   map[string][]string           // file notices for the next run
 	live    map[string]int                // sessions a human opened: their queue waits
 	noticed map[string]time.Time          // links last told of a refused message
 	changed chan struct{}                 // closed and replaced when a worker stops
+
+	beforeStart func() // tests: runs between a run's checks and its start
 }
 
 // NewSessionHost builds the host.
@@ -211,6 +214,9 @@ func (h *SessionHost) Close(ctx context.Context, sessionID, reason string) error
 	if err := h.d.Sessions.Close(ctx, sessionID); err != nil {
 		return err
 	}
+	// A run that passed its checks before the session closed but had not
+	// started yet: run() sees the session closed or this stop.
+	h.stop(sessionID)
 	_ = h.d.Audit.Record(audit.Event{Type: EvManagedClose, Peer: m.Peer, ItemID: sessionID, Detail: map[string]any{
 		"session": s.Name, "reason": reason,
 	}})
