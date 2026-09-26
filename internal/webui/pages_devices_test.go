@@ -215,3 +215,40 @@ func TestActivityPageShowsAuditTail(t *testing.T) {
 		t.Fatalf("audit.read calls %v", got)
 	}
 }
+
+var passwordInput = regexp.MustCompile(`<input[^>]*type="password"[^>]*>`)
+
+// Every password field is required and asks browsers and password managers
+// not to offer to save or fill it: the login password is typed each time
+// and must not end up stored in the browser.
+func TestPasswordFieldsAreNotSaved(t *testing.T) {
+	var pages []string
+	sd := statusDaemon(t)
+	sd.setKilled(true)
+	pages = append(pages, newUI(t, sd).open().get("/status").body)
+
+	d := newUI(t, devicesDaemon(t)).open()
+	pages = append(pages, d.get("/devices").body)
+	pages = append(pages, d.post("/devices", "/devices/join", url.Values{"code": {"ABCD-2345"}, "password": {"pw"}}).body)
+
+	a := newUI(t, approvalsDaemon(t)).open()
+	pages = append(pages, a.get("/approvals").body, a.get("/sessions?machine=gpu-box").body)
+	pages = append(pages, a.post("/approvals", "/approvals/tasks", url.Values{"password": {"pw"}}).body)
+
+	n := 0
+	for _, page := range pages {
+		for _, in := range passwordInput.FindAllString(page, -1) {
+			n++
+			for _, attr := range []string{`autocomplete="off"`, `data-lpignore="true"`, ` required`, `name="password"`} {
+				if !strings.Contains(in, attr) {
+					t.Errorf("password field lacks %s: %s", attr, in)
+				}
+			}
+		}
+	}
+	// status resume, pair, join, the naming step, link accept, show tasks,
+	// connect, and one per task.
+	if n < 8 {
+		t.Fatalf("found only %d password fields", n)
+	}
+}
