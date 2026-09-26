@@ -26,7 +26,7 @@ func TestReleaseWorkflowShape(t *testing.T) {
 	wf := releaseWorkflow(t)
 	for _, want := range []string{
 		"{ runner: macos-14, goos: darwin, goarch: arm64 }",
-		"{ runner: macos-13, goos: darwin, goarch: amd64 }",
+		"{ runner: macos-15-intel, goos: darwin, goarch: amd64 }",
 		"{ runner: ubuntu-24.04, goos: linux, goarch: amd64 }",
 		"{ runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }",
 		"libpam0g-dev",
