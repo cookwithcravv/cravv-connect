@@ -27,7 +27,7 @@ type world struct {
 	lastProject  string
 	lastWait     time.Duration
 	disconnected chan string
-	unread       map[string]int
+	notice       string
 	pending      int
 	lw           *linkWorld
 }
@@ -304,10 +304,15 @@ func (f fAudit) Read(_ context.Context, limit int) ([]audit.Event, error) {
 
 type fHook struct{ *world }
 
-func (f fHook) Counts(context.Context, string) (map[string]int, int, error) {
+func (f fHook) Check(_ context.Context, q ipc.HookCountsParams) (ipc.HookCountsResult, error) {
+	f.record(fmt.Sprintf("hook %s %s %s %v", q.Cwd, q.SessionID, q.Event, q.StopHookActive))
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.unread, f.pending, nil
+	return ipc.HookCountsResult{Notice: f.notice, Unread: f.pending}, nil
+}
+
+func (f fHook) Bind(_ context.Context, agentSession, sessionID string) {
+	f.record("bind " + agentSession + " " + sessionID)
 }
 
 type fAuth struct{ *world }

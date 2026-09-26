@@ -13,7 +13,6 @@ import (
 
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/present"
 	"github.com/cravv/cravv-connect/internal/store"
 )
 
@@ -437,19 +436,35 @@ func TestFilesAndControl(t *testing.T) {
 
 func TestHookCounts(t *testing.T) {
 	h := newHarness(t)
-	h.w.unread = map[string]int{"gpu-box": 2}
-	h.w.pending = 1
+	h.w.notice, h.w.pending = "cravv-connect: 2 new messages on link 1 from gpu-box. Call check_inbox.", 2
 	c := h.dial(t)
 	var r ipc.HookCountsResult
-	if err := c.Call(bg, ipc.MethodHookCounts, ipc.HookCountsParams{Cwd: "/work/proj"}, &r); err != nil {
+	q := ipc.HookCountsParams{Cwd: "/work/proj", SessionID: "chat-1", Event: "Stop", StopHookActive: true}
+	if err := c.Call(bg, ipc.MethodHookCounts, q, &r); err != nil {
 		t.Fatal(err)
 	}
-	if r.Notice != present.Notice(map[string]int{"gpu-box": 2}, 1) || r.Notice == "" || r.Unread != 2 || r.Approvals != 1 {
-		t.Fatalf("%+v", r)
+	if r.Notice != h.w.notice || r.Unread != 2 || h.w.lastCall() != "hook /work/proj chat-1 Stop true" {
+		t.Fatalf("%+v, call %q", r, h.w.lastCall())
 	}
-	h.w.unread, h.w.pending = nil, 0
-	if err := c.Call(bg, ipc.MethodHookCounts, ipc.HookCountsParams{Cwd: "/work/proj"}, &r); err != nil || r.Notice != "" {
-		t.Fatalf("empty: %v %+v", err, r)
+}
+
+// The chat's ID reaches the hook binding when it shares or reattaches.
+func TestShareAndReattachBindTheAgentChat(t *testing.T) {
+	h := newHarness(t)
+	c := h.session(t)
+	var res ipc.ShareResult
+	if err := c.Call(bg, ipc.MethodSessionShare, ipc.SessionShareParams{Name: "lead", AgentSession: "chat-1"}, &res); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.w.lastCall(); got != "bind chat-1 S1" {
+		t.Fatalf("share: %q", got)
+	}
+	c2 := h.session(t)
+	if err := c2.Call(bg, ipc.MethodSessionReattach, ipc.SessionReattachParams{ReattachToken: res.ReattachToken, AgentSession: "chat-2"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.w.lastCall(); got != "bind chat-2 S1" {
+		t.Fatalf("reattach: %q", got)
 	}
 }
 

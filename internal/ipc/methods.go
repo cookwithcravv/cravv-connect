@@ -198,16 +198,25 @@ type AuditReadResult struct {
 	Events []audit.Event `json:"events"`
 }
 
+// HookCountsParams is one agent hook run: its folder, the agent's chat ID
+// (Claude Code's session_id), the hook event and, for Stop, whether the
+// chat already continues because of a Stop hook.
 type HookCountsParams struct {
-	Cwd string `json:"cwd"`
+	Cwd            string `json:"cwd"`
+	SessionID      string `json:"session_id,omitempty"`
+	Event          string `json:"event,omitempty"`
+	StopHookActive bool   `json:"stop_hook_active,omitempty"`
 }
 
-// HookCountsResult carries the ready-made notice line plus the raw counts so
-// hook callers can decide per event (for example, Stop only cares about Unread).
+// HookCountsResult carries the ready-made notice line (local names only),
+// the unhandled items and pending decisions of the chat's shared session,
+// and for Stop whether to keep the chat going, with a one-line reason.
 type HookCountsResult struct {
 	Notice    string `json:"notice"`
 	Unread    int    `json:"unread"`
 	Approvals int    `json:"approvals"`
+	Block     bool   `json:"block,omitempty"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // InboxView is one delivered item. Wrapped is the only field agents should read
@@ -297,10 +306,13 @@ type StatusResult struct {
 
 // SessionShareParams shares the chat on this connection. Visibility is
 // "private" (the default), "all-peers" or "peers:<alias>[,<alias>...]".
+// AgentSession is the agent's own chat ID (Claude Code's session ID), so
+// the chat's hooks find this session.
 type SessionShareParams struct {
-	Name       string `json:"name"`
-	Purpose    string `json:"purpose,omitempty"`
-	Visibility string `json:"visibility,omitempty"`
+	Name         string `json:"name"`
+	Purpose      string `json:"purpose,omitempty"`
+	Visibility   string `json:"visibility,omitempty"`
+	AgentSession string `json:"agent_session,omitempty"`
 }
 
 // SharedSessionView is a local shared session. It never carries its ID.
@@ -330,6 +342,7 @@ type SessionSetParams struct {
 
 type SessionReattachParams struct {
 	ReattachToken string `json:"reattach_token"`
+	AgentSession  string `json:"agent_session,omitempty"`
 }
 
 // SessionListenParams blocks until the session holding the wake token has

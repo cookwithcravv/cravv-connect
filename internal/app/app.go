@@ -235,21 +235,20 @@ func (a auditReader) Read(_ context.Context, limit int) ([]audit.Event, error) {
 
 type hook struct{ d *daemon.Daemon }
 
-// Counts uses the read position of the open shared session in cwd; with no
-// session there, it reports only approvals.
-func (a hook) Counts(ctx context.Context, cwd string) (map[string]int, int, error) {
-	unread := map[string]int{}
-	if s, ok := a.d.Shared().ForProjectDir(ctx, cwd); ok {
-		var err error
-		if unread, err = a.d.Inbox().Unread(ctx, s.ID); err != nil {
-			return nil, 0, err
-		}
-	}
-	approvals, err := a.d.Tasks().PendingApprovals(ctx)
+// Check answers for the shared session of the chat running the hook.
+func (a hook) Check(ctx context.Context, q ipc.HookCountsParams) (ipc.HookCountsResult, error) {
+	ans, err := a.d.Hooks().Check(ctx, daemon.HookQuery{AgentSession: q.SessionID, Cwd: q.Cwd, Event: q.Event, StopHookActive: q.StopHookActive})
 	if err != nil {
-		return nil, 0, err
+		return ipc.HookCountsResult{}, err
 	}
-	return unread, approvals, nil
+	return ipc.HookCountsResult{
+		Notice: ans.Notice, Unread: ans.Counts.Unhandled(), Approvals: ans.Counts.Requests + ans.Counts.Approvals,
+		Block: ans.Block, Reason: ans.Reason,
+	}, nil
+}
+
+func (a hook) Bind(_ context.Context, agentSession, sessionID string) {
+	a.d.Hooks().Bind(agentSession, sessionID)
 }
 
 type guard struct{ d *daemon.Daemon }

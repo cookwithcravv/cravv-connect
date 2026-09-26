@@ -16,6 +16,14 @@ type Reattacher interface {
 	SetReattach(token string)
 }
 
+// agentSessionOf returns the agent's own chat ID when c knows it.
+func agentSessionOf(c Caller) string {
+	if a, ok := c.(interface{ AgentSession() string }); ok {
+		return a.AgentSession()
+	}
+	return ""
+}
+
 type sessionShareTool struct{}
 
 type sessionShareIn struct {
@@ -35,7 +43,8 @@ func (sessionShareTool) Register(s *mcp.Server, c Caller) {
 	addTool(s, "session_share", "Share this chat as a session other machines can link to. Nothing reaches this chat until it shares and a link is accepted. Returns the wake token for the listener.",
 		func(ctx context.Context, in sessionShareIn) (string, error) {
 			var r ipc.ShareResult
-			if err := c.Call(ctx, ipc.MethodSessionShare, ipc.SessionShareParams{Name: in.Name, Purpose: in.Purpose, Visibility: in.Visibility}, &r); err != nil {
+			p := ipc.SessionShareParams{Name: in.Name, Purpose: in.Purpose, Visibility: in.Visibility, AgentSession: agentSessionOf(c)}
+			if err := c.Call(ctx, ipc.MethodSessionShare, p, &r); err != nil {
 				return "", err
 			}
 			if ra, ok := c.(Reattacher); ok {

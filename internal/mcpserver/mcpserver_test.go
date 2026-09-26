@@ -87,9 +87,10 @@ func connect(t *testing.T, d *daemonFake, clientName string) (*mcp.ClientSession
 	t.Helper()
 	ctx := context.Background()
 	srv, sess := New(Options{
-		Dial:       func(ctx context.Context) (Conn, error) { return ipc.DialContext(ctx, d.sock) },
-		ProjectDir: "/work/glow-v2",
-		Version:    "test",
+		Dial:         func(ctx context.Context) (Conn, error) { return ipc.DialContext(ctx, d.sock) },
+		ProjectDir:   "/work/glow-v2",
+		Version:      "test",
+		AgentSession: "chat-1",
 	})
 	st, ct := mcp.NewInMemoryTransports()
 	ss, err := srv.Connect(ctx, st, nil)
@@ -280,8 +281,13 @@ func TestRestrictExplainsRaise(t *testing.T) {
 func TestShareKeepsReattachTokenForReconnects(t *testing.T) {
 	d := newDaemonFake(t)
 	var mu sync.Mutex
-	var reattached []string
+	var reattached, chats []string
 	d.handle(ipc.MethodSessionShare, ipc.GateSession, func(cs *ipc.ConnState, raw json.RawMessage) (any, error) {
+		var p ipc.SessionShareParams
+		json.Unmarshal(raw, &p)
+		mu.Lock()
+		chats = append(chats, p.AgentSession)
+		mu.Unlock()
 		return ipc.ShareResult{Session: ipc.SharedSessionView{Name: "lead", State: "open"}, WakeToken: "WAKE", ReattachToken: "SECRET-REATTACH"}, nil
 	})
 	d.handle(ipc.MethodSessionReattach, ipc.GateSession, func(cs *ipc.ConnState, raw json.RawMessage) (any, error) {
@@ -289,6 +295,7 @@ func TestShareKeepsReattachTokenForReconnects(t *testing.T) {
 		json.Unmarshal(raw, &p)
 		mu.Lock()
 		reattached = append(reattached, p.ReattachToken)
+		chats = append(chats, p.AgentSession)
 		mu.Unlock()
 		return ipc.SharedSessionView{Name: "lead", State: "open"}, nil
 	})
@@ -310,6 +317,9 @@ func TestShareKeepsReattachTokenForReconnects(t *testing.T) {
 	defer mu.Unlock()
 	if len(reattached) != 1 || reattached[0] != "SECRET-REATTACH" {
 		t.Fatalf("reattached with %v", reattached)
+	}
+	if len(chats) != 2 || chats[0] != "chat-1" || chats[1] != "chat-1" {
+		t.Fatalf("the agent's chat ID must reach share and reattach: %v", chats)
 	}
 }
 

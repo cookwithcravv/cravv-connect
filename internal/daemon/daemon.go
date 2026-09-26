@@ -77,6 +77,7 @@ type Daemon struct {
 	inbox    *InboxService
 	attend   *AttentionService
 	codes    *ConfirmCodes
+	hooks    *HookService
 
 	svc        atomic.Pointer[services]
 	registered atomic.Bool
@@ -521,6 +522,7 @@ func (d *Daemon) Discovery() *Discovery         { return d.svc.Load().discover }
 func (d *Daemon) Links() *LinkService           { return d.svc.Load().links }
 func (d *Daemon) Review() *ReviewService        { return d.svc.Load().review }
 func (d *Daemon) Codes() *ConfirmCodes          { return d.codes }
+func (d *Daemon) Hooks() *HookService           { return d.hooks }
 func (d *Daemon) Presence() *PresenceService    { return d.svc.Load().presence }
 func (d *Daemon) Pairing() *PairingService      { return d.svc.Load().pairing }
 func (d *Daemon) Status() *StatusService        { return d.svc.Load().status }

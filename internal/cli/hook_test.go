@@ -7,12 +7,10 @@ import (
 	"github.com/cravv/cravv-connect/internal/ipc"
 )
 
-func hookDaemon(t *testing.T, res ipc.HookCountsResult, gotCwd *string) *fakeDaemon {
+func hookDaemon(t *testing.T, res ipc.HookCountsResult, got *ipc.HookCountsParams) *fakeDaemon {
 	fd := newFakeDaemon(t)
 	fd.handle(ipc.MethodHookCounts, ipc.GateAllowWhenKilled, func(_ *ipc.ConnState, raw json.RawMessage) (any, error) {
-		var p ipc.HookCountsParams
-		json.Unmarshal(raw, &p)
-		*gotCwd = p.Cwd
+		json.Unmarshal(raw, got)
 		return res, nil
 	})
 	fd.start()
@@ -20,45 +18,49 @@ func hookDaemon(t *testing.T, res ipc.HookCountsResult, gotCwd *string) *fakeDae
 }
 
 func TestHookOutputs(t *testing.T) {
-	notice := "cravv-connect: 2 new messages from gpu-box. Use check_inbox."
+	notice := "cravv-connect: 2 new messages on link 1 from gpu-box. Call check_inbox."
 	withUnread := ipc.HookCountsResult{Notice: notice, Unread: 2}
-	onlyApprovals := ipc.HookCountsResult{Notice: "cravv-connect: 1 task awaiting your approval.", Approvals: 1}
+	blocking := ipc.HookCountsResult{Notice: notice, Unread: 2, Block: true, Reason: notice + " Then start the listener again."}
 	cases := []struct {
 		name  string
 		res   ipc.HookCountsResult
 		stdin string
 		args  []string
 		want  string
+		query ipc.HookCountsParams
 	}{
-		{"prompt submit prints line", withUnread, `{"cwd":"/p","hook_event_name":"UserPromptSubmit","prompt":"secret"}`, nil, notice + "\n"},
-		{"nothing unread prints nothing", ipc.HookCountsResult{}, `{"cwd":"/p","hook_event_name":"UserPromptSubmit"}`, nil, ""},
-		{"stop with unread continues", withUnread, `{"cwd":"/p","hook_event_name":"Stop","stop_hook_active":false}`, nil,
-			`{"hookSpecificOutput":{"additionalContext":"` + notice + `","hookEventName":"Stop"}}` + "\n"},
-		{"stop already continuing stays silent", withUnread, `{"cwd":"/p","hook_event_name":"Stop","stop_hook_active":true}`, nil, ""},
-		{"stop with only approvals stays silent", onlyApprovals, `{"cwd":"/p","hook_event_name":"Stop"}`, nil, ""},
-		{"approvals on prompt submit", onlyApprovals, `{"cwd":"/p","hook_event_name":"UserPromptSubmit"}`, nil, "cravv-connect: 1 task awaiting your approval.\n"},
-		{"codex notify passes json as argument", withUnread, "", []string{`{"type":"agent-turn-complete","cwd":"/p"}`}, notice + "\n"},
+		{"prompt submit prints line", withUnread, `{"cwd":"/p","session_id":"c1","hook_event_name":"UserPromptSubmit","prompt":"secret"}`, nil, notice + "\n",
+			ipc.HookCountsParams{Cwd: "/p", SessionID: "c1", Event: "UserPromptSubmit"}},
+		{"nothing prints nothing", ipc.HookCountsResult{}, `{"cwd":"/p","hook_event_name":"UserPromptSubmit"}`, nil, "",
+			ipc.HookCountsParams{Cwd: "/p", Event: "UserPromptSubmit"}},
+		{"stop blocks with a one-line reason", blocking, `{"cwd":"/p","session_id":"c1","hook_event_name":"Stop","stop_hook_active":true}`, nil,
+			`{"decision":"block","reason":"` + notice + ` Then start the listener again."}` + "\n",
+			ipc.HookCountsParams{Cwd: "/p", SessionID: "c1", Event: "Stop", StopHookActive: true}},
+		{"stop the daemon does not block stays silent", withUnread, `{"cwd":"/p","session_id":"c1","hook_event_name":"Stop"}`, nil, "",
+			ipc.HookCountsParams{Cwd: "/p", SessionID: "c1", Event: "Stop"}},
+		{"codex notify passes json as argument", withUnread, "", []string{`{"type":"agent-turn-complete","cwd":"/p"}`}, notice + "\n",
+			ipc.HookCountsParams{Cwd: "/p"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var cwd string
-			fd := hookDaemon(t, tc.res, &cwd)
+			var got ipc.HookCountsParams
+			fd := hookDaemon(t, tc.res, &got)
 			r := fd.runStdin(nil, tc.stdin, append([]string{"hook"}, tc.args...)...)
 			if r.code != 0 || r.stdout != tc.want || r.stderr != "" {
 				t.Fatalf("code %d stdout %q stderr %q", r.code, r.stdout, r.stderr)
 			}
-			if cwd != "/p" {
-				t.Fatalf("cwd %q", cwd)
+			if got != tc.query {
+				t.Fatalf("query %+v, want %+v", got, tc.query)
 			}
 		})
 	}
 }
 
 func TestHookFallsBackToWorkingDirAndIsSilentOnFailure(t *testing.T) {
-	var cwd string
-	fd := hookDaemon(t, ipc.HookCountsResult{}, &cwd)
-	if r := fd.runStdin(nil, "not json", "hook"); r.code != 0 || r.stdout != "" || cwd != "/work/glow-v2" {
-		t.Fatalf("%d %q cwd %q", r.code, r.stdout, cwd)
+	var got ipc.HookCountsParams
+	fd := hookDaemon(t, ipc.HookCountsResult{}, &got)
+	if r := fd.runStdin(nil, "not json", "hook"); r.code != 0 || r.stdout != "" || got.Cwd != "/work/glow-v2" {
+		t.Fatalf("%d %q cwd %q", r.code, r.stdout, got.Cwd)
 	}
 	down := newFakeDaemon(t) // never started
 	r := down.runStdin(nil, `{"cwd":"/p","hook_event_name":"UserPromptSubmit"}`, "hook")

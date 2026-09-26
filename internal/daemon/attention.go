@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/cravv/cravv-connect/internal/core"
@@ -57,10 +58,33 @@ type AttentionDeps struct {
 
 // AttentionService tells a listener that something is pending for its
 // session, and nothing else (v2 spec 3.2: the wake token reveals counts only).
-type AttentionService struct{ d AttentionDeps }
+type AttentionService struct {
+	d AttentionDeps
+
+	mu        sync.Mutex
+	listening map[string]int // session ID -> Listen calls waiting
+}
 
 // NewAttentionService wires the service.
-func NewAttentionService(d AttentionDeps) *AttentionService { return &AttentionService{d: d} }
+func NewAttentionService(d AttentionDeps) *AttentionService {
+	return &AttentionService{d: d, listening: map[string]int{}}
+}
+
+// Listening reports whether a listener is waiting for the session now.
+func (a *AttentionService) Listening(sessionID string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.listening[sessionID] > 0
+}
+
+func (a *AttentionService) track(sessionID string, delta int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.listening[sessionID] += delta
+	if a.listening[sessionID] <= 0 {
+		delete(a.listening, sessionID)
+	}
+}
 
 // pendingKinds maps inbox item kinds to the kinds the listener names.
 var pendingKinds = map[core.Kind]string{
@@ -138,6 +162,8 @@ func (a *AttentionService) Listen(ctx context.Context, wakeToken string, timeout
 	if err != nil {
 		return Counts{}, err
 	}
+	a.track(s.ID, 1)
+	defer a.track(s.ID, -1)
 	var expired <-chan time.Time
 	if timeout > 0 {
 		t := time.NewTimer(timeout)

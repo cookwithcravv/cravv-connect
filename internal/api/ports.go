@@ -151,10 +151,12 @@ type AuditPort interface {
 	Read(ctx context.Context, limit int) ([]audit.Event, error)
 }
 
-// HookPort returns unread counts keyed by local alias for the shared session
-// open in cwd, plus the number of tasks awaiting approval.
+// HookPort answers agent hooks for the shared session of the chat that
+// runs them. Bind records the agent's chat ID for a session when the chat
+// shares or reattaches it.
 type HookPort interface {
-	Counts(ctx context.Context, cwd string) (unread map[string]int, approvals int, err error)
+	Check(ctx context.Context, q ipc.HookCountsParams) (ipc.HookCountsResult, error)
+	Bind(ctx context.Context, agentSession, sessionID string)
 }
 
 // AuthPort checks the OS login password (implemented by *auth.Guard, which

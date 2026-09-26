@@ -32,6 +32,8 @@ type Session struct {
 	dial       func(ctx context.Context) (Conn, error)
 	projectDir string
 
+	agentSession string // the agent's own chat ID, for the chat's hooks ("" if unknown)
+
 	mu       sync.Mutex
 	agent    string
 	conn     Conn
@@ -41,6 +43,9 @@ type Session struct {
 	// session back with the reattach token.
 	pending bool
 }
+
+// AgentSession returns the agent's own chat ID ("" if unknown).
+func (s *Session) AgentSession() string { return s.agentSession }
 
 // NewSession returns an unconnected session for projectDir.
 func NewSession(dial func(ctx context.Context) (Conn, error), projectDir string) *Session {
@@ -112,7 +117,7 @@ func (s *Session) reattachLocked(ctx context.Context) {
 	if !s.pending || s.reattach == "" {
 		return
 	}
-	err := s.conn.Call(ctx, ipc.MethodSessionReattach, ipc.SessionReattachParams{ReattachToken: s.reattach}, nil)
+	err := s.conn.Call(ctx, ipc.MethodSessionReattach, ipc.SessionReattachParams{ReattachToken: s.reattach, AgentSession: s.agentSession}, nil)
 	switch {
 	case err == nil:
 		s.pending = false

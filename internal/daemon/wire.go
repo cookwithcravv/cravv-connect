@@ -242,6 +242,7 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 	d.attend = NewAttentionService(AttentionDeps{Sessions: d.shared, Inbox: db, Links: db, Tasks: db, Peers: db, Changes: d.inbox})
 	d.shared.AddObserver(d.attend)
 	d.codes = NewConfirmCodes(opts.Clock, opts.Desktop)
+	d.hooks = NewHookService(d.shared, d.attend)
 	d.svc.Store(d.build(identity))
 	// No connection survives a restart: every open session is away until
 	// its client reattaches (links stay open for the away grace).

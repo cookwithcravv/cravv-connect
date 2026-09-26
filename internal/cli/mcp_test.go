@@ -11,3 +11,17 @@ func TestMCPProjectDir(t *testing.T) {
 		t.Fatal(d)
 	}
 }
+
+func TestAgentSessionFromEnv(t *testing.T) {
+	env := map[string]string{"CLAUDE_SESSION_ID": "old", "CLAUDE_CODE_SESSION_ID": "d7f5456e-cc64-487c-aa67-8839a2db4980"}
+	if got := agentSessionFromEnv(func(k string) string { return env[k] }); got != "d7f5456e-cc64-487c-aa67-8839a2db4980" {
+		t.Fatal(got)
+	}
+	delete(env, "CLAUDE_CODE_SESSION_ID")
+	if got := agentSessionFromEnv(func(k string) string { return env[k] }); got != "old" {
+		t.Fatal(got)
+	}
+	if got := agentSessionFromEnv(func(string) string { return "" }); got != "" {
+		t.Fatal(got)
+	}
+}

@@ -16,6 +16,10 @@ type Options struct {
 	ProjectDir string
 	Version    string
 	Logger     *slog.Logger
+	// AgentSession is the agent's own chat ID (Claude Code sets
+	// CLAUDE_CODE_SESSION_ID for its MCP servers). The daemon records it
+	// with the shared session so the chat's hooks find it.
+	AgentSession string
 }
 
 // New builds the MCP server and its daemon session.
@@ -28,6 +32,7 @@ type Options struct {
 // records the name before any tool runs. ServerRequest.ClientInfo covers both.
 func New(opts Options) (*mcp.Server, *Session) {
 	sess := NewSession(opts.Dial, opts.ProjectDir)
+	sess.agentSession = opts.AgentSession
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)

@@ -31,6 +31,9 @@ func (h *handlers) sessionShare(ctx context.Context, cs *ipc.ConnState, p ipc.Se
 		return nil, err
 	}
 	cs.SetShared(id)
+	if p.AgentSession != "" {
+		h.p.Hook.Bind(ctx, p.AgentSession, id)
+	}
 	return res, nil
 }
 
@@ -60,6 +63,9 @@ func (h *handlers) sessionReattach(ctx context.Context, cs *ipc.ConnState, p ipc
 		return nil, err
 	}
 	cs.SetShared(id)
+	if p.AgentSession != "" {
+		h.p.Hook.Bind(ctx, p.AgentSession, id)
+	}
 	return view, nil
 }
 

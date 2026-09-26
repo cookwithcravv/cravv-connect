@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 
 	"github.com/cravv/cravv-connect/internal/ipc"
@@ -33,13 +34,29 @@ func newMCPCmd(env *Env) *cobra.Command {
 					}
 					return ipc.DialContext(ctx, p.Socket)
 				},
-				ProjectDir: dir,
-				Version:    Version,
+				ProjectDir:   dir,
+				Version:      Version,
+				AgentSession: agentSessionFromEnv(os.Getenv),
 			})
 		},
 	}
 	cmd.Flags().StringVar(&projectDir, "project-dir", "", "project folder for this session (default: the current directory)")
 	return cmd
+}
+
+// agentSessionEnv lists the variables agents set to their chat ID for the
+// MCP servers they start, in order of preference. Claude Code sets
+// CLAUDE_CODE_SESSION_ID (seen in 2.1.28x; not documented).
+var agentSessionEnv = []string{"CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"}
+
+// agentSessionFromEnv returns the agent's chat ID, or "".
+func agentSessionFromEnv(getenv func(string) string) string {
+	for _, k := range agentSessionEnv {
+		if v := getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // mcpProjectDir returns the absolute project folder: the flag, else the

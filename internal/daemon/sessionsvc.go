@@ -314,20 +314,6 @@ func (s *SessionService) VisibleTo(ctx context.Context, id string, peer core.Mac
 	return rec, nil
 }
 
-// ForProjectDir returns an open session shared from projectDir (hooks use it).
-func (s *SessionService) ForProjectDir(ctx context.Context, projectDir string) (store.SharedSession, bool) {
-	open, err := s.store.ListShared(ctx, core.SessionOpen)
-	if err != nil {
-		return store.SharedSession{}, false
-	}
-	for _, r := range open {
-		if r.ProjectDir == projectDir {
-			return r, true
-		}
-	}
-	return store.SharedSession{}, false
-}
-
 // SetCursor stores the session's inbox read position.
 func (s *SessionService) SetCursor(ctx context.Context, id string, cursor int64) error {
 	return s.store.SetSharedCursor(ctx, id, cursor)

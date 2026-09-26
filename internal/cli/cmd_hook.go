@@ -24,6 +24,7 @@ func init() { Register(newHookCmd) }
 // stdin; Codex `notify` passes it as the last argument).
 type hookInput struct {
 	Cwd            string `json:"cwd"`
+	SessionID      string `json:"session_id"`
 	HookEventName  string `json:"hook_event_name"`
 	StopHookActive bool   `json:"stop_hook_active"`
 }
@@ -48,21 +49,15 @@ func renderLine(_ hookInput, res ipc.HookCountsResult) string {
 }
 
 // renderStop handles Claude Code's Stop hook, whose plain stdout only reaches
-// the debug log. When there are unread messages it returns
-// hookSpecificOutput.additionalContext, which keeps the conversation going as
-// non-error "Stop hook feedback". It stays silent when stop_hook_active is set
-// (Claude is already continuing because of a stop hook), which prevents loops,
-// and when only approvals are pending (the agent cannot approve anything).
-func renderStop(in hookInput, res ipc.HookCountsResult) string {
-	if in.StopHookActive || res.Unread == 0 || res.Notice == "" {
+// the debug log. When the daemon says to keep the chat going (its shared
+// session has unhandled items), it returns {"decision":"block","reason":...}
+// with a one-line reason. The daemon never blocks for decisions only,
+// respects stop_hook_active and stops after 2 blocks in a row.
+func renderStop(_ hookInput, res ipc.HookCountsResult) string {
+	if !res.Block || res.Reason == "" {
 		return ""
 	}
-	b, err := json.Marshal(map[string]any{
-		"hookSpecificOutput": map[string]string{
-			"hookEventName":     in.HookEventName,
-			"additionalContext": res.Notice,
-		},
-	})
+	b, err := json.Marshal(map[string]string{"decision": "block", "reason": res.Reason})
 	if err != nil {
 		return ""
 	}
@@ -98,7 +93,8 @@ func hookOutput(ctx context.Context, env *Env, args []string) string {
 	}
 	defer c.Close()
 	var res ipc.HookCountsResult
-	if err := c.Call(ctx, ipc.MethodHookCounts, ipc.HookCountsParams{Cwd: in.Cwd}, &res); err != nil {
+	q := ipc.HookCountsParams{Cwd: in.Cwd, SessionID: in.SessionID, Event: in.HookEventName, StopHookActive: in.StopHookActive}
+	if err := c.Call(ctx, ipc.MethodHookCounts, q, &res); err != nil {
 		return ""
 	}
 	render, ok := hookRenderers[in.HookEventName]
