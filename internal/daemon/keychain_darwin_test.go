@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeKeychain emulates security(1) for one generic password item.
@@ -90,5 +91,34 @@ func TestKeychainIdentityStore(t *testing.T) {
 	}
 	if err := ks.Delete(ctx); err != nil || kc.item != "" {
 		t.Fatalf("delete: %v item=%q", err, kc.item)
+	}
+}
+
+// A locked Keychain can make security(1) wait for a dialog nobody sees (the
+// daemon runs without a GUI session): every call is bounded, and a timeout is
+// a clear error, never a silent new identity or a fallback write.
+func TestKeychainTimeout(t *testing.T) {
+	hang := func(ctx context.Context, _ ...string) ([]byte, int, error) {
+		<-ctx.Done()
+		return nil, -1, ctx.Err()
+	}
+	k := &KeychainIdentityStore{Fallback: SettingsIdentityStore{Settings: d2Store(t)}, run: hang, timeout: 20 * time.Millisecond}
+	ctx := context.Background()
+	start := time.Now()
+	if _, found, err := k.Load(ctx); err == nil || found || !errors.Is(err, ErrKeychainTimeout) ||
+		!strings.Contains(err.Error(), "unlock the login keychain") {
+		t.Fatalf("Load = found %v, err %v", found, err)
+	}
+	if err := k.Save(ctx, []byte("seed")); !errors.Is(err, ErrKeychainTimeout) {
+		t.Fatalf("Save err = %v", err)
+	}
+	if _, found, _ := k.Fallback.Load(ctx); found {
+		t.Fatal("Save wrote the fallback after a Keychain timeout")
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatal("calls were not bounded by the timeout")
+	}
+	if d := NewKeychainIdentityStore(nil).timeout; d != 10*time.Second {
+		t.Fatalf("default timeout %v", d)
 	}
 }

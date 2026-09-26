@@ -253,6 +253,9 @@ changes nothing.
     list for a moment. If the Keychain refuses the write, the seed goes to the
     fallback below; if the Keychain cannot be read and there is no fallback
     copy, the daemon refuses to start instead of creating a new identity.
+    Every `security` call has a 10 second limit: a locked Keychain can wait
+    for an unlock dialog a background daemon never shows, and a timeout
+    stops the start with an error (and never writes the fallback).
   - Linux (and the macOS fallback): the `settings` table of `store.db`,
     base64 encoded, protected only by file permissions.
 - **Prekeys:** private X25519 keys in `store.db`. The current one is rotated

@@ -266,6 +266,7 @@ Linux `login`, the default, or `system-auth`; any other value is refused).
 | `password check unavailable: ... built without PAM support` | Rebuild with cgo and the PAM headers (`make build`) and restart the daemon. |
 | `pam service not allowed` | Set `pam_service` in `config.toml` to an allowed value (see above), or remove it. |
 | `refusing to start: ... password verifier accepted a random password` | The daemon checks once per PAM service (and again after its `/etc/pam.d` file changes) that a random password is rejected. Your PAM service accepts anything; use one that checks your login password. |
+| `keychain locked or waiting for a dialog` (macOS) | The daemon could not read its identity from the login Keychain within 10 seconds. Unlock it (`security unlock-keychain ~/Library/Keychains/login.keychain-db`) or start the daemon from your logged-in session, then start it again. |
 | `too many failed password attempts; locked` | Five wrong passwords in a row lock it. Wait 15 minutes (restarting the daemon does not reset it). Every attempt is in `cravv-connect log`. |
 | `pairing failed: wrong code or the exchange was interrupted` | The code is burned. Run `cravv-connect pair` again for a new one. |
 | Sends to a peer say "paused" | You paused it: `cravv-connect resume-peer <alias>`. If `peers` shows "paused by peer", the other side paused you; your messages are held until they resume. |

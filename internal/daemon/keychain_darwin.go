@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/store"
 )
@@ -16,6 +17,15 @@ const (
 	keychainAccount  = "identity"
 	keychainNotFound = 44 // security(1) exit status for errSecItemNotFound
 )
+
+// KeychainTimeout bounds every security(1) call. A locked login Keychain can
+// make it wait for an unlock dialog that a daemon without a GUI session never
+// shows.
+const KeychainTimeout = 10 * time.Second
+
+// ErrKeychainTimeout is returned when security(1) does not answer in time.
+var ErrKeychainTimeout = errors.New("keychain locked or waiting for a dialog; unlock the login keychain " +
+	"(security unlock-keychain ~/Library/Keychains/login.keychain-db) or start the daemon from your logged-in session")
 
 // securityRunner runs /usr/bin/security and returns stdout and the exit status
 // (-1 when the command could not run at all).
@@ -41,11 +51,28 @@ func runSecurity(ctx context.Context, args ...string) ([]byte, int, error) {
 type KeychainIdentityStore struct {
 	Fallback IdentityStore
 	run      securityRunner
+	timeout  time.Duration // per security(1) call; 0 means KeychainTimeout
 }
 
 // NewKeychainIdentityStore builds a Keychain store with a fallback.
 func NewKeychainIdentityStore(fallback IdentityStore) *KeychainIdentityStore {
-	return &KeychainIdentityStore{Fallback: fallback, run: runSecurity}
+	return &KeychainIdentityStore{Fallback: fallback, run: runSecurity, timeout: KeychainTimeout}
+}
+
+// call runs security(1) with a deadline derived from ctx. When the deadline
+// (not ctx itself) ends the call, the error is ErrKeychainTimeout.
+func (k *KeychainIdentityStore) call(ctx context.Context, args ...string) ([]byte, int, error) {
+	d := k.timeout
+	if d <= 0 {
+		d = KeychainTimeout
+	}
+	cctx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+	out, code, err := k.run(cctx, args...)
+	if err != nil && ctx.Err() == nil && errors.Is(cctx.Err(), context.DeadlineExceeded) {
+		return out, code, fmt.Errorf("%w (security %s did not answer within %s)", ErrKeychainTimeout, args[0], d)
+	}
+	return out, code, err
 }
 
 // DefaultIdentityStore is the Keychain with the settings store as fallback.
@@ -57,7 +84,7 @@ func DefaultIdentityStore(settings store.SettingsStore) IdentityStore {
 // than "not found" with nothing in the fallback is an error, never a silent
 // new identity.
 func (k *KeychainIdentityStore) Load(ctx context.Context) ([]byte, bool, error) {
-	out, code, err := k.run(ctx, "find-generic-password", "-s", keychainService, "-a", keychainAccount, "-w")
+	out, code, err := k.call(ctx, "find-generic-password", "-s", keychainService, "-a", keychainAccount, "-w")
 	if err == nil {
 		seed, derr := base64.StdEncoding.DecodeString(strings.TrimSpace(string(out)))
 		if derr != nil {
@@ -69,6 +96,9 @@ func (k *KeychainIdentityStore) Load(ctx context.Context) ([]byte, bool, error) 
 	if ferr != nil || found {
 		return seed, found, ferr
 	}
+	if errors.Is(err, ErrKeychainTimeout) {
+		return nil, false, err
+	}
 	if code != keychainNotFound {
 		return nil, false, fmt.Errorf("keychain unavailable (unlock it or run the daemon in your login session): %w", err)
 	}
@@ -76,10 +106,13 @@ func (k *KeychainIdentityStore) Load(ctx context.Context) ([]byte, bool, error) 
 }
 
 // Save writes the Keychain item (updating it if present). If the Keychain
-// refuses, the seed goes to the fallback instead.
+// refuses, the seed goes to the fallback instead; if it times out, Save fails.
 func (k *KeychainIdentityStore) Save(ctx context.Context, seed []byte) error {
 	b64 := base64.StdEncoding.EncodeToString(seed)
-	if _, _, err := k.run(ctx, "add-generic-password", "-s", keychainService, "-a", keychainAccount, "-w", b64, "-U"); err != nil {
+	if _, _, err := k.call(ctx, "add-generic-password", "-s", keychainService, "-a", keychainAccount, "-w", b64, "-U"); err != nil {
+		if errors.Is(err, ErrKeychainTimeout) {
+			return err // the Keychain may hold an older seed: do not split the identity
+		}
 		return k.Fallback.Save(ctx, seed)
 	}
 	return k.Fallback.Delete(ctx)
@@ -87,7 +120,7 @@ func (k *KeychainIdentityStore) Save(ctx context.Context, seed []byte) error {
 
 // Delete removes the Keychain item and the fallback copy.
 func (k *KeychainIdentityStore) Delete(ctx context.Context) error {
-	if _, code, err := k.run(ctx, "delete-generic-password", "-s", keychainService, "-a", keychainAccount); err != nil && code != keychainNotFound {
+	if _, code, err := k.call(ctx, "delete-generic-password", "-s", keychainService, "-a", keychainAccount); err != nil && code != keychainNotFound {
 		return fmt.Errorf("keychain delete: %w", err)
 	}
 	return k.Fallback.Delete(ctx)
