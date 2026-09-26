@@ -227,9 +227,9 @@ func (r *reviewer) decide(ctx context.Context, p ipc.ReviewDecideParams) (string
 	err := r.c.Call(ctx, ipc.MethodReviewDecide, p, &res)
 	switch {
 	case ipc.IsKind(err, ipc.KindBadCode):
-		return "", fmt.Errorf("%s: that code is wrong or expired. Ask the human to read the newest cravv-connect notification; after %d wrong codes the item waits until its code expires", p.Item, 3)
+		return "", fmt.Errorf("%s: that code is wrong or expired. Ask the human to read the newest cravv-connect notification; after %d wrong codes the item can only be decided with the human's password", p.Item, 3)
 	case ipc.IsKind(err, ipc.KindCodeLocked):
-		return "", fmt.Errorf("%s: too many wrong codes. The human can decide in a terminal (cravv-connect links, cravv-connect approvals) or the %s, or wait 10 minutes and call review_pending again", p.Item, webUI)
+		return "", fmt.Errorf("%s: too many wrong codes, so no code works for it any more. The human decides with their password: in a terminal (cravv-connect links, cravv-connect approvals) or the %s", p.Item, webUI)
 	case err != nil:
 		return "", err
 	}
@@ -257,7 +257,7 @@ func (r *reviewer) fallback(ctx context.Context, it ipc.ReviewItemView) string {
 		return fmt.Sprintf("%s (%s from %s/%s): this machine cannot show a form or a notification. The human decides with their password: %s.",
 			it.Item, describe(it), it.Machine, it.Session, passwordPath(it))
 	case ipc.IsKind(err, ipc.KindCodeLocked):
-		return fmt.Sprintf("%s: too many wrong codes; the human decides with their password (%s) or waits 10 minutes.", it.Item, passwordPath(it))
+		return fmt.Sprintf("%s: too many wrong codes, so no code works for it any more; the human decides with their password (%s).", it.Item, passwordPath(it))
 	}
 	return fmt.Sprintf("%s: %v", it.Item, err)
 }

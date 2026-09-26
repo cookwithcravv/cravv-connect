@@ -109,6 +109,18 @@ func TestReviewIsScopedAndRateLimited(t *testing.T) {
 	if _, _, err := rv.Decide(ctx, trainer.Session.ID, item, cd); !errors.Is(err, ErrBadCode) {
 		t.Fatalf("accept with a code never shown: %v", err)
 	}
+	if err := rv.ShowCode(ctx, trainer.Session.ID, item); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := rv.Decide(ctx, trainer.Session.ID, item, cd); !errors.Is(err, ErrBadCode) {
+		t.Fatalf("accept with a wrong code: %v", err)
+	}
+	rv.d.Codes.mu.Lock()
+	counted := len(rv.d.Codes.wrong.Sessions[trainer.Session.ID])
+	rv.d.Codes.mu.Unlock()
+	if counted != 1 {
+		t.Fatalf("the wrong code counted %d times against the deciding session", counted)
+	}
 	if got := b.linkOf(t, a, in.ID); got.State != store.LinkPending {
 		t.Fatalf("still pending, got %s", got.State)
 	}

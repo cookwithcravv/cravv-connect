@@ -20,11 +20,13 @@ import (
 var (
 	errTestNoDesktop = errors.New("this machine cannot show desktop notifications")
 	errTestBadCode   = errors.New("wrong or expired confirmation code")
+	errTestLocked    = errors.New("too many wrong confirmation codes")
 )
 
 func init() {
 	ipc.RegisterErrorKind(errTestNoDesktop, ipc.KindNoDesktop)
 	ipc.RegisterErrorKind(errTestBadCode, ipc.KindBadCode)
+	ipc.RegisterErrorKind(errTestLocked, ipc.KindCodeLocked)
 }
 
 // Claude Code negotiates a protocol before 2026-07-28, on which a server
@@ -259,6 +261,12 @@ func TestReviewPendingTypedAnswers(t *testing.T) {
 	d.decErr = errTestBadCode
 	if text, isErr := callTool(t, cs, "review_pending", map[string]any{"item": "link-3", "decision": "accept", "code": "1111"}); !isErr || !strings.Contains(text, "wrong or expired") {
 		t.Fatalf("bad code: %v %q", isErr, text)
+	}
+	// A locked item stays locked: only the password path is offered.
+	d.decErr = errTestLocked
+	text, isErr = callTool(t, cs, "review_pending", map[string]any{"item": "link-3", "decision": "accept", "code": "1111"})
+	if !isErr || !strings.Contains(text, "password") || !strings.Contains(text, "cravv-connect ui") || strings.Contains(text, "wait") {
+		t.Fatalf("locked: %v %q", isErr, text)
 	}
 }
 

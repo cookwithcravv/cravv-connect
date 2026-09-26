@@ -132,6 +132,10 @@ func (s *ReviewService) Decide(ctx context.Context, session, id string, d Decide
 	if err != nil {
 		return store.Link{}, nil, err
 	}
+	if cd, ok := d.(CodeDecider); ok { // wrong codes count against this session
+		cd.Session = session
+		d = cd
+	}
 	if it.Task == nil {
 		l, err := s.d.LinkSvc.DecideVia(ctx, d, it.Link.Num)
 		if err == nil {
@@ -155,7 +159,7 @@ func (s *ReviewService) ShowCode(ctx context.Context, session, id string) error 
 	if err != nil {
 		return err
 	}
-	return s.d.Codes.Show(id, codeText(it))
+	return s.d.Codes.Show(session, id, codeText(it))
 }
 
 // codeText describes an item for its code notification.
@@ -190,10 +194,11 @@ func (a AnswerDecider) Decide(context.Context, DecisionRequest) (DecisionAnswer,
 // needs none (lowering never needs a gate). A code accepts a link at most
 // at tasks-ask: the chat tier cannot grant tasks-auto.
 type CodeDecider struct {
-	Codes  *ConfirmCodes
-	Item   string
-	Code   string
-	Answer DecisionAnswer
+	Codes   *ConfirmCodes
+	Session string // set by ReviewService.Decide
+	Item    string
+	Code    string
+	Answer  DecisionAnswer
 }
 
 // Decide checks the code and returns the answer.
@@ -204,7 +209,7 @@ func (c CodeDecider) Decide(_ context.Context, req DecisionRequest) (DecisionAns
 	if c.Code == "" {
 		return DecisionAnswer{}, ErrNoDecision
 	}
-	if err := c.Codes.Check(c.Item, c.Code); err != nil {
+	if err := c.Codes.Check(c.Session, c.Item, c.Code); err != nil {
 		return DecisionAnswer{}, err
 	}
 	ans := c.Answer
