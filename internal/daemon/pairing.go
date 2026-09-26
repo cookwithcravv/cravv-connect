@@ -110,7 +110,12 @@ func (s *PairingService) Close() { s.stop() }
 
 // Start creates a room and an invite and returns the bind code. The exchange runs in the
 // background until a joiner arrives or the room lifetime ends; Await waits for it.
-func (s *PairingService) Start(ctx context.Context) (pendingID, code string, err error) {
+// Start, Join and Finalize are human-only: unlocked must be true (the IPC connection's
+// unlock state), otherwise core.ErrAuthRequired.
+func (s *PairingService) Start(ctx context.Context, unlocked bool) (pendingID, code string, err error) {
+	if !unlocked {
+		return "", "", core.ErrAuthRequired
+	}
 	if s.base.Err() != nil {
 		return "", "", ErrPairingClosed
 	}
@@ -180,7 +185,10 @@ func (s *PairingService) Await(ctx context.Context, pendingID string) (Proposal,
 
 // Join runs the joiner side for a bind code. It needs no mailbox: the invite that lets this
 // machine register arrives in the creator's payload and is used by Finalize.
-func (s *PairingService) Join(ctx context.Context, code string) (Proposal, error) {
+func (s *PairingService) Join(ctx context.Context, code string, unlocked bool) (Proposal, error) {
+	if !unlocked {
+		return Proposal{}, core.ErrAuthRequired
+	}
 	c, err := bindcode.Parse(code)
 	if err != nil {
 		return Proposal{}, err
@@ -211,7 +219,10 @@ func (s *PairingService) Join(ctx context.Context, code string) (Proposal, error
 // Finalize stores the peer under alias with the chosen incoming trust, registers this
 // machine's mailbox first if needed (joiner), allows the peer on the relay, and audits.
 // It returns the alias actually used.
-func (s *PairingService) Finalize(ctx context.Context, pendingID, alias string, trust core.TrustLevel) (string, error) {
+func (s *PairingService) Finalize(ctx context.Context, pendingID, alias string, trust core.TrustLevel, unlocked bool) (string, error) {
+	if !unlocked {
+		return "", core.ErrAuthRequired
+	}
 	if !trust.Valid() {
 		return "", fmt.Errorf("invalid trust level %d", int(trust))
 	}

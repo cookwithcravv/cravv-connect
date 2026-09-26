@@ -111,7 +111,8 @@ Each method has a gate, checked before the handler in this order:
 
 The daemon checks the connection's unlock state again for every human-only
 action (`approvals.decide`, `files.accept`, `resume`, `allow_path.add`,
-`reset_identity`, and `peer.trust` when raising), so a missing unlock fails
+`reset_identity`, `pair.start`, `join.start`, `pair.finalize`, and
+`peer.trust` when raising), so a missing unlock fails
 with `auth_required` even if a gate were misconfigured.
 
 `auth.unlock` checks the OS login password of the user running the daemon

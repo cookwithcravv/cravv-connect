@@ -140,8 +140,8 @@ How it works:
   not stored anywhere.
 - The daemon checks the connection's unlock again inside each human-only
   action (approving or denying, accepting a file, raising trust, `resume`,
-  `allow-path`, `reset-identity`), so a missing check in one layer does not
-  open the gate. Pairing is checked at the socket.
+  `allow-path`, `reset-identity`, starting, joining and finalizing a
+  pairing), so a missing check in one layer does not open the gate.
 - After 5 wrong passwords in a row, every attempt fails for 15 minutes without
   reaching PAM. The count and lockout are stored in `store.db`, so restarting
   the daemon does not reset them; if that state cannot be read, the daemon

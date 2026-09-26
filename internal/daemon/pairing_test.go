@@ -206,14 +206,14 @@ func TestPairingFullExchange(t *testing.T) {
 	a := newPairSide(t, rooms, "Prith's MacBook", true)
 	b := newPairSide(t, rooms, "GPU Box", false) // joiner has no mailbox yet
 
-	pendingA, code, err := a.svc.Start(ctx)
+	pendingA, code, err := a.svc.Start(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := bindcode.Parse(code); err != nil {
 		t.Fatalf("code %q does not parse: %v", code, err)
 	}
-	propB, err := b.svc.Join(ctx, code)
+	propB, err := b.svc.Join(ctx, code, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,11 +228,11 @@ func TestPairingFullExchange(t *testing.T) {
 		t.Fatalf("suggested names %q / %q", propA.SuggestedName, propB.SuggestedName)
 	}
 
-	aliasA, err := a.svc.Finalize(ctx, pendingA, "", core.TrustAskFirst)
+	aliasA, err := a.svc.Finalize(ctx, pendingA, "", core.TrustAskFirst, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	aliasB, err := b.svc.Finalize(ctx, propB.PendingID, "My Mac", core.TrustAutonomous)
+	aliasB, err := b.svc.Finalize(ctx, propB.PendingID, "My Mac", core.TrustAutonomous, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,10 +266,10 @@ func TestPairingFullExchange(t *testing.T) {
 			t.Fatalf("audit = %v", s.audit.types())
 		}
 	}
-	if _, err := a.svc.Finalize(ctx, pendingA, "again", core.TrustAskFirst); !errors.Is(err, core.ErrNotFound) {
+	if _, err := a.svc.Finalize(ctx, pendingA, "again", core.TrustAskFirst, true); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("second finalize err = %v", err)
 	}
-	if _, err := newPairSide(t, rooms, "late", true).svc.Join(ctx, code); err == nil {
+	if _, err := newPairSide(t, rooms, "late", true).svc.Join(ctx, code, true); err == nil {
 		t.Fatal("a used code joined again")
 	}
 }
@@ -288,7 +288,7 @@ func TestPairingWrongCodeFailsBothAndBurnsRoom(t *testing.T) {
 	rooms := newMemRooms()
 	a := newPairSide(t, rooms, "a", true)
 	b := newPairSide(t, rooms, "b", false)
-	pendingA, code, err := a.svc.Start(ctx)
+	pendingA, code, err := a.svc.Start(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,13 +296,13 @@ func TestPairingWrongCodeFailsBothAndBurnsRoom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.svc.Join(ctx, wrongSecret(c).String()); !errors.Is(err, ErrPairingFailed) {
+	if _, err := b.svc.Join(ctx, wrongSecret(c).String(), true); !errors.Is(err, ErrPairingFailed) {
 		t.Fatalf("joiner err = %v, want ErrPairingFailed", err)
 	}
 	if _, err := a.svc.Await(ctx, pendingA); !errors.Is(err, ErrPairingFailed) {
 		t.Fatalf("creator err = %v, want ErrPairingFailed", err)
 	}
-	if _, err := b.svc.Join(ctx, code); err == nil {
+	if _, err := b.svc.Join(ctx, code, true); err == nil {
 		t.Fatal("room still usable after a failed attempt")
 	}
 	if n := len(a.peers.m) + len(b.peers.m); n != 0 {
@@ -322,11 +322,11 @@ func TestPairingTamperedPayloadFailsBoth(t *testing.T) {
 		}
 		a := newPairSide(t, rooms, "a", true)
 		b := newPairSide(t, rooms, "b", false)
-		pendingA, code, err := a.svc.Start(ctx)
+		pendingA, code, err := a.svc.Start(ctx, true)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := b.svc.Join(ctx, code); !errors.Is(err, ErrPairingFailed) {
+		if _, err := b.svc.Join(ctx, code, true); !errors.Is(err, ErrPairingFailed) {
 			t.Fatalf("tamper from creator=%v: joiner err = %v", fromCreator, err)
 		}
 		if _, err := a.svc.Await(ctx, pendingA); !errors.Is(err, ErrPairingFailed) {
@@ -340,11 +340,11 @@ func TestPairingExpiredPending(t *testing.T) {
 	rooms := newMemRooms()
 	a := newPairSide(t, rooms, "a", true)
 	b := newPairSide(t, rooms, "b", false)
-	pendingA, code, err := a.svc.Start(ctx)
+	pendingA, code, err := a.svc.Start(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	prop, err := b.svc.Join(ctx, code)
+	prop, err := b.svc.Join(ctx, code, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,10 +353,10 @@ func TestPairingExpiredPending(t *testing.T) {
 	}
 	a.clock.Advance(core.RoomTTL + time.Second)
 	b.clock.Advance(core.RoomTTL + time.Second)
-	if _, err := a.svc.Finalize(ctx, pendingA, "b", core.TrustAskFirst); !errors.Is(err, ErrPairingExpired) {
+	if _, err := a.svc.Finalize(ctx, pendingA, "b", core.TrustAskFirst, true); !errors.Is(err, ErrPairingExpired) {
 		t.Fatalf("creator finalize err = %v, want ErrPairingExpired", err)
 	}
-	if _, err := b.svc.Finalize(ctx, prop.PendingID, "a", core.TrustAskFirst); !errors.Is(err, ErrPairingExpired) {
+	if _, err := b.svc.Finalize(ctx, prop.PendingID, "a", core.TrustAskFirst, true); !errors.Is(err, ErrPairingExpired) {
 		t.Fatalf("joiner finalize err = %v, want ErrPairingExpired", err)
 	}
 	if len(b.reg.invites) != 0 {
@@ -366,7 +366,7 @@ func TestPairingExpiredPending(t *testing.T) {
 
 func TestPairingStartNeedsMailbox(t *testing.T) {
 	a := newPairSide(t, newMemRooms(), "a", false)
-	if _, _, err := a.svc.Start(context.Background()); !errors.Is(err, ErrOfflineForPairing) {
+	if _, _, err := a.svc.Start(context.Background(), true); !errors.Is(err, ErrOfflineForPairing) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -375,20 +375,20 @@ func TestPairingFinalizeValidation(t *testing.T) {
 	ctx := context.Background()
 	rooms := newMemRooms()
 	a := newPairSide(t, rooms, "a", true)
-	pendingA, _, err := a.svc.Start(ctx)
+	pendingA, _, err := a.svc.Start(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.svc.Finalize(ctx, pendingA, "x", core.TrustAskFirst); !errors.Is(err, ErrPairingInProgress) {
+	if _, err := a.svc.Finalize(ctx, pendingA, "x", core.TrustAskFirst, true); !errors.Is(err, ErrPairingInProgress) {
 		t.Fatalf("finalize before exchange err = %v", err)
 	}
-	if _, err := a.svc.Finalize(ctx, pendingA, "x", core.TrustLevel(7)); err == nil {
+	if _, err := a.svc.Finalize(ctx, pendingA, "x", core.TrustLevel(7), true); err == nil {
 		t.Fatal("invalid trust accepted")
 	}
-	if _, err := a.svc.Finalize(ctx, "nope", "x", core.TrustAskFirst); !errors.Is(err, core.ErrNotFound) {
+	if _, err := a.svc.Finalize(ctx, "nope", "x", core.TrustAskFirst, true); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("unknown pending err = %v", err)
 	}
-	if _, err := a.svc.Join(ctx, "not a code"); err == nil {
+	if _, err := a.svc.Join(ctx, "not a code", true); err == nil {
 		t.Fatal("garbage code accepted")
 	}
 	awaitCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
@@ -404,11 +404,11 @@ func TestPairingRejectsBadPeerRelayURL(t *testing.T) {
 	a := newPairSide(t, rooms, "a", true)
 	b := newPairSide(t, rooms, "b", false)
 	b.svc.cfg.RelayURL = "http://relay.attacker.example" // plaintext relay for a remote host
-	pendingA, code, err := a.svc.Start(ctx)
+	pendingA, code, err := a.svc.Start(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = b.svc.Join(ctx, code)
+	_, _ = b.svc.Join(ctx, code, true)
 	if _, err := a.svc.Await(ctx, pendingA); !errors.Is(err, ErrPairingFailed) {
 		t.Fatalf("creator accepted a plaintext remote relay URL: %v", err)
 	}
@@ -419,13 +419,13 @@ func TestPairingExpiryStartsWhenExchangeCompletes(t *testing.T) {
 	rooms := newMemRooms()
 	a := newPairSide(t, rooms, "a", true)
 	b := newPairSide(t, rooms, "b", false)
-	pendingA, code, err := a.svc.Start(ctx)
+	pendingA, code, err := a.svc.Start(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The joiner shows up late in the room lifetime.
 	a.clock.Advance(core.RoomTTL - time.Minute)
-	prop, err := b.svc.Join(ctx, code)
+	prop, err := b.svc.Join(ctx, code, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,10 +435,10 @@ func TestPairingExpiryStartsWhenExchangeCompletes(t *testing.T) {
 	// The human takes a few minutes to choose an alias: still valid.
 	a.clock.Advance(3 * time.Minute)
 	b.clock.Advance(3 * time.Minute)
-	if _, err := a.svc.Finalize(ctx, pendingA, "b", core.TrustAskFirst); err != nil {
+	if _, err := a.svc.Finalize(ctx, pendingA, "b", core.TrustAskFirst, true); err != nil {
 		t.Fatalf("creator finalize: %v", err)
 	}
-	if _, err := b.svc.Finalize(ctx, prop.PendingID, "a", core.TrustAskFirst); err != nil {
+	if _, err := b.svc.Finalize(ctx, prop.PendingID, "a", core.TrustAskFirst, true); err != nil {
 		t.Fatalf("joiner finalize: %v", err)
 	}
 }
@@ -446,7 +446,7 @@ func TestPairingExpiryStartsWhenExchangeCompletes(t *testing.T) {
 func TestPairingCloseStopsWaitingCreator(t *testing.T) {
 	ctx := context.Background()
 	a := newPairSide(t, newMemRooms(), "a", true)
-	pendingA, _, err := a.svc.Start(ctx)
+	pendingA, _, err := a.svc.Start(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +456,45 @@ func TestPairingCloseStopsWaitingCreator(t *testing.T) {
 	if _, err := a.svc.Await(awaitCtx, pendingA); !errors.Is(err, ErrPairingFailed) {
 		t.Fatalf("Await after Close err = %v, want ErrPairingFailed", err)
 	}
-	if _, _, err := a.svc.Start(ctx); err == nil {
+	if _, _, err := a.svc.Start(ctx, true); err == nil {
 		t.Fatal("Start after Close succeeded")
+	}
+}
+
+// Pairing is human-only: the daemon refuses every step without an unlocked
+// connection, independently of the IPC gate.
+func TestPairingNeedsUnlock(t *testing.T) {
+	ctx := context.Background()
+	rooms := newMemRooms()
+	a := newPairSide(t, rooms, "a", true)
+	b := newPairSide(t, rooms, "b", false)
+	if _, _, err := a.svc.Start(ctx, false); !errors.Is(err, core.ErrAuthRequired) {
+		t.Fatalf("Start locked err = %v", err)
+	}
+	pendingA, code, err := a.svc.Start(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.svc.Join(ctx, code, false); !errors.Is(err, core.ErrAuthRequired) {
+		t.Fatalf("Join locked err = %v", err)
+	}
+	prop, err := b.svc.Join(ctx, code, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.svc.Await(ctx, pendingA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.svc.Finalize(ctx, pendingA, "b", core.TrustAutonomous, false); !errors.Is(err, core.ErrAuthRequired) {
+		t.Fatalf("Finalize locked err = %v", err)
+	}
+	if peers, _ := a.peers.ListPeers(ctx); len(peers) != 0 {
+		t.Fatalf("locked finalize stored a peer: %+v", peers)
+	}
+	if _, err := a.svc.Finalize(ctx, pendingA, "b", core.TrustAutonomous, true); err != nil {
+		t.Fatalf("unlocked finalize after a locked attempt: %v", err)
+	}
+	if _, err := b.svc.Finalize(ctx, prop.PendingID, "a", core.TrustAskFirst, true); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -69,11 +69,13 @@ type PeerPort interface {
 }
 
 // PairingPort runs the bind-code flow on both sides.
+// Start, Join and Finalize take unlocked, the IPC connection's unlock state,
+// so the daemon enforces the human-only gate as well.
 type PairingPort interface {
-	Start(ctx context.Context) (ipc.PairStartResult, error)
+	Start(ctx context.Context, unlocked bool) (ipc.PairStartResult, error)
 	Await(ctx context.Context, pendingID string) (ipc.PendingPeerResult, error)
-	Join(ctx context.Context, code string) (ipc.PendingPeerResult, error)
-	Finalize(ctx context.Context, pendingID, alias string, trust core.TrustLevel) (string, error)
+	Join(ctx context.Context, code string, unlocked bool) (ipc.PendingPeerResult, error)
+	Finalize(ctx context.Context, pendingID, alias string, trust core.TrustLevel, unlocked bool) (string, error)
 }
 
 // ControlPort holds machine-wide controls. AddAllowPath validates the

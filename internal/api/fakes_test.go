@@ -227,16 +227,25 @@ func (f fPeers) SetTrust(_ context.Context, _ string, l core.TrustLevel, _ bool)
 
 type fPairing struct{ *world }
 
-func (fPairing) Start(context.Context) (ipc.PairStartResult, error) {
+func (fPairing) Start(_ context.Context, unlocked bool) (ipc.PairStartResult, error) {
+	if !unlocked {
+		return ipc.PairStartResult{}, core.ErrAuthRequired
+	}
 	return ipc.PairStartResult{PendingID: "P1", Code: "CRAVV-7K3F-9QXM-TR2A"}, nil
 }
 func (fPairing) Await(_ context.Context, id string) (ipc.PendingPeerResult, error) {
 	return ipc.PendingPeerResult{PendingID: id, SuggestedName: "gpu-box", MachineID: "m"}, nil
 }
-func (fPairing) Join(context.Context, string) (ipc.PendingPeerResult, error) {
+func (fPairing) Join(_ context.Context, _ string, unlocked bool) (ipc.PendingPeerResult, error) {
+	if !unlocked {
+		return ipc.PendingPeerResult{}, core.ErrAuthRequired
+	}
 	return ipc.PendingPeerResult{PendingID: "P2", SuggestedName: "mac", MachineID: "m"}, nil
 }
-func (fPairing) Finalize(_ context.Context, _, alias string, _ core.TrustLevel) (string, error) {
+func (fPairing) Finalize(_ context.Context, _, alias string, _ core.TrustLevel, unlocked bool) (string, error) {
+	if !unlocked {
+		return "", core.ErrAuthRequired
+	}
 	return alias, nil
 }
 

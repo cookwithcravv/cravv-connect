@@ -616,12 +616,12 @@ func TestCloseAndResetStopPairing(t *testing.T) {
 	if err := d.ResetIdentity(ctx, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := old.Start(ctx); !errors.Is(err, ErrPairingClosed) {
+	if _, _, err := old.Start(ctx, true); !errors.Is(err, ErrPairingClosed) {
 		t.Fatalf("old pairing service after reset: %v", err)
 	}
 	cur := d.Pairing()
 	d.Close()
-	if _, _, err := cur.Start(ctx); !errors.Is(err, ErrPairingClosed) {
+	if _, _, err := cur.Start(ctx, true); !errors.Is(err, ErrPairingClosed) {
 		t.Fatalf("pairing after Close: %v", err)
 	}
 }

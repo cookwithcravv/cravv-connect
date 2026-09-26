@@ -176,8 +176,8 @@ func proposal(p daemon.Proposal, err error) (ipc.PendingPeerResult, error) {
 	return ipc.PendingPeerResult{PendingID: p.PendingID, SuggestedName: p.SuggestedName, MachineID: string(p.MachineID)}, nil
 }
 
-func (a pairing) Start(ctx context.Context) (ipc.PairStartResult, error) {
-	id, code, err := a.d.Pairing().Start(ctx)
+func (a pairing) Start(ctx context.Context, unlocked bool) (ipc.PairStartResult, error) {
+	id, code, err := a.d.Pairing().Start(ctx, unlocked)
 	if err != nil {
 		return ipc.PairStartResult{}, err
 	}
@@ -186,11 +186,11 @@ func (a pairing) Start(ctx context.Context) (ipc.PairStartResult, error) {
 func (a pairing) Await(ctx context.Context, id string) (ipc.PendingPeerResult, error) {
 	return proposal(a.d.Pairing().Await(ctx, id))
 }
-func (a pairing) Join(ctx context.Context, code string) (ipc.PendingPeerResult, error) {
-	return proposal(a.d.Pairing().Join(ctx, code))
+func (a pairing) Join(ctx context.Context, code string, unlocked bool) (ipc.PendingPeerResult, error) {
+	return proposal(a.d.Pairing().Join(ctx, code, unlocked))
 }
-func (a pairing) Finalize(ctx context.Context, id, alias string, trust core.TrustLevel) (string, error) {
-	return a.d.Pairing().Finalize(ctx, id, alias, trust)
+func (a pairing) Finalize(ctx context.Context, id, alias string, trust core.TrustLevel, unlocked bool) (string, error) {
+	return a.d.Pairing().Finalize(ctx, id, alias, trust, unlocked)
 }
 
 type control struct{ d *daemon.Daemon }
