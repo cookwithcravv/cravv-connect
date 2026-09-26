@@ -13,7 +13,7 @@ import (
 )
 
 const taskCols = `id, direction, peer, from_session, to_session, instructions, state, claimed_by,
-	notes_json, result, result_files_json, files_json, created_at, updated_at, expires_at`
+	notes_json, result, result_files_json, files_json, created_at, updated_at, expires_at, link_id`
 
 func (d *DB) PutTask(ctx context.Context, t store.Task) error {
 	return upsertTask(ctx, d.sql, t)
@@ -33,16 +33,17 @@ func upsertTask(ctx context.Context, ex execer, t store.Task) error {
 		return err
 	}
 	_, err = ex.ExecContext(ctx, `
-INSERT INTO tasks (`+taskCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO tasks (`+taskCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET direction = excluded.direction, peer = excluded.peer,
 	from_session = excluded.from_session, to_session = excluded.to_session,
 	instructions = excluded.instructions, state = excluded.state, claimed_by = excluded.claimed_by,
 	notes_json = excluded.notes_json, result = excluded.result,
 	result_files_json = excluded.result_files_json, files_json = excluded.files_json,
-	created_at = excluded.created_at, updated_at = excluded.updated_at, expires_at = excluded.expires_at`,
+	created_at = excluded.created_at, updated_at = excluded.updated_at, expires_at = excluded.expires_at,
+	link_id = excluded.link_id`,
 		t.ID, string(t.Direction), string(t.Peer), t.FromSession, t.ToSession, t.Instructions,
 		string(t.State), t.ClaimedBy, string(notes), t.Result, string(rfiles), string(files),
-		toMS(t.CreatedAt), toMS(t.UpdatedAt), toMS(t.ExpiresAt))
+		toMS(t.CreatedAt), toMS(t.UpdatedAt), toMS(t.ExpiresAt), t.LinkID)
 	return err
 }
 
@@ -104,6 +105,10 @@ func (d *DB) ListTasks(ctx context.Context, f store.TaskFilter) ([]store.Task, e
 		where = append(where, "peer = ?")
 		args = append(args, string(f.Peer))
 	}
+	if f.LinkID != "" {
+		where = append(where, "link_id = ?")
+		args = append(args, f.LinkID)
+	}
 	if !f.ExpiredBefore.IsZero() {
 		where = append(where, "expires_at <> 0 AND expires_at <= ?")
 		args = append(args, toMS(f.ExpiredBefore))
@@ -137,7 +142,7 @@ func scanTask(s rowScanner) (store.Task, error) {
 		createdAt, updatedAt, expiresAt int64
 	)
 	if err := s.Scan(&t.ID, &dir, &peer, &t.FromSession, &t.ToSession, &t.Instructions, &state,
-		&t.ClaimedBy, &notes, &t.Result, &rfiles, &files, &createdAt, &updatedAt, &expiresAt); err != nil {
+		&t.ClaimedBy, &notes, &t.Result, &rfiles, &files, &createdAt, &updatedAt, &expiresAt, &t.LinkID); err != nil {
 		return store.Task{}, notFound(err)
 	}
 	if err := json.Unmarshal([]byte(notes), &t.Notes); err != nil {

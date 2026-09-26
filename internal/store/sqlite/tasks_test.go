@@ -199,3 +199,24 @@ func TestListTasksFilters(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskLinkIDRoundTripAndFilter(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	for _, tk := range []store.Task{
+		{ID: "T1", Direction: store.TaskInbound, Peer: "m1", LinkID: "L1", State: core.TaskQueued, CreatedAt: t0},
+		{ID: "T2", Direction: store.TaskInbound, Peer: "m1", LinkID: "L2", State: core.TaskQueued, CreatedAt: t0},
+	} {
+		if err := db.PutTask(ctx, tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := db.GetTask(ctx, "T1")
+	if err != nil || got.LinkID != "L1" {
+		t.Fatalf("GetTask = %+v, %v", got, err)
+	}
+	list, err := db.ListTasks(ctx, store.TaskFilter{LinkID: "L2"})
+	if err != nil || len(list) != 1 || list[0].ID != "T2" {
+		t.Fatalf("ListTasks(LinkID) = %+v, %v", list, err)
+	}
+}

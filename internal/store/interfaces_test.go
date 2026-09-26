@@ -24,10 +24,20 @@ func TestPersistedEnumValuesAreStable(t *testing.T) {
 		{string(FileOffered), "offered"}, {string(FileHeld), "held"}, {string(FileDownloading), "downloading"},
 		{string(FileDone), "done"}, {string(FileFailed), "failed"}, {string(FileDeclined), "declined"},
 		{string(FileUploading), "uploading"}, {string(FileSent), "sent"},
+		{string(LinkInbound), "in"}, {string(LinkOutbound), "out"},
+		{string(LinkPending), "pending"}, {string(LinkActive), "active"}, {string(LinkClosed), "closed"},
 	}
 	for _, p := range pairs {
 		if p[0] != p[1] {
 			t.Errorf("got %q, want %q", p[0], p[1])
+		}
+	}
+}
+
+func TestLinkOpen(t *testing.T) {
+	for st, want := range map[LinkState]bool{LinkPending: true, LinkActive: true, LinkClosed: false} {
+		if got := (Link{State: st}).Open(); got != want {
+			t.Errorf("Link{State: %s}.Open() = %v, want %v", st, got, want)
 		}
 	}
 }

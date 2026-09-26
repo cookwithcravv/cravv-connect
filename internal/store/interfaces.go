@@ -90,6 +90,7 @@ type InboxItem struct {
 	From        core.MachineID
 	FromSession string
 	ToSession   string // "" = machine-wide
+	LinkID      string // the link the item arrived on ("" for v1 items)
 	Kind        core.Kind
 	Body        json.RawMessage
 	TaskID      string
@@ -115,6 +116,13 @@ type InboxStore interface {
 	// HasInboxMsg reports whether any item carries msgID (handlers use it to
 	// finish a delivery that failed after their own store write).
 	HasInboxMsg(ctx context.Context, msgID string) (bool, error)
+	// SessionItems returns items addressed to exactly this shared session
+	// (ToSession == session) with seq > after, ascending, at most limit.
+	SessionItems(ctx context.Context, session string, after int64, limit int) ([]InboxItem, error)
+	// SessionUnread counts SessionItems(session, after), in total and per sender.
+	SessionUnread(ctx context.Context, session string, after int64) (int, map[core.MachineID]int, error)
+	// DeleteSessionItems deletes the session's items from one link with seq > after.
+	DeleteSessionItems(ctx context.Context, session, linkID string, after int64) (int, error)
 }
 
 type SessionRecord struct {
@@ -153,6 +161,7 @@ type Task struct {
 	Peer         core.MachineID
 	FromSession  string // sender session (inbound) / local session (outbound)
 	ToSession    string
+	LinkID       string // the link the task travels on ("" for v1 tasks)
 	Instructions string
 	State        core.TaskState
 	ClaimedBy    string
@@ -181,6 +190,7 @@ type TaskFilter struct {
 	States        []core.TaskState
 	ClaimedBy     string
 	Peer          core.MachineID
+	LinkID        string
 	ExpiredBefore time.Time // ExpiresAt != zero AND ExpiresAt <= this
 }
 
@@ -209,6 +219,8 @@ type FileRecord struct {
 	SHA256    []byte
 	Key       []byte
 	TaskID    string
+	LinkID    string // the link the file travels on ("" for v1 files)
+	Session   string // local shared session ID ("" for v1 files)
 	State     FileState
 	LocalPath string
 	NextChunk uint32 // resume point
@@ -261,6 +273,8 @@ type Store interface {
 	OutboxStore
 	InboxStore
 	SessionStore
+	SharedSessionStore
+	LinkStore
 	TaskStore
 	FileStore
 	DedupStore

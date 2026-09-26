@@ -121,6 +121,55 @@ DELETE FROM inbox WHERE kind = 'chat' AND msg_id != '' AND seq NOT IN (
 	SELECT MIN(seq) FROM inbox WHERE kind = 'chat' AND msg_id != '' GROUP BY msg_id, to_session);
 CREATE UNIQUE INDEX inbox_chat_once ON inbox(msg_id, to_session) WHERE kind = 'chat' AND msg_id != '';
 `,
+	// v2: shared sessions, links, and the link every inbox item, task and
+	// file travels on. Items, tasks and files from v1 keep link_id ''.
+	`
+CREATE TABLE shared_sessions (
+	id              TEXT PRIMARY KEY,
+	name            TEXT NOT NULL,
+	purpose         TEXT NOT NULL,
+	kind            TEXT NOT NULL,
+	agent           TEXT NOT NULL,
+	project_dir     TEXT NOT NULL,
+	visibility_json TEXT NOT NULL,
+	state           TEXT NOT NULL,
+	reattach_hash   TEXT NOT NULL,
+	wake_hash       TEXT NOT NULL,
+	cursor          INTEGER NOT NULL,
+	created_at      INTEGER NOT NULL,
+	state_since     INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX shared_sessions_live_name ON shared_sessions(name) WHERE state != 'closed';
+CREATE INDEX shared_sessions_wake ON shared_sessions(wake_hash);
+CREATE INDEX shared_sessions_reattach ON shared_sessions(reattach_hash);
+CREATE TABLE links (
+	num            INTEGER PRIMARY KEY AUTOINCREMENT,
+	peer           TEXT NOT NULL,
+	link_id        TEXT NOT NULL,
+	direction      TEXT NOT NULL,
+	session_id     TEXT NOT NULL,
+	remote_session TEXT NOT NULL,
+	remote_name    TEXT NOT NULL,
+	remote_purpose TEXT NOT NULL,
+	permission_in  TEXT NOT NULL,
+	permission_out TEXT NOT NULL,
+	proposed       TEXT NOT NULL,
+	note           TEXT NOT NULL,
+	state          TEXT NOT NULL,
+	remote_away    INTEGER NOT NULL,
+	reason         TEXT NOT NULL,
+	created_at     INTEGER NOT NULL,
+	updated_at     INTEGER NOT NULL,
+	expires_at     INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX links_peer_id ON links(peer, link_id);
+CREATE INDEX links_session ON links(session_id, state);
+ALTER TABLE inbox ADD COLUMN link_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN link_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE files ADD COLUMN link_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE files ADD COLUMN session_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX tasks_link ON tasks(link_id);
+`,
 }
 
 // migrate creates schema_migrations and applies every migration whose

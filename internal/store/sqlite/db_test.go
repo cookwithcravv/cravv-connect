@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,27 +160,15 @@ func TestTransactionsBeginImmediate(t *testing.T) {
 func TestChatUniqueMigrationDropsDuplicates(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "store.db")
-	db, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Roll the last migration back to look like the previous schema.
-	for _, q := range []string{
-		`DROP INDEX inbox_chat_once`,
-		fmt.Sprintf(`DELETE FROM schema_migrations WHERE version = %d`, len(migrations)),
-	} {
-		if _, err := db.sql.ExecContext(ctx, q); err != nil {
-			t.Fatal(err)
-		}
-	}
+	raw := openAtVersion(t, path, 2) // the schema before inbox_chat_once
 	for _, id := range []string{"M1", "M1", "M2"} {
-		if _, err := db.sql.ExecContext(ctx, `INSERT INTO inbox (msg_id, from_machine, from_session, to_session, kind, body, task_id, note, received_at)
+		if _, err := raw.ExecContext(ctx, `INSERT INTO inbox (msg_id, from_machine, from_session, to_session, kind, body, task_id, note, received_at)
 VALUES (?, 'P', '', '', 'chat', '{}', '', '', 0)`, id); err != nil {
 			t.Fatal(err)
 		}
 	}
-	db.Close()
-	db, err = Open(path)
+	raw.Close()
+	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -190,4 +177,27 @@ VALUES (?, 'P', '', '', 'chat', '{}', '', '', 0)`, id); err != nil {
 	if err := db.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbox`).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("rows after migration = %d, %v", n, err)
 	}
+}
+
+// openAtVersion creates a database with only the first v migrations applied,
+// the way an older release left it.
+func openAtVersion(t *testing.T, path string, v int) *sql.DB {
+	t.Helper()
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw.SetMaxOpenConns(1)
+	if _, err := raw.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < v; i++ {
+		if _, err := raw.Exec(migrations[i]); err != nil {
+			t.Fatalf("migration %d: %v", i+1, err)
+		}
+		if _, err := raw.Exec(`INSERT INTO schema_migrations(version) VALUES (?)`, i+1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return raw
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/cravv/cravv-connect/internal/store"
 )
 
-const inboxCols = `seq, msg_id, from_machine, from_session, to_session, kind, body, task_id, note, received_at, read_by_any`
+const inboxCols = `seq, msg_id, from_machine, from_session, to_session, kind, body, task_id, note, received_at, read_by_any, link_id`
 
 // AddItem inserts an item. A chat whose (msg_id, to_session) is already
 // stored is not inserted again; the existing item's seq is returned.
@@ -23,10 +23,10 @@ func (d *DB) AddItem(ctx context.Context, it store.InboxItem) (int64, error) {
 	var seq int64
 	err := inTx(ctx, d.sql, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `
-INSERT INTO inbox (msg_id, from_machine, from_session, to_session, kind, body, task_id, note, received_at, read_by_any)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+INSERT INTO inbox (msg_id, from_machine, from_session, to_session, kind, body, task_id, note, received_at, read_by_any, link_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
 			it.MsgID, string(it.From), it.FromSession, it.ToSession, string(it.Kind), body,
-			it.TaskID, it.Note, toMS(it.ReceivedAt), boolInt(it.ReadByAny))
+			it.TaskID, it.Note, toMS(it.ReceivedAt), boolInt(it.ReadByAny), it.LinkID)
 		if err != nil {
 			return err
 		}
@@ -93,8 +93,8 @@ func (d *DB) RedirectOrphans(ctx context.Context, session string, note string) (
 	var n int
 	err := inTx(ctx, d.sql, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `
-INSERT INTO inbox (msg_id, from_machine, from_session, to_session, kind, body, task_id, note, received_at, read_by_any)
-SELECT msg_id, from_machine, from_session, '', kind, body, task_id, ?, received_at, 0
+INSERT INTO inbox (msg_id, from_machine, from_session, to_session, kind, body, task_id, note, received_at, read_by_any, link_id)
+SELECT msg_id, from_machine, from_session, '', kind, body, task_id, ?, received_at, 0, link_id
 FROM inbox WHERE to_session = ? ORDER BY seq`, note, session)
 		if err != nil {
 			return err
@@ -159,6 +159,68 @@ func (d *DB) HasInboxMsg(ctx context.Context, msgID string) (bool, error) {
 	return n == 1, err
 }
 
+// SessionItems returns the items addressed to exactly this shared session.
+func (d *DB) SessionItems(ctx context.Context, session string, after int64, limit int) ([]store.InboxItem, error) {
+	if session == "" {
+		return nil, nil
+	}
+	rows, err := d.sql.QueryContext(ctx, `SELECT `+inboxCols+` FROM inbox
+WHERE to_session = ? AND seq > ? ORDER BY seq LIMIT ?`, session, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []store.InboxItem
+	for rows.Next() {
+		it, err := scanInbox(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// SessionUnread counts the session's items after the cursor, per sender.
+func (d *DB) SessionUnread(ctx context.Context, session string, after int64) (int, map[core.MachineID]int, error) {
+	per := map[core.MachineID]int{}
+	if session == "" {
+		return 0, per, nil
+	}
+	rows, err := d.sql.QueryContext(ctx, `SELECT from_machine, COUNT(*) FROM inbox
+WHERE to_session = ? AND seq > ? GROUP BY from_machine`, session, after)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+	total := 0
+	for rows.Next() {
+		var (
+			from string
+			n    int
+		)
+		if err := rows.Scan(&from, &n); err != nil {
+			return 0, nil, err
+		}
+		per[core.MachineID(from)] = n
+		total += n
+	}
+	return total, per, rows.Err()
+}
+
+// DeleteSessionItems drops the session's unread items from one link.
+func (d *DB) DeleteSessionItems(ctx context.Context, session, linkID string, after int64) (int, error) {
+	if session == "" || linkID == "" {
+		return 0, nil
+	}
+	res, err := d.sql.ExecContext(ctx, `DELETE FROM inbox WHERE to_session = ? AND link_id = ? AND seq > ?`,
+		session, linkID, after)
+	if err != nil {
+		return 0, err
+	}
+	return affected(res)
+}
+
 func scanInbox(s rowScanner) (store.InboxItem, error) {
 	var (
 		it         store.InboxItem
@@ -168,7 +230,7 @@ func scanInbox(s rowScanner) (store.InboxItem, error) {
 		read       int
 	)
 	if err := s.Scan(&it.Seq, &it.MsgID, &from, &it.FromSession, &it.ToSession, &kind, &body,
-		&it.TaskID, &it.Note, &received, &read); err != nil {
+		&it.TaskID, &it.Note, &received, &read, &it.LinkID); err != nil {
 		return store.InboxItem{}, notFound(err)
 	}
 	it.From = core.MachineID(from)

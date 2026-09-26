@@ -282,3 +282,44 @@ func TestAddItemChatIsIdempotent(t *testing.T) {
 		t.Fatalf("file notices = %d, %v", n, err)
 	}
 }
+
+func TestSessionItemsAreScopedToOneSession(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	add := func(msg, to, link string) int64 {
+		seq, err := db.AddItem(ctx, store.InboxItem{MsgID: msg, From: "m1", ToSession: to, LinkID: link,
+			Kind: core.KindChat, Body: []byte(`{}`), ReceivedAt: t0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return seq
+	}
+	add("M0", "", "") // a v1 machine-wide item: never shown to a shared session
+	s1 := add("M1", "S1", "L1")
+	add("M2", "S2", "L2")
+	add("M3", "S1", "L3")
+	items, err := db.SessionItems(ctx, "S1", 0, 10)
+	if err != nil || len(items) != 2 || items[0].MsgID != "M1" || items[1].MsgID != "M3" || items[0].LinkID != "L1" {
+		t.Fatalf("SessionItems(S1) = %+v, %v", items, err)
+	}
+	if items, _ := db.SessionItems(ctx, "S1", s1, 10); len(items) != 1 || items[0].MsgID != "M3" {
+		t.Fatalf("after cursor = %+v", items)
+	}
+	if items, _ := db.SessionItems(ctx, "", 0, 10); len(items) != 0 {
+		t.Fatalf("empty session matched %+v", items)
+	}
+	total, per, err := db.SessionUnread(ctx, "S1", 0)
+	if err != nil || total != 2 || per["m1"] != 2 {
+		t.Fatalf("SessionUnread = %d %v %v", total, per, err)
+	}
+	n, err := db.DeleteSessionItems(ctx, "S1", "L3", s1)
+	if err != nil || n != 1 {
+		t.Fatalf("DeleteSessionItems = %d, %v", n, err)
+	}
+	if n, _ := db.DeleteSessionItems(ctx, "S1", "L1", s1); n != 0 {
+		t.Fatalf("an item at or before the cursor was deleted")
+	}
+	if total, _, _ := db.SessionUnread(ctx, "S1", 0); total != 1 {
+		t.Fatalf("unread after delete = %d", total)
+	}
+}

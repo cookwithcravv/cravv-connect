@@ -10,7 +10,7 @@ import (
 )
 
 const fileCols = `file_id, direction, peer, msg_id, blob_id, name, size, chunks, sha256, key,
-	task_id, state, local_path, next_chunk, attempts, reason, created_at`
+	task_id, state, local_path, next_chunk, attempts, reason, created_at, link_id, session_id`
 
 func (d *DB) PutFile(ctx context.Context, f store.FileRecord) error {
 	return upsertFile(ctx, d.sql, f)
@@ -18,15 +18,16 @@ func (d *DB) PutFile(ctx context.Context, f store.FileRecord) error {
 
 func upsertFile(ctx context.Context, ex execer, f store.FileRecord) error {
 	_, err := ex.ExecContext(ctx, `
-INSERT INTO files (`+fileCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO files (`+fileCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(file_id) DO UPDATE SET direction = excluded.direction, peer = excluded.peer,
 	msg_id = excluded.msg_id, blob_id = excluded.blob_id, name = excluded.name, size = excluded.size,
 	chunks = excluded.chunks, sha256 = excluded.sha256, key = excluded.key, task_id = excluded.task_id,
 	state = excluded.state, local_path = excluded.local_path, next_chunk = excluded.next_chunk,
-	attempts = excluded.attempts, reason = excluded.reason, created_at = excluded.created_at`,
+	attempts = excluded.attempts, reason = excluded.reason, created_at = excluded.created_at,
+	link_id = excluded.link_id, session_id = excluded.session_id`,
 		f.FileID, string(f.Direction), string(f.Peer), f.MsgID, f.BlobID, f.Name, f.Size, int64(f.Chunks),
 		f.SHA256, f.Key, f.TaskID, string(f.State), f.LocalPath, int64(f.NextChunk), f.Attempts, f.Reason,
-		toMS(f.CreatedAt))
+		toMS(f.CreatedAt), f.LinkID, f.Session)
 	return err
 }
 
@@ -114,7 +115,8 @@ func scanFile(s rowScanner) (store.FileRecord, error) {
 		createdAt         int64
 	)
 	if err := s.Scan(&f.FileID, &dir, &peer, &f.MsgID, &f.BlobID, &f.Name, &f.Size, &chunks, &f.SHA256,
-		&f.Key, &f.TaskID, &state, &f.LocalPath, &nextChunk, &f.Attempts, &f.Reason, &createdAt); err != nil {
+		&f.Key, &f.TaskID, &state, &f.LocalPath, &nextChunk, &f.Attempts, &f.Reason, &createdAt,
+		&f.LinkID, &f.Session); err != nil {
 		return store.FileRecord{}, notFound(err)
 	}
 	f.Direction = store.TaskDirection(dir)

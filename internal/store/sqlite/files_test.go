@@ -158,3 +158,17 @@ func TestPurgeFilesBeforeKeepsActiveRecords(t *testing.T) {
 		t.Fatalf("left = %v, want %v", ids, want)
 	}
 }
+
+func TestFileLinkFieldsRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	f := store.FileRecord{FileID: "F1", Direction: store.TaskInbound, Peer: "m1", Name: "a.txt", State: store.FileHeld,
+		LinkID: "L1", Session: "S1", CreatedAt: t0}
+	if err := db.PutFile(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetFile(ctx, "F1")
+	if err != nil || got.LinkID != "L1" || got.Session != "S1" {
+		t.Fatalf("GetFile = %+v, %v", got, err)
+	}
+}
