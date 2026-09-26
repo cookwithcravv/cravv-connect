@@ -1,0 +1,25 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · cravv-connect</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<header>
+<span class="brand">cravv-connect</span>
+<nav>{{range .Nav}}<a href="{{.Path}}"{{if .Current}} aria-current="page"{{end}}>{{.Title}}</a>{{end}}</nav>
+{{if .Unlocked}}<span class="unlocked">{{.Unlocked}}</span>{{end}}
+</header>
+<main>
+<h1>{{.Title}}</h1>
+{{range .Flash}}<p class="flash {{.Kind}}" role="status">{{.Text}}</p>{{end}}
+{{if .Error}}<p class="flash error" role="alert">{{.Error}}</p>{{end}}
+{{template "content" .}}
+</main>
+</body>
+</html>
+{{end}}
+{{define "password"}}<label class="password">Login password <input type="password" name="password" autocomplete="current-password"{{if .}} required{{end}}></label>{{end}}

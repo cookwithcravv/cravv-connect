@@ -1,0 +1,37 @@
+{{define "content"}}{{$csrf := .CSRF}}{{with .Data}}
+<section>
+<h2>Kill switch</h2>
+{{if .Killed}}
+<p class="warn">The kill switch is on. Links are closed and nothing is sent or received.</p>
+<form method="post" action="/status/resume">
+<input type="hidden" name="csrf" value="{{$csrf}}">
+{{template "password" (not $.Unlocked)}}
+<button type="submit">Resume</button>
+</form>
+{{else}}
+<p>Turning it on closes every link and stops all traffic until you resume with your password.</p>
+<form method="post" action="/status/kill" data-confirm="Turn on the kill switch? Every link closes and nothing is sent or received until you resume.">
+<input type="hidden" name="csrf" value="{{$csrf}}">
+<button type="submit" class="danger">Turn on the kill switch</button>
+</form>
+{{end}}
+</section>
+<section>
+<h2>This machine</h2>
+<dl>
+<dt>Device name</dt><dd>{{dash .DeviceName}}</dd>
+<dt>Machine ID</dt><dd><code>{{.MachineID}}</code></dd>
+<dt>Relay</dt><dd>{{dash .RelayURL}} ({{if .RelayConnected}}connected{{else}}not connected{{end}})</dd>
+<dt>Shared sessions</dt><dd>{{range $i, $s := .Sessions}}{{if $i}}, {{end}}{{$s}}{{else}}none{{end}}</dd>
+<dt>Unread messages</dt><dd>{{.InboxUnread}}</dd>
+<dt>Tasks awaiting approval</dt><dd>{{.PendingApprovals}}</dd>
+<dt>Outbox</dt><dd>{{.OutboxPending}} pending, {{.OutboxHeld}} held</dd>
+</dl>
+</section>
+{{if .Errors}}
+<section>
+<h2>Problems</h2>
+<ul>{{range .Errors}}<li>{{clean .}}</li>{{end}}</ul>
+</section>
+{{end}}
+{{end}}{{end}}
