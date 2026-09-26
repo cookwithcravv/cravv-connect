@@ -35,14 +35,16 @@ func agentInstaller(env *Env, name string) (install.Installer, error) {
 }
 
 func newInstallCmd(env *Env) *cobra.Command {
-	var allowSend bool
+	var allowSend, noAllowSend bool
 	cmd := &cobra.Command{
 		Use:   "install [agent]",
 		Short: "Add cravv-connect to a coding agent (claude, codex); no argument lists agents",
 		Long: "Adds the MCP server to the agent. For Claude Code it also adds the Stop and UserPromptSubmit hooks, " +
 			"the /cravv skill and allow rules for the tools that only read or act within an existing link and for " +
 			"the listener; connect, create_task and send_file still ask unless you pass --allow-send. " +
-			"Running it again changes nothing; `cravv-connect uninstall <agent>` removes what it added.",
+			"Running it again without either flag keeps the send rules as they are; --no-allow-send removes the " +
+			"ones --allow-send added. Rules you wrote yourself are never changed. " +
+			"`cravv-connect uninstall <agent>` removes what it added.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -56,12 +58,15 @@ func newInstallCmd(env *Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if allowSend && noAllowSend {
+				return errors.New("--allow-send and --no-allow-send cannot be used together")
+			}
 			oi, withOptions := i.(install.OptionInstaller)
 			switch {
 			case withOptions:
-				err = oi.InstallWith(cmd.Context(), bin, install.Options{AllowSend: allowSend})
-			case allowSend:
-				return fmt.Errorf("--allow-send applies to Claude Code only, not %s", i.Name())
+				err = oi.InstallWith(cmd.Context(), bin, install.Options{AllowSend: allowSend, NoAllowSend: noAllowSend})
+			case allowSend || noAllowSend:
+				return fmt.Errorf("--allow-send and --no-allow-send apply to Claude Code only, not %s", i.Name())
 			default:
 				err = i.Install(cmd.Context(), bin)
 			}
@@ -69,13 +74,15 @@ func newInstallCmd(env *Env) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(env.Stdout, "Installed cravv-connect for %s. Restart the agent so it loads the MCP server.\n", i.Name())
-			if withOptions && !allowSend {
-				fmt.Fprintln(env.Stdout, "connect, create_task and send_file still ask each time; `cravv-connect install claude --allow-send` allows them too.")
+			if withOptions && !allowSend && !noAllowSend {
+				fmt.Fprintln(env.Stdout, "Allow rules for connect, create_task and send_file are left as they were: "+
+					"`cravv-connect install claude --allow-send` allows them without a prompt, --no-allow-send makes them ask again.")
 			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&allowSend, "allow-send", false, "also allow connect, create_task and send_file without a prompt (Claude Code)")
+	cmd.Flags().BoolVar(&noAllowSend, "no-allow-send", false, "remove the connect, create_task and send_file rules --allow-send added (Claude Code)")
 	return cmd
 }
 

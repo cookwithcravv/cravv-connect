@@ -44,8 +44,12 @@ type Installer interface {
 // Options tune an install.
 type Options struct {
 	// AllowSend also allows, without a prompt, the tools that open new flows
-	// or send local files (connect, create_task, send_file).
+	// or send local files (connect, create_task, send_file). Without it an
+	// install keeps the send rules as they are.
 	AllowSend bool
+	// NoAllowSend removes the send rules an earlier --allow-send added
+	// (never ones the user wrote).
+	NoAllowSend bool
 }
 
 // OptionInstaller is an Installer that takes Options (Claude Code).

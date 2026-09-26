@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -50,6 +51,9 @@ func (c *Claude) Install(ctx context.Context, bin string) error {
 // registration is never removed when adding is impossible. Running it again
 // with the same options changes nothing.
 func (c *Claude) InstallWith(ctx context.Context, bin string, o Options) error {
+	if o.AllowSend && o.NoAllowSend {
+		return errors.New("--allow-send and --no-allow-send cannot be used together")
+	}
 	if _, err := c.LookPath("claude"); err != nil {
 		return errors.New("claude CLI not found on PATH; install Claude Code first, or see docs/agents.md for manual setup")
 	}
@@ -63,16 +67,24 @@ func (c *Claude) InstallWith(ctx context.Context, bin string, o Options) error {
 				"run `claude %s` yourself, then run this install again", ServerName, err, strings.Join(add, " "))
 		}
 	}
+	added, err := c.loadAllowState()
+	if err != nil {
+		return err
+	}
 	if err := c.editSettings(func(s map[string]any) {
 		setClaudeHooks(s, shellQuote(bin)+" hook")
-		setClaudeAllow(s, claudeAllowRules(bin, o.AllowSend))
+		added = setClaudeAllow(s, claudeAllowRules(bin, o.AllowSend), added, o.NoAllowSend)
 	}); err != nil {
+		return err
+	}
+	if err := c.saveAllowState(added); err != nil {
 		return err
 	}
 	return c.writeSkill()
 }
 
-// Uninstall removes the MCP server and only our hook entries.
+// Uninstall removes the MCP server, our hook entries, the skill and only
+// the allow rules we added.
 func (c *Claude) Uninstall(ctx context.Context) error {
 	if _, err := c.LookPath("claude"); err == nil {
 		_, _ = c.Run.Run(ctx, "claude", "mcp", "remove", "--scope", "user", ServerName)
@@ -80,13 +92,20 @@ func (c *Claude) Uninstall(ctx context.Context) error {
 	if err := c.removeSkill(); err != nil {
 		return err
 	}
-	if _, err := os.Stat(c.settingsPath()); errors.Is(err, os.ErrNotExist) {
-		return nil
+	added, err := c.loadAllowState()
+	if err != nil {
+		return err
 	}
-	return c.editSettings(func(s map[string]any) {
+	if _, err := os.Stat(c.settingsPath()); errors.Is(err, os.ErrNotExist) {
+		return c.saveAllowState(nil)
+	}
+	if err := c.editSettings(func(s map[string]any) {
 		removeClaudeHooks(s)
-		removeClaudeAllow(s)
-	})
+		removeClaudeAllow(s, func(r string) bool { return slices.Contains(added, r) })
+	}); err != nil {
+		return err
+	}
+	return c.saveAllowState(nil)
 }
 
 // editSettings loads settings.json (or {}), applies fn, and writes it back.

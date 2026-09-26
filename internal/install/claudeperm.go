@@ -1,6 +1,10 @@
 package install
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -9,7 +13,8 @@ import (
 // Claude Code allow rules (v2 spec 7.4). By default every tool that only
 // reads or acts within an existing link is allowed, and so is the
 // listener; the tools that open new flows or send local files prompt
-// unless the user asks for them (--allow-send).
+// unless the user asks for them (--allow-send). Only rules cravv-connect
+// added itself are ever removed (see allowStatePath).
 var (
 	claudeAllowedTools = []string{
 		"machines", "sessions", "links", "check_inbox", "wait_for_message", "review_pending",
@@ -41,38 +46,103 @@ func claudeAllowRules(bin string, allowSend bool) []string {
 	return rules
 }
 
-// isOurAllowRule reports whether a rule is one cravv-connect adds.
-func isOurAllowRule(rule string) bool {
-	if tool, ok := strings.CutPrefix(rule, "mcp__"+ServerName+"__"); ok {
-		return slices.Contains(claudeAllowedTools, tool) || slices.Contains(claudeSendTools, tool)
-	}
-	inner, ok := strings.CutPrefix(rule, "Bash(")
-	if !ok {
-		return false
-	}
-	prog, ok := strings.CutSuffix(inner, " listen:*)")
-	return ok && filepath.Base(strings.Trim(prog, `'"`)) == ServerName
+// allowStatePath is the file that records the allow rules cravv-connect added to
+// ~/.claude/settings.json, so install and uninstall never touch a rule the
+// user wrote, even one that looks like ours.
+func (c *Claude) allowStatePath() string {
+	return filepath.Join(c.Home, ".cravv-connect", "claude-allow-rules.json")
 }
 
-// setClaudeAllow replaces our allow rules with rules, keeping every other
-// rule in place and in order.
-func setClaudeAllow(settings map[string]any, rules []string) {
-	removeClaudeAllow(settings)
+type claudeAllowState struct {
+	Added []string `json:"added"`
+}
+
+// loadAllowState returns the rules we added (none if there is no state file).
+func (c *Claude) loadAllowState() ([]string, error) {
+	b, err := os.ReadFile(c.allowStatePath())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var st claudeAllowState
+	if err := json.Unmarshal(b, &st); err != nil {
+		return nil, fmt.Errorf("%s is not valid JSON, not changing the allow rules: %w", c.allowStatePath(), err)
+	}
+	return st.Added, nil
+}
+
+// saveAllowState records added, or removes the state file when it is empty.
+func (c *Claude) saveAllowState(added []string) error {
+	path := c.allowStatePath()
+	if len(added) == 0 {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	b, err := json.MarshalIndent(claudeAllowState{Added: added}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(path, append(b, '\n'), 0o600)
+}
+
+func isSendRule(rule string) bool {
+	tool, ok := strings.CutPrefix(rule, "mcp__"+ServerName+"__")
+	return ok && slices.Contains(claudeSendTools, tool)
+}
+
+// setClaudeAllow makes sure every rule in want is allowed and returns the
+// rules we added, now. Of the rules we added earlier (added), those no
+// longer wanted are removed, except send rules, which stay unless dropSend
+// (install without --allow-send keeps them; --no-allow-send removes them).
+// A rule already present that we did not add is the user's: it is left
+// alone and never recorded as ours. Every other rule stays in place and in
+// order.
+func setClaudeAllow(settings map[string]any, want, added []string, dropSend bool) []string {
+	ours := map[string]bool{}
+	for _, r := range added {
+		ours[r] = true
+	}
+	removeClaudeAllow(settings, func(r string) bool {
+		return ours[r] && !slices.Contains(want, r) && (dropSend || !isSendRule(r))
+	})
 	perms, _ := settings["permissions"].(map[string]any)
 	if perms == nil {
 		perms = map[string]any{}
 	}
 	allow, _ := perms["allow"].([]any)
-	for _, r := range rules {
-		allow = append(allow, r)
+	present := map[string]bool{}
+	for _, r := range allow {
+		if s, ok := r.(string); ok {
+			present[s] = true
+		}
 	}
-	perms["allow"] = allow
-	settings["permissions"] = perms
+	var now []string
+	for _, r := range allow {
+		if s, ok := r.(string); ok && ours[s] && !slices.Contains(now, s) {
+			now = append(now, s)
+		}
+	}
+	for _, r := range want {
+		if !present[r] {
+			allow = append(allow, r)
+			present[r] = true
+			now = append(now, r)
+		}
+	}
+	if len(allow) > 0 {
+		perms["allow"] = allow
+		settings["permissions"] = perms
+	}
+	return now
 }
 
-// removeClaudeAllow drops our allow rules, then an allow list and a
-// permissions object that became empty because of it.
-func removeClaudeAllow(settings map[string]any) {
+// removeClaudeAllow drops the string rules drop matches, then an allow list
+// and a permissions object that became empty because of it.
+func removeClaudeAllow(settings map[string]any, drop func(rule string) bool) {
 	perms, ok := settings["permissions"].(map[string]any)
 	if !ok {
 		return
@@ -83,10 +153,13 @@ func removeClaudeAllow(settings map[string]any) {
 	}
 	kept := make([]any, 0, len(allow))
 	for _, r := range allow {
-		if s, ok := r.(string); ok && isOurAllowRule(s) {
+		if s, ok := r.(string); ok && drop(s) {
 			continue
 		}
 		kept = append(kept, r)
+	}
+	if len(kept) == len(allow) {
+		return
 	}
 	if len(kept) == 0 {
 		delete(perms, "allow")

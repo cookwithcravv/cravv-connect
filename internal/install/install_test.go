@@ -493,8 +493,17 @@ func TestClaudeAllowRules(t *testing.T) {
 	if err := c.Install(bg, bin); err != nil {
 		t.Fatal(err)
 	}
-	if allow := allowList(t, path); slices.Contains(allow, "mcp__cravv-connect__connect") {
-		t.Fatalf("installing without --allow-send keeps the send rules: %v", allow)
+	if allow := allowList(t, path); !slices.Contains(allow, "mcp__cravv-connect__connect") {
+		t.Fatalf("installing again without a flag must keep the send rules: %v", allow)
+	}
+	if err := c.InstallWith(bg, bin, Options{NoAllowSend: true}); err != nil {
+		t.Fatal(err)
+	}
+	if allow := allowList(t, path); slices.Contains(allow, "mcp__cravv-connect__connect") || !slices.Contains(allow, "mcp__cravv-connect__links") {
+		t.Fatalf("--no-allow-send: %v", allow)
+	}
+	if err := c.InstallWith(bg, bin, Options{AllowSend: true, NoAllowSend: true}); err == nil {
+		t.Fatal("--allow-send with --no-allow-send")
 	}
 	if err := c.Uninstall(bg); err != nil {
 		t.Fatal(err)
@@ -504,21 +513,52 @@ func TestClaudeAllowRules(t *testing.T) {
 	}
 }
 
-func TestIsOurAllowRule(t *testing.T) {
-	for rule, want := range map[string]bool{
-		"mcp__cravv-connect__links":                     true,
-		"mcp__cravv-connect__connect":                   true,
-		"mcp__cravv-connect__something_else":            false,
-		"mcp__other__links":                             false,
-		"Bash(cravv-connect listen:*)":                  true,
-		"Bash(/usr/local/bin/cravv-connect listen:*)":   true,
-		"Bash('/Apps/My Tools/cravv-connect' listen:*)": true,
-		"Bash(cravv-connect status:*)":                  false,
-		"Bash(ls)":                                      false,
-	} {
-		if got := isOurAllowRule(rule); got != want {
-			t.Errorf("isOurAllowRule(%q) = %v", rule, got)
+// Review focus: install and uninstall touch only the allow rules
+// cravv-connect added itself (recorded in a state file), never rules the
+// user wrote, even ones that look like ours.
+func TestClaudeAllowRulesOnlyTouchWhatWeAdded(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".claude", "settings.json")
+	os.MkdirAll(filepath.Dir(path), 0o700)
+	mine := []string{"Bash(ls)", "mcp__cravv-connect__links", "mcp__cravv-connect__send_file", "Bash(cravv-connect listen:*)"}
+	b, _ := json.Marshal(map[string]any{"permissions": map[string]any{"allow": mine}})
+	os.WriteFile(path, b, 0o600)
+	c := &Claude{Home: home, Run: &fakeRunner{}, LookPath: found}
+	if err := c.InstallWith(bg, "/old/bin/cravv-connect", Options{AllowSend: true}); err != nil {
+		t.Fatal(err)
+	}
+	allow := allowList(t, path)
+	if !slices.Equal(allow[:len(mine)], mine) || slices.Index(allow, "mcp__cravv-connect__links") != 1 {
+		t.Fatalf("the user's rules moved or doubled: %v", allow)
+	}
+	state, err := os.ReadFile(filepath.Join(home, ".cravv-connect", "claude-allow-rules.json"))
+	if err != nil {
+		t.Fatalf("no state file: %v", err)
+	}
+	for _, r := range mine[1:] {
+		if strings.Contains(string(state), `"`+r+`"`) {
+			t.Fatalf("the user's rule %s is recorded as ours: %s", r, state)
 		}
+	}
+	// A new binary path replaces the listener rule we added.
+	if err := c.InstallWith(bg, bin, Options{NoAllowSend: true}); err != nil {
+		t.Fatal(err)
+	}
+	allow = allowList(t, path)
+	if slices.Contains(allow, "Bash(/old/bin/cravv-connect listen:*)") || !slices.Contains(allow, "Bash("+bin+" listen:*)") {
+		t.Fatalf("stale listener rule: %v", allow)
+	}
+	if slices.Contains(allow, "mcp__cravv-connect__connect") || !slices.Contains(allow, "mcp__cravv-connect__send_file") {
+		t.Fatalf("--no-allow-send must remove our send rules and keep the user's: %v", allow)
+	}
+	if err := c.Uninstall(bg); err != nil {
+		t.Fatal(err)
+	}
+	if allow := allowList(t, path); !slices.Equal(allow, mine) {
+		t.Fatalf("after uninstall %v, want the user's %v", allow, mine)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".cravv-connect", "claude-allow-rules.json")); !os.IsNotExist(err) {
+		t.Fatalf("state file left: %v", err)
 	}
 }
 

@@ -48,17 +48,26 @@ func TestInstallAllowSend(t *testing.T) {
 	env, out, errb := fd.env(&fakePrompter{}, "")
 	env.Agents = install.NewRegistry(claude, codex)
 	env.Executable = func() (string, error) { return "/usr/local/bin/cravv-connect", nil }
-	if code := Main([]string{"install", "claude"}, env); code != 0 || !strings.Contains(out.String(), "allows them too") {
+	if code := Main([]string{"install", "claude"}, env); code != 0 || !strings.Contains(out.String(), "--allow-send") || !strings.Contains(out.String(), "--no-allow-send") {
 		t.Fatalf("%d %q %q", code, out.String(), errb.String())
 	}
 	out.Reset()
-	if code := Main([]string{"install", "claude", "--allow-send"}, env); code != 0 || strings.Contains(out.String(), "still ask") {
+	if code := Main([]string{"install", "claude", "--allow-send"}, env); code != 0 || strings.Contains(out.String(), "--no-allow-send") {
 		t.Fatalf("%d %q", code, out.String())
 	}
-	if len(claude.opts) != 2 || claude.opts[0].AllowSend || !claude.opts[1].AllowSend {
+	if code := Main([]string{"install", "claude", "--no-allow-send"}, env); code != 0 {
+		t.Fatalf("%d %q", code, errb.String())
+	}
+	if len(claude.opts) != 3 || claude.opts[0] != (install.Options{}) || claude.opts[1] != (install.Options{AllowSend: true}) || claude.opts[2] != (install.Options{NoAllowSend: true}) {
 		t.Fatalf("options %+v", claude.opts)
 	}
-	if code := Main([]string{"install", "codex", "--allow-send"}, env); code != 1 || !strings.Contains(errb.String(), "applies to Claude Code only") || codex.installed != "" {
+	if code := Main([]string{"install", "claude", "--allow-send", "--no-allow-send"}, env); code != 1 || len(claude.opts) != 3 {
+		t.Fatalf("both flags: %d %q", code, errb.String())
+	}
+	if code := Main([]string{"install", "codex", "--no-allow-send"}, env); code != 1 || codex.installed != "" {
+		t.Fatalf("%d %q", code, errb.String())
+	}
+	if code := Main([]string{"install", "codex", "--allow-send"}, env); code != 1 || !strings.Contains(errb.String(), "apply to Claude Code only") || codex.installed != "" {
 		t.Fatalf("%d %q", code, errb.String())
 	}
 }
