@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/cravv/cravv-connect/internal/childenv"
 )
 
 // Environment the fake agent reads (the daemon passes its own environment
@@ -36,6 +38,12 @@ type Record struct {
 	HasToken bool              `json:"has_token_env"`     // CRAVV_RUN_TOKEN in the agent's own environment
 	Environ  []string          `json:"environ,omitempty"` // the agent's own environment
 	Results  map[string]string `json:"results,omitempty"` // what the run's daemon calls returned
+}
+
+// The daemon passes a run only an allowlisted environment; the fake agent
+// reads its mode from these, so a test binary lets them through.
+func init() {
+	childenv.Allow(EnvMode, EnvLog, EnvSocket, EnvProbe)
 }
 
 // Main runs the fake agent and exits when EnvMode is set; otherwise it

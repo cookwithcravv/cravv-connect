@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cravv/cravv-connect/internal/audit"
+	"github.com/cravv/cravv-connect/internal/childenv"
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/store"
 )
@@ -345,15 +346,11 @@ func (h *SessionHost) writeConfig(adapter AgentAdapter, runID, token string) (st
 	return path, nil
 }
 
-// env is the child's environment: the daemon's, never with a run token.
+// env is the child's environment: the allowlisted part of the daemon's
+// (childenv: home, path, locale, terminal and what claude needs to
+// authenticate), never CRAVV_* and never a run token.
 func (h *SessionHost) env() []string {
-	var out []string
-	for _, kv := range h.d.Env() {
-		if !strings.HasPrefix(kv, EnvRunToken+"=") {
-			out = append(out, kv)
-		}
-	}
-	return out
+	return childenv.Filter(h.d.Env())
 }
 
 func (h *SessionHost) alias(ctx context.Context, id core.MachineID) string {

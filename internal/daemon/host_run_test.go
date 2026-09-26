@@ -492,3 +492,34 @@ func Eventually(t *testing.T, what string, cond func() bool) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// A run gets only the allowlisted environment: never the daemon's CRAVV_*
+// settings or secrets, never unrelated credentials, but what claude needs
+// to authenticate.
+func TestHostPassesAnAllowlistedEnvironment(t *testing.T) {
+	t.Setenv("CRAVV_ADMIN_SECRET", "must-not-leak")
+	t.Setenv("CRAVV_HOME", "/somewhere")
+	t.Setenv("GITHUB_TOKEN", "ghp-must-not-leak")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-for-claude")
+	t.Setenv("LC_ALL", "C")
+	e := newHostEnv(t, "ok", nil)
+	e.start(t)
+	e.finished(t, e.task(t, "env"))
+	rec := e.runs(t, 1)[0]
+	vars := map[string]string{}
+	for _, kv := range rec.Environ {
+		k, v, _ := strings.Cut(kv, "=")
+		vars[k] = v
+	}
+	for _, k := range []string{"CRAVV_ADMIN_SECRET", "CRAVV_HOME", "GITHUB_TOKEN", EnvRunToken} {
+		if _, ok := vars[k]; ok {
+			t.Errorf("%s reached the run", k)
+		}
+	}
+	if vars["ANTHROPIC_API_KEY"] != "sk-for-claude" || vars["LC_ALL"] != "C" || vars["HOME"] == "" || vars["PATH"] == "" {
+		t.Errorf("the run is missing HOME, PATH, LC_ALL or ANTHROPIC_API_KEY")
+	}
+	if vars["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] != "1" {
+		t.Error("the adapter's own variables must still reach the run")
+	}
+}
