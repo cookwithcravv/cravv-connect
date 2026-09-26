@@ -186,7 +186,12 @@ each delivery:
    item the level rejects never reaches the normal handler.
 8. **Record** `id` in the deduplication store. This happens only after the
    handler succeeded or failed for good, so a retryable failure leaves the
-   message unrecorded and a redelivery runs the handler again.
+   message unrecorded and a redelivery runs the handler again. Handlers are
+   therefore idempotent on their own: a crash between the handler's write and
+   this step must not store the item twice. Tasks and files check their own
+   records; a `chat` whose `id` is already in the inbox is not stored again
+   (the receiver also keeps a unique index on the chat's `id` and target
+   session).
 9. **Confirm.** For every non-control kind, queue the ID for a
    `control.delivered` receipt to the sender.
 10. **Ack** the relay `seq`.

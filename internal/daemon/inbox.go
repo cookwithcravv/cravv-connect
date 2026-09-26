@@ -288,7 +288,9 @@ func (s *InboxService) entry(ctx context.Context, it store.InboxItem) InboxEntry
 	}
 }
 
-// NewChatHandler stores incoming chat for core.KindChat.
+// NewChatHandler stores incoming chat for core.KindChat. A chat already in the
+// inbox (a redelivery after a crash between the insert and the dedup mark) is
+// not stored again; the store's unique chat index backs this up.
 func NewChatHandler(inbox *InboxService) Handler {
 	return HandlerFunc(func(ctx context.Context, peer store.Peer, env core.Envelope) error {
 		body, err := decodeEnvBody[core.ChatBody](env.Body)
@@ -297,6 +299,11 @@ func NewChatHandler(inbox *InboxService) Handler {
 		}
 		if len(body.Text) > core.MaxTextBytes {
 			return fmt.Errorf("chat %s: %w", env.ID, core.ErrTooLarge)
+		}
+		if seen, err := inbox.Delivered(ctx, env.ID); err != nil {
+			return Retryable(err)
+		} else if seen {
+			return nil
 		}
 		_, err = inbox.Deliver(ctx, store.InboxItem{
 			MsgID:       env.ID,

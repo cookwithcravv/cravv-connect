@@ -226,3 +226,39 @@ func TestUnreadCountsByAlias(t *testing.T) {
 		t.Fatalf("unknown session err = %v", err)
 	}
 }
+
+// A crash between the chat insert and the dedup mark means the relay delivers
+// the same envelope again; the chat must still appear once, also when the
+// addressed session registered in between (the first copy became machine-wide).
+func TestChatRedeliveryAfterCrashStoredOnce(t *testing.T) {
+	ctx := context.Background()
+	st := d2Store(t)
+	reg, inbox := d2Inbox(t, st, core.NewFakeClock(d2Epoch))
+	peer, _ := d2Peer(t, st, "gpu-box", core.TrustAutonomous)
+	name, _ := reg.Register(ctx, "claude", "/w/p")
+	h := NewChatHandler(inbox)
+	plain := d2Env(t, peer, core.KindChat, "codex@x", "", core.ChatBody{Text: "once"})
+	late := d2Env(t, peer, core.KindChat, "codex@x", "claude@later", core.ChatBody{Text: "once too"})
+	for _, env := range []core.Envelope{plain, late} {
+		if err := h.Handle(ctx, peer, env); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := reg.Register(ctx, "claude", "/w/later"); err != nil {
+		t.Fatal(err)
+	}
+	// Redelivery: the dedup mark was never written.
+	for _, env := range []core.Envelope{plain, late} {
+		if err := h.Handle(ctx, peer, env); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, _ := inbox.Check(ctx, name, 10)
+	if len(items) != 2 {
+		t.Fatalf("items after redelivery = %d, want 2", len(items))
+	}
+	// Both machine-wide copies, and no session-addressed second copy of "late".
+	if items2, _ := inbox.Check(ctx, "claude@later", 10); len(items2) != 2 {
+		t.Fatalf("claude@later sees %d items, want 2", len(items2))
+	}
+}

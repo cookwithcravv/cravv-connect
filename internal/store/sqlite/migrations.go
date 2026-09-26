@@ -111,6 +111,16 @@ CREATE TABLE settings (
 CREATE INDEX inbox_msg ON inbox(msg_id);
 CREATE INDEX files_created ON files(created_at);
 `,
+	// A chat is stored once per (msg_id, to_session), so a redelivery after a
+	// crash between the insert and the dedup mark cannot store it twice. Other
+	// kinds are made idempotent by their own records (tasks, files), and file
+	// notices legitimately repeat a message ID. Duplicates an older version
+	// stored are removed first, keeping the earliest.
+	`
+DELETE FROM inbox WHERE kind = 'chat' AND msg_id != '' AND seq NOT IN (
+	SELECT MIN(seq) FROM inbox WHERE kind = 'chat' AND msg_id != '' GROUP BY msg_id, to_session);
+CREATE UNIQUE INDEX inbox_chat_once ON inbox(msg_id, to_session) WHERE kind = 'chat' AND msg_id != '';
+`,
 }
 
 // migrate creates schema_migrations and applies every migration whose

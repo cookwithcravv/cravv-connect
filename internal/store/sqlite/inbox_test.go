@@ -253,3 +253,32 @@ func TestHasInboxMsg(t *testing.T) {
 		t.Fatal("redirected item lost its message ID")
 	}
 }
+
+// A chat is stored once per (msg_id, to_session): a redelivery after a crash
+// between the insert and the dedup mark gets the existing seq back.
+func TestAddItemChatIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	first := addInbox(t, db, "M1", "PEER", "", time.UnixMilli(1000))
+	again := addInbox(t, db, "M1", "PEER", "", time.UnixMilli(2000))
+	if again != first {
+		t.Fatalf("second insert seq %d, want existing %d", again, first)
+	}
+	other := addInbox(t, db, "M1", "PEER", "claude@proj", time.UnixMilli(2000))
+	if other == first {
+		t.Fatal("a different to_session was folded into the first item")
+	}
+	var n int
+	if err := db.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbox WHERE msg_id = 'M1'`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("rows = %d, %v", n, err)
+	}
+	// File notices legitimately repeat a message ID (held, then done).
+	for range 2 {
+		if _, err := db.AddItem(ctx, store.InboxItem{MsgID: "F1", From: "PEER", Kind: core.KindFileOffer, Body: json.RawMessage(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbox WHERE msg_id = 'F1'`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("file notices = %d, %v", n, err)
+	}
+}

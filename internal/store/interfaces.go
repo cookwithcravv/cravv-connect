@@ -99,6 +99,8 @@ type InboxItem struct {
 }
 
 type InboxStore interface {
+	// AddItem stores it and returns its seq. A chat whose (MsgID, ToSession) is
+	// already stored is not stored again; the existing seq is returned.
 	AddItem(ctx context.Context, it InboxItem) (int64, error)
 	// Visible to session: seq > after AND (ToSession=="" OR ToSession==session); ascending; limit
 	ItemsFor(ctx context.Context, session string, after int64, limit int) ([]InboxItem, error)

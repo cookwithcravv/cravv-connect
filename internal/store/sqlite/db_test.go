@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,5 +153,41 @@ func TestTransactionsBeginImmediate(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "locked") && !strings.Contains(strings.ToLower(err.Error()), "busy") {
 		t.Fatalf("unexpected error from competing writer: %v", err)
+	}
+}
+
+// The migration that makes chat inserts idempotent first removes duplicate
+// chat rows an older version may have stored, keeping the earliest.
+func TestChatUniqueMigrationDropsDuplicates(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "store.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Roll the last migration back to look like the previous schema.
+	for _, q := range []string{
+		`DROP INDEX inbox_chat_once`,
+		fmt.Sprintf(`DELETE FROM schema_migrations WHERE version = %d`, len(migrations)),
+	} {
+		if _, err := db.sql.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{"M1", "M1", "M2"} {
+		if _, err := db.sql.ExecContext(ctx, `INSERT INTO inbox (msg_id, from_machine, from_session, to_session, kind, body, task_id, note, received_at)
+VALUES (?, 'P', '', '', 'chat', '{}', '', '', 0)`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbox`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("rows after migration = %d, %v", n, err)
 	}
 }

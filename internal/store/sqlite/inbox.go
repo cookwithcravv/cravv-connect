@@ -13,20 +13,33 @@ import (
 
 const inboxCols = `seq, msg_id, from_machine, from_session, to_session, kind, body, task_id, note, received_at, read_by_any`
 
+// AddItem inserts an item. A chat whose (msg_id, to_session) is already
+// stored is not inserted again; the existing item's seq is returned.
 func (d *DB) AddItem(ctx context.Context, it store.InboxItem) (int64, error) {
 	body := []byte(it.Body)
 	if body == nil {
 		body = []byte("null")
 	}
-	res, err := d.sql.ExecContext(ctx, `
+	var seq int64
+	err := inTx(ctx, d.sql, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `
 INSERT INTO inbox (msg_id, from_machine, from_session, to_session, kind, body, task_id, note, received_at, read_by_any)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		it.MsgID, string(it.From), it.FromSession, it.ToSession, string(it.Kind), body,
-		it.TaskID, it.Note, toMS(it.ReceivedAt), boolInt(it.ReadByAny))
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+			it.MsgID, string(it.From), it.FromSession, it.ToSession, string(it.Kind), body,
+			it.TaskID, it.Note, toMS(it.ReceivedAt), boolInt(it.ReadByAny))
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 1 {
+			seq, err = res.LastInsertId()
+			return err
+		}
+		return tx.QueryRowContext(ctx, `SELECT seq FROM inbox WHERE msg_id = ? AND to_session = ? AND kind = ?`,
+			it.MsgID, it.ToSession, string(it.Kind)).Scan(&seq)
+	})
+	return seq, err
 }
 
 func (d *DB) ItemsFor(ctx context.Context, session string, after int64, limit int) ([]store.InboxItem, error) {
