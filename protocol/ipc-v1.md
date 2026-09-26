@@ -13,7 +13,10 @@ and `internal/api` (one file per method group).
 
 - **Socket:** a unix stream socket at `$CRAVV_HOME/daemon.sock`
   (default `~/.cravv-connect/daemon.sock`). The directory is mode `0700` and the
-  socket `0600`, so only the same OS user can connect.
+  socket `0600`, so only the same OS user can connect. The daemon also reads
+  the peer credentials of every accepted connection (`LOCAL_PEERCRED` on
+  macOS, `SO_PEERCRED` on Linux) and closes it at once unless the connecting
+  process runs as the daemon's UID.
 - **Startup:** the daemon removes a stale socket left by a crash, refuses to
   replace anything that is not a socket, and refuses to start when another
   daemon answers on it.

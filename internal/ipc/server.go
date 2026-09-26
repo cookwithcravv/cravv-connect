@@ -72,7 +72,9 @@ func (s *Server) Methods() map[string]Gate {
 }
 
 // Serve accepts connections until ctx is cancelled or ln fails. It closes ln
-// and waits for every connection to finish before returning.
+// and waits for every connection to finish before returning. A connection
+// from a process of another user (by the socket's peer credentials) is
+// closed at once.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	stop := context.AfterFunc(ctx, func() { ln.Close() })
 	defer stop()
@@ -84,6 +86,11 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 				return nil
 			}
 			return err
+		}
+		if err := verifyPeer(conn); err != nil {
+			s.opts.Logger.Warn("ipc: connection refused", "err", err)
+			conn.Close()
+			continue
 		}
 		s.conns.Add(1)
 		go func() {

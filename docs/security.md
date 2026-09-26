@@ -124,7 +124,9 @@ How it works:
 - The CLI reads the password from `/dev/tty` with echo off, never from stdin
   or an argument, so a process without a terminal (such as an agent running a
   shell command) cannot be prompted.
-- The CLI sends it over the local socket (mode `0600`, directory `0700`) in
+- The CLI sends it over the local socket (mode `0600`, directory `0700`; the
+  daemon also refuses any connection whose peer credentials show another
+  UID) in
   `auth.unlock`. The daemon checks it with PAM for the user the daemon runs
   as. Only services that check the login password are allowed: `chkpasswd`
   (default) or `checkpw` on macOS, `login` (default) or `system-auth` on
