@@ -1,0 +1,63 @@
+{{define "content"}}{{$csrf := .CSRF}}{{with .Data}}{{$d := .}}
+<section>
+<h2>Managed sessions running here</h2>
+{{if .Open}}<div class="flash ok" role="status">
+<p>The page cannot open a terminal. To open <strong>{{.Open}}</strong>, run this in a terminal on this machine:</p>
+<pre>cravv-connect session open {{.Open}}</pre>
+<p class="muted">Its queue waits while you have it open and runs again when you exit.</p>
+</div>{{end}}
+{{if .Sessions}}
+<div class="table-wrap"><table>
+<thead><tr><th>Session</th><th>For</th><th>Offer</th><th>State</th><th>Link</th><th>Folder</th><th>Last active</th><th></th></tr></thead>
+<tbody>
+{{range .Sessions}}<tr>
+<td>{{.Name}}</td><td>{{.Machine}}</td><td>{{dash .Offer}}</td><td>{{.State}}</td><td>{{.Link}}</td><td><code>{{.Folder}}</code></td><td>{{time .LastActive}}</td>
+<td>{{if .Started}}<a href="/managed?open={{.Name}}">Open</a>{{end}}
+<form method="post" action="/managed/close" data-confirm="Close {{.Name}}? Its link closes and a run in progress stops."><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="name" value="{{.Name}}"><button type="submit" class="danger">Close</button></form></td>
+</tr>{{end}}
+</tbody>
+</table></div>
+{{else}}<p class="muted">No managed sessions. A paired device starts one by connecting to new:&lt;label&gt; of an offer below.</p>{{end}}
+</section>
+<section>
+<h2>Offers</h2>
+{{if .Offers}}
+<div class="table-wrap"><table>
+<thead><tr><th>Device</th><th>Label</th><th>Folder</th><th>Mode</th><th>Permission</th><th>Limits</th><th></th></tr></thead>
+<tbody>
+{{range .Offers}}<tr>
+<td>{{.Machine}}</td><td>{{.Label}}</td><td><code>{{.Folder}}</code></td><td>{{.RunMode}}</td><td>{{.Permission}}</td><td>{{.Limits}}</td>
+<td><form method="post" action="/managed/offers/remove" data-confirm="Remove offer {{.Label}}? Its managed sessions close.">
+<input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="machine" value="{{.Machine}}"><input type="hidden" name="label" value="{{.Label}}">
+{{template "password"}}
+<button type="submit" class="danger">Remove</button></form></td>
+</tr>{{end}}
+</tbody>
+</table></div>
+{{else}}<p class="muted">No offers. Nothing can start a session on this machine.</p>{{end}}
+</section>
+<section>
+<h2>Make or change an offer</h2>
+{{if .Peers}}
+<p>The device you choose may start agent sessions in the folder, with no one asking you each time. The same label replaces that device's offer.</p>
+<form method="post" action="/managed/offers/set" class="block">
+<input type="hidden" name="csrf" value="{{$csrf}}">
+<label>Device <select name="machine">{{range .Peers}}<option value="{{.Alias}}">{{.Alias}}</option>{{end}}</select></label>
+<label>Label <input name="label" required maxlength="27" pattern="[a-z0-9][a-z0-9-]*" autocomplete="off"></label>
+<label>Folder (absolute path) <input name="folder" required autocomplete="off"></label>
+<label>The device may <select name="permission">{{range .Permissions}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+<label>Run mode <select name="run_mode">{{range .Modes}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+<p class="muted">read-only reads and searches the folder. edit-in-folder also edits files, with no shell and no web. shell also runs commands.</p>
+<p class="warn">Run mode shell: the peer can run commands as your user on this machine. To choose it, type shell here:</p>
+<label>Confirm shell <input name="shell_confirm" autocomplete="off"></label>
+<label>Sessions open at once <input name="max_concurrent" inputmode="numeric" placeholder="2"></label>
+<label>Runs an hour per link <input name="runs_per_hour" inputmode="numeric" placeholder="30"></label>
+<label>Runs a day for the device <input name="runs_per_day" inputmode="numeric" placeholder="200"></label>
+<label>Run timeout in minutes <input name="run_timeout_m" inputmode="numeric" placeholder="30"></label>
+<label>Idle timeout in minutes <input name="idle_timeout_m" inputmode="numeric" placeholder="120"></label>
+{{template "password"}}
+<button type="submit">Save offer</button>
+</form>
+{{else}}<p class="muted">No paired devices. Pair one on the Devices page first.</p>{{end}}
+</section>
+{{end}}{{end}}

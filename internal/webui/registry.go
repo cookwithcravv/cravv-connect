@@ -66,6 +66,7 @@ func DefaultRegistry() *Registry {
 		addDevices,
 		addSessions,
 		addApprovals,
+		addManaged,
 		addActivity,
 		addStatus,
 	} {
