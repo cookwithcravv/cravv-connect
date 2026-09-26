@@ -57,6 +57,14 @@ toolchain is needed. Use `sh -s -- --system` to install to `/usr/local/bin`
 instead, and `CRAVV_VERSION=v1.2.0` to pick a release. The repository URL is a
 placeholder until the project is published.
 
+Every release archive also has a signed build provenance attestation from the
+release workflow. To check that an archive you downloaded was built there, use
+the [GitHub CLI](https://cli.github.com/):
+
+```sh
+gh attestation verify cravv-connect_1.2.0_linux_amd64.tar.gz --repo cravv/cravv-connect
+```
+
 ### Install from source
 
 You need Go 1.26 and a C toolchain, because password checks use PAM through

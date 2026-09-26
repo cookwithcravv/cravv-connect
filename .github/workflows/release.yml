@@ -63,6 +63,9 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      # Build provenance: an OIDC token to sign with, and the attestation store.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -75,6 +78,11 @@ jobs:
           test "$(ls *.tar.gz | wc -l)" -eq 4
           sha256sum *.tar.gz > SHA256SUMS
           cat SHA256SUMS
+      # Signed provenance for each archive: `gh attestation verify <archive>
+      # --repo <owner>/<repo>` checks it came from this workflow.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.tar.gz
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}

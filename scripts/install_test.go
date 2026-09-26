@@ -303,3 +303,71 @@ func TestInstallWithWget(t *testing.T) {
 		t.Fatalf("cravv-connect says %q", got)
 	}
 }
+
+// fakeTool writes a tool script into dir that logs its arguments to log and
+// fails, so no test reaches the network.
+func fakeTool(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	log := filepath.Join(dir, name+".log")
+	os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body+"echo \"$*\" >> "+log+"\nexit 22\n"), 0o755)
+	return log
+}
+
+// CRAVV_BASE_URL must be https; plain http only for this machine (the tests'
+// release server), and never with a user part that would send the request
+// elsewhere. A refused URL is never fetched.
+func TestInstallRefusesPlainHTTP(t *testing.T) {
+	fake := t.TempDir()
+	log := fakeTool(t, fake, "curl", "")
+	for _, sh := range shells(t) {
+		for _, base := range []string{
+			"http://example.com/releases",
+			"http://127.0.0.1.example.com/releases",
+			"http://localhost.example.com/releases",
+			"http://localhost:80@example.com/releases",
+			"http://127.0.0.1@example.com/releases",
+			"ftp://example.com/releases",
+			"HTTP://example.com/releases",
+			"github.com/cravv/cravv-connect/releases",
+		} {
+			cmd := exec.Command(sh, "install.sh")
+			cmd.Env = []string{"HOME=" + t.TempDir(), "PATH=" + fake + ":" + os.Getenv("PATH"), "CRAVV_BASE_URL=" + base}
+			out, err := cmd.CombinedOutput()
+			if err == nil || !strings.Contains(string(out), "install.sh: CRAVV_BASE_URL must be an https URL (plain http only for http://127.0.0.1 or http://localhost): "+base) {
+				t.Errorf("%s %s: %v\n%s", sh, base, err, out)
+			}
+			if _, err := os.Stat(log); err == nil {
+				t.Fatalf("%s %s: fetched anyway", sh, base)
+			}
+		}
+	}
+}
+
+// curl only speaks https (with TLS 1.2 or newer), redirects included; wget
+// is told --https-only when it knows the option.
+func TestInstallTransportFlags(t *testing.T) {
+	fake := t.TempDir()
+	log := fakeTool(t, fake, "curl", "")
+	cmd := exec.Command("sh", "install.sh")
+	cmd.Env = []string{"HOME=" + t.TempDir(), "PATH=" + fake + ":" + os.Getenv("PATH"), "CRAVV_BASE_URL=https://example.com/releases"}
+	cmd.CombinedOutput()
+	got, _ := os.ReadFile(log)
+	if !strings.Contains(string(got), "--proto =https --proto-redir =https --tlsv1.2 ") {
+		t.Fatalf("curl %s", got)
+	}
+
+	tools := t.TempDir()
+	for _, tool := range []string{"uname", "sed", "awk", "tail", "tr", "sha256sum", "shasum", "perl", "sysctl"} {
+		if p, err := exec.LookPath(tool); err == nil {
+			os.Symlink(p, filepath.Join(tools, tool))
+		}
+	}
+	wlog := fakeTool(t, tools, "wget", "case \"$1\" in --help) echo '  --https-only  only follow secure HTTPS links'; exit 0 ;; esac\n")
+	cmd = exec.Command("sh", "install.sh")
+	cmd.Env = []string{"HOME=" + t.TempDir(), "PATH=" + tools, "CRAVV_BASE_URL=https://example.com/releases"}
+	cmd.CombinedOutput()
+	got, _ = os.ReadFile(wlog)
+	if !strings.Contains(string(got), "--https-only") {
+		t.Fatalf("wget %s", got)
+	}
+}

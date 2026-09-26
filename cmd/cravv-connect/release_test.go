@@ -65,3 +65,31 @@ func TestReleaseWorkflowStampsTheVersion(t *testing.T) {
 		t.Fatalf("version: %v %q, want %q", err, out, want)
 	}
 }
+
+// The publish job attests the archives' build provenance (the README says how
+// to verify it), with only the permissions that needs.
+func TestReleaseWorkflowAttests(t *testing.T) {
+	wf := releaseWorkflow(t)
+	publish := wf[strings.Index(wf, "\n  publish:"):]
+	for _, want := range []string{
+		"      id-token: write\n",
+		"      attestations: write\n",
+		"      contents: write\n",
+		"uses: actions/attest-build-provenance@",
+		"subject-path: dist/*.tar.gz",
+	} {
+		if !strings.Contains(publish, want) {
+			t.Errorf("publish job lacks %q", want)
+		}
+	}
+	if strings.Contains(wf[:strings.Index(wf, "\n  publish:")], "id-token: write") {
+		t.Error("the build job can mint OIDC tokens")
+	}
+	readme, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(readme), "gh attestation verify cravv-connect_") {
+		t.Error("README does not say how to verify the attestation")
+	}
+}

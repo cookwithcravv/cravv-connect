@@ -12,7 +12,8 @@
 #   CRAVV_VERSION   release tag to install, for example v1.2.0 (default: the latest release)
 #   CRAVV_REPO      GitHub repository, owner/name (default: cravv/cravv-connect)
 #   CRAVV_BASE_URL  release URL, default https://github.com/$CRAVV_REPO/releases
-#                   (it serves <base>/latest and <base>/download/<tag>/<file>)
+#                   (it serves <base>/latest and <base>/download/<tag>/<file>);
+#                   https only, or plain http on http://127.0.0.1 or http://localhost
 set -eu
 
 # The default repository is a placeholder: update it (here and in the URLs
@@ -64,13 +65,33 @@ if [ "$os" = darwin ] && [ "$arch" = amd64 ] && [ "$(sysctl -n sysctl.proc_trans
 	arch=arm64
 fi
 
+# Downloads use https only. Plain http is allowed for a release server on
+# this machine (tests, local mirrors), and never with a user part, which would
+# send the request to another host.
+loopback=0
+case "$base" in
+*@*) die "CRAVV_BASE_URL must be an https URL (plain http only for http://127.0.0.1 or http://localhost): $base" ;;
+https://?*) ;;
+http://127.0.0.1 | http://127.0.0.1[:/]* | http://localhost | http://localhost[:/]*) loopback=1 ;;
+*) die "CRAVV_BASE_URL must be an https URL (plain http only for http://127.0.0.1 or http://localhost): $base" ;;
+esac
+
 if command -v curl >/dev/null 2>&1; then
-	fetch() { curl -fsSL -o "$2" "$1"; }
+	proto='=https'
+	[ "$loopback" = 0 ] || proto='=http'
+	fetch() { curl --proto "$proto" --proto-redir "$proto" --tlsv1.2 -fsSL -o "$2" "$1"; }
 	# The URL that <base>/latest redirects to ends in /tag/<tag>.
-	latest_url() { curl -fsSL -o /dev/null -w '%{url_effective}' "$base/latest"; }
+	latest_url() { curl --proto "$proto" --proto-redir "$proto" --tlsv1.2 -fsSL -o /dev/null -w '%{url_effective}' "$base/latest"; }
 elif command -v wget >/dev/null 2>&1; then
-	fetch() { wget -q -O "$2" "$1"; }
-	latest_url() { wget -q -O /dev/null --server-response "$base/latest" 2>&1 | sed -n 's/^ *[Ll]ocation: *//p' | tail -n 1 | tr -d '\r'; }
+	# BusyBox wget has no --https-only: use it where wget knows it.
+	wget_https=""
+	if [ "$loopback" = 0 ]; then
+		case "$(wget --help 2>&1)" in
+		*--https-only*) wget_https="--https-only" ;;
+		esac
+	fi
+	fetch() { wget -q $wget_https -O "$2" "$1"; }
+	latest_url() { wget -q $wget_https -O /dev/null --server-response "$base/latest" 2>&1 | sed -n 's/^ *[Ll]ocation: *//p' | tail -n 1 | tr -d '\r'; }
 else
 	die "curl or wget is needed"
 fi
