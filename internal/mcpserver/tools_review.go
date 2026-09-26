@@ -66,7 +66,7 @@ func (reviewPendingTool) Register(s *mcp.Server, c Caller) {
 		Description: "Ask your human to decide link requests and tasks waiting on tasks-ask links: one form each. " +
 			"If the form cannot be shown, the human gets a 4-digit code in a desktop notification; when they type " +
 			"\"accept <code>\" or \"reject\", call review_pending again with item, decision and code. You never see the code.",
-		Annotations: annLocal,
+		Annotations: annSend, // a decision reaches the peer (link accepted, task approved or denied)
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in reviewIn) (*mcp.CallToolResult, any, error) {
 		var text string
 		var err error

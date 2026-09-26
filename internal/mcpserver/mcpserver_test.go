@@ -190,7 +190,9 @@ func TestToolListAndDescriptions(t *testing.T) {
 			t.Errorf("%s should be read-only: %+v", n, a)
 		}
 	}
-	for _, n := range []string{"connect", "send_message", "create_task", "send_file", "update_task", "complete_task", "fail_task"} {
+	// review_pending sends the human's decision to the peer (link accepted,
+	// task approved or denied).
+	for _, n := range []string{"connect", "send_message", "create_task", "send_file", "update_task", "complete_task", "fail_task", "review_pending"} {
 		if a := hints[n]; a == nil || a.ReadOnlyHint || a.OpenWorldHint == nil || !*a.OpenWorldHint {
 			t.Errorf("%s sends to another machine: %+v", n, a)
 		}
