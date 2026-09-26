@@ -406,6 +406,11 @@ func (s *setup) offerPairing(st ipc.StatusResult) error {
 		}
 		fmt.Fprintf(s.w, "Paired with %s.\n", strings.Join(names, ", "))
 	}
+	if loopbackRelay(st.RelayURL) {
+		fmt.Fprintf(s.w, "The relay %s is reachable only from this machine, so another machine could not use a join code for it. "+
+			"To pair with another machine, use a relay it can reach: `cravv-connect setup --reset`.\n", terminalSafe(st.RelayURL))
+		return nil
+	}
 	pair := s.o.pair
 	if !pair && !s.o.yes {
 		var err error

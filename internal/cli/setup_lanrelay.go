@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
+	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -78,7 +80,13 @@ func (s *setup) startLANRelay() (string, string, error) {
 		return "", "", err
 	}
 	logPath := filepath.Join(s.paths.Home, "relay.log")
-	args := []string{"-addr", net.JoinHostPort("0.0.0.0", strconv.Itoa(lanRelayPort)), "-origin", origin}
+	// Every interface, so other machines can reach it; only loopback when
+	// no network address was found (other machines could not reach it anyway).
+	bind := "0.0.0.0"
+	if loopbackHost(host) {
+		bind = "127.0.0.1"
+	}
+	args := []string{"-addr", net.JoinHostPort(bind, strconv.Itoa(lanRelayPort)), "-origin", origin}
 	if err := s.sys.StartRelay(bin, args, []string{"CRAVV_RELAY_ADMIN_TOKEN=" + token}, logPath); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return "", "", fmt.Errorf("cravv-relay was not found next to cravv-connect (%s); install it from the release archive, or enter a relay URL", bin)
@@ -98,8 +106,27 @@ func (s *setup) startLANRelay() (string, string, error) {
 	}
 	fmt.Fprintf(s.w, "Started a LAN test relay at %s (log: %s).\n", origin, logPath)
 	fmt.Fprintln(s.w, "It keeps everything in memory and stops when this machine restarts; for real use, deploy the Cloudflare relay.")
-	if host == "127.0.0.1" {
-		fmt.Fprintln(s.w, "No network address was found, so only this machine can reach it.")
+	if bind == "127.0.0.1" {
+		fmt.Fprintln(s.w, "No network address was found, so the test relay listens on this machine only: other machines cannot reach it.")
+	} else {
+		fmt.Fprintln(s.w, "This test relay is reachable by anyone on this network. Use it only on a trusted network.")
 	}
 	return origin, token, nil
+}
+
+// loopbackHost reports whether host names this machine only (localhost or a
+// loopback address).
+func loopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	a, err := netip.ParseAddr(host)
+	return err == nil && a.Unmap().IsLoopback()
+}
+
+// loopbackRelay reports whether the relay at origin is reachable only from
+// this machine.
+func loopbackRelay(origin string) bool {
+	u, err := url.Parse(origin)
+	return err == nil && loopbackHost(u.Hostname())
 }

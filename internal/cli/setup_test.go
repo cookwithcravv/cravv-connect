@@ -330,6 +330,40 @@ func TestSetupStartsLANRelay(t *testing.T) {
 	if slices.Contains(r.prompt.asked, "password: Relay admin token (only for the relay's first machine; press Enter if another machine is already on it): ") {
 		t.Fatal("asked for the admin token of the relay it started")
 	}
+	if !strings.Contains(r.out.String(), "This test relay is reachable by anyone on this network. Use it only on a trusted network.\n") {
+		t.Fatalf("no network warning:\n%s", r.out.String())
+	}
+}
+
+// With no network address the LAN test relay listens on loopback only, says
+// other machines cannot reach it, and setup does not offer a join code
+// another machine could not use.
+func TestSetupLoopbackLANRelay(t *testing.T) {
+	r := newSetupRig(t, ipc.StatusResult{RelayURL: "http://127.0.0.1:8787", RelayConnected: true})
+	r.env.Hostname = func() (string, error) { return "gpu-box", nil }
+	r.prompt.lines = []string{""}
+	if code := r.run("--no-agents"); code != 0 {
+		t.Fatalf("code %d stderr %s", code, r.errb.String())
+	}
+	if len(r.sys.started) != 1 || !slices.Equal(r.sys.started[0].args, []string{"-addr", "127.0.0.1:8787", "-origin", "http://127.0.0.1:8787"}) {
+		t.Fatalf("started %v", r.sys.started)
+	}
+	out := r.out.String()
+	for _, want := range []string{
+		"No network address was found, so the test relay listens on this machine only: other machines cannot reach it.\n",
+		"== Pair a device ==\nThe relay http://127.0.0.1:8787 is reachable only from this machine, so another machine could not use a join code for it. " +
+			"To pair with another machine, use a relay it can reach: `cravv-connect setup --reset`.\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "reachable by anyone on this network") {
+		t.Error("warned about the network for a loopback relay")
+	}
+	if len(r.prompt.asked) != 1 {
+		t.Fatalf("asked %q", r.prompt.asked)
+	}
 }
 
 // <host>.local when it resolves, else the first private IPv4 address, else
