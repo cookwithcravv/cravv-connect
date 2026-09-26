@@ -330,6 +330,77 @@ machine killed because it may be compromised gets a new identity without
 reconnecting under the old one first. Pulling the switch again while it is on succeeds and
 changes nothing.
 
+## Managed sessions
+
+An offer lets a paired machine start agent sessions on this machine, in
+one folder, with nobody at the keyboard. Each item the peer sends runs
+`claude -p` in that folder. What a run can do depends on the offer's run
+mode:
+
+- **read-only**: it can read, glob and grep inside the folder, and use the
+  cravv-connect tools on its one link. Nothing else: no writes, no shell,
+  no web. Reads outside the folder, including through symlinks, are refused.
+- **edit-in-folder**: it can also edit and write files inside the folder,
+  but not the folder's Claude settings, git or tool configuration files.
+  No shell, no web.
+- **shell**: it can run commands. **A shell run can do anything your user
+  can**, including talking to the local cravv-connect daemon without a
+  token, reading `~/.cravv-connect`, and editing your `~/.claude`
+  settings. Choose it only for a machine you trust as much as yourself.
+
+How a run is contained (Claude Code 2.1.283 flags, checked by probes):
+
+- `--restricted`: the user, project and local settings files are ignored,
+  so neither your settings nor a `.claude/settings.json` in the folder can
+  add hooks, permission rules or a wider permission mode; the file tools
+  are confined to the folder; bypassPermissions is refused.
+- `--tools` names every built-in tool of the run mode, and the permission
+  mode is always given (dontAsk for read-only, acceptEdits otherwise);
+  anything that would ask a person is denied.
+- Only the cravv-connect MCP server (`--strict-mcp-config` with a config
+  the daemon writes), no skills, no CLAUDE.md at any level and no
+  auto-memory.
+- Only an allowlisted environment reaches the run: `HOME`, `PATH`,
+  `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TMPDIR`, `TERM`, and what
+  claude needs to log in and reach the API (`ANTHROPIC_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`,
+  `CLAUDE_CONFIG_DIR` and the proxy variables) when the daemon has them.
+  Nothing named `CRAVV_*`.
+- The run's MCP server binds to its managed session with a run token that
+  works for one connection and one run. It can only send messages, work on
+  its own tasks, send files from the offer's folder and list its link. It
+  cannot read the inbox (the daemon hands it the item), share, connect,
+  decide, unlock, change offers or use machine controls.
+- Each run starts in a process group of its own. The group is killed when
+  the run ends (even normally), at its timeout, when the session closes,
+  on the kill switch and at shutdown, and a daemon that restarts after a
+  crash kills groups recorded in the same boot. A process that calls
+  `setsid` (or double-forks into a new group) escapes this; only a shell
+  run can do that. cravv-connect does not use `systemd-run --scope` on
+  Linux.
+- Defense in depth: a connection to the daemon from a process inside a
+  live run (in its process group, or below its agent in the process tree,
+  by the socket's peer PID) may only bind with a run token. So a shell
+  run's `cravv-connect status` or a script that talks to the socket is
+  refused. A process that escaped the group and was reparented is not
+  caught: for a shell run this is a speed bump, not a boundary.
+- Caps: runs an hour per link, runs a day per machine, sessions open at
+  once per offer, and a run timeout. The hourly cap counts one link, and a
+  managed session has one link, so a peer that closes it and starts a new
+  managed session starts a new hourly count; the daily cap and the open
+  sessions cap still hold.
+
+**Opening a managed session.** `cravv-connect session open <name>` (or
+Open in the web UI) resumes the conversation in your terminal with your
+normal Claude settings, hooks and permissions. It was written by a run the
+peer drove, so both warn: "This conversation was driven by <machine>. It
+opens with your normal Claude settings; review before continuing."
+
+**Transcripts.** Claude Code keeps every managed conversation under
+`~/.claude/projects/<folder path with dashes>/<session id>.jsonl`. They
+grow with every run and stay after the session closes. cravv-connect does
+not delete them; remove old ones by hand when you no longer need them.
+
 ## Keys and local storage
 
 - **State directory:** `~/.cravv-connect` (or `CRAVV_HOME`), mode `0700`.

@@ -175,29 +175,41 @@ Offer rules are set per peer machine and are **password-gated** (web UI or CLI).
 | `runs_per_hour` | Default 30 per link |
 | `runs_per_day` | Default 200 per machine |
 
-`run_mode` values:
-- `read-only`: `--allowedTools Read,Glob,Grep,mcp__cravv-connect__*`
-- `edit-in-folder`: `--permission-mode acceptEdits --disallowedTools Bash,WebFetch,WebSearch`
-- `shell`: acceptEdits plus Bash.
-  - The rule editor makes the human type `shell` and shows "The peer can run commands as your user on this machine".
-  - This mode is what running training jobs needs.
+`run_mode` values (the exact flags, probed on Claude Code 2.1.283; section 12):
+- `read-only`: `--permission-mode dontAsk --tools Read,Glob,Grep --allowedTools mcp__cravv-connect__*`. Reads, globs and greps inside the folder only.
+- `edit-in-folder`: `--permission-mode acceptEdits --tools Read,Glob,Grep,Edit,Write --allowedTools mcp__cravv-connect__*`. Also edits and writes inside the folder, never the folder's settings, git or tool configuration files; no Bash, no web.
+- `shell`: `--permission-mode acceptEdits --tools Read,Glob,Grep,Edit,Write,Bash --allowedTools Bash,mcp__cravv-connect__*`.
+  - The rule editor makes the human type `shell` and shows: "Run mode shell: the peer can run commands as your user on this machine. A shell run can do anything your user can, including talking to the local cravv-connect daemon without a token, reading ~/.cravv-connect, and editing your ~/.claude settings."
+  - Bash is not confined to the folder. This mode is what running training jobs needs.
 
-Every run also:
-- uses `--strict-mcp-config` with a daemon-written MCP config that contains only cravv-connect (so no user-scope MCP servers or hooks are inherited);
-- sets `--disallowedTools "Bash(cravv-connect:*)"`, so the child cannot drive the local cravv-connect CLI;
-- never uses a bypass permission mode.
+Every run also gets:
+- `claude -p --session-id <uuid>` (first run) or `--resume <uuid>`, `--output-format json`, the prompt on stdin;
+- `--restricted`: ignores the user, project and local settings files (so no settings hooks, permission rules or `defaultMode` of the user or of the folder apply, and no user plugins load), turns project CLAUDE.md off, confines Read/Glob/Grep/Edit/Write to the folder (symlinks that leave it are refused too), and refuses bypassPermissions;
+- `--strict-mcp-config --mcp-config <daemon-written config>`: cravv-connect is the only MCP server. This flag is about MCP servers only; it is `--restricted` that keeps hooks and settings out. `--safe-mode` is not used: it also drops the servers of `--mcp-config`;
+- `--disable-slash-commands` (no skills) and `--permission-prompts none` (anything that would ask a person is denied);
+- `--disallowedTools "Bash(cravv-connect:*)"`, so a shell run's Bash cannot drive the local cravv-connect CLI by name;
+- the environment variables `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (no CLAUDE.md at any level, no auto-memory);
+- only an allowlisted environment from the daemon: `HOME`, `PATH`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TMPDIR`, `TERM`, and what claude needs to authenticate and reach the API (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, the proxy variables). Nothing named `CRAVV_*`;
+- never a bypass permission mode, and always an explicit `--permission-mode`.
+
+Caps: `runs_per_hour` counts runs on the link. A managed session has one link, so a peer that closes the link and requests a new managed session starts a new hourly count; `runs_per_day` per machine and `max_concurrent` bound that. The cap check and the run record are one store transaction.
 
 ### 6.2 Creation and runs
 
 - **Creation.** A `link.request` to an offer:
   1. checks the rules, the caps and the concurrency limit;
   2. creates a managed session named from the label plus a 4-character suffix;
-  3. accepts at `min(proposed, permission)` with no prompt. The password-gated rule was the human's approval.
+  3. accepts at `min(proposed, permission)` with no prompt, except that `tasks-ask` is granted as `messages` (nobody could answer the ask). The password-gated rule was the human's approval.
 - **Runs.**
   - The daemon's `SessionHost` keeps one queue per managed session and runs one item at a time.
   - Each item runs through the adapter: `claude -p <prompt> [--resume <agent_session_id>] --output-format json` in the folder, with the flags above. If the agent CLI supports choosing a session ID up front (`--session-id`, checked in Phase 0), the daemon uses it; otherwise it records the ID from the first run's JSON.
-  - The child's MCP server identifies itself with the run token. It can only act as that managed session, and only within the link's permissions. It cannot share sessions, connect, or change policy.
-- **Opening.** `cravv-connect session open <name>` (or "Open" in the web UI) runs `claude --resume <id>` in the folder. While a human has it open, the daemon pauses the session's queue and the session shows as `live`.
+  - The child's MCP server identifies itself with the run token. It can only act as that managed session, and only within the link's permissions. It cannot share sessions, connect, or change policy, and it has no inbox tools: the host owns the queue and puts the item in the prompt.
+  - The token is single-use: the first connection that binds it keeps it, and it dies with the run. The run's MCP config (which holds it) is removed at the bind, and stale configs are removed when the daemon starts.
+  - Each run's process group is recorded and killed after the run (even after a normal exit), on close, on the kill switch and at shutdown; a daemon that starts kills groups a crashed daemon left in the same boot. A process that calls `setsid` escapes its group; only a shell run can do that.
+  - Defense in depth: a daemon connection whose peer process is inside a live run (in its process group or below its agent in the process tree) may only register and bind with its run token.
+  - Started (whether `--resume` is used) comes from the agent: its JSON result for the session ID, or its "already in use" / "No conversation found" error, after which the item runs once more the other way.
+- **Opening.** `cravv-connect session open <name>` (or "Open" in the web UI) runs `claude --resume <id>` in the folder. While a human has it open, the daemon pauses the session's queue and the session shows as `live`. Both warn first: "This conversation was driven by <machine>. It opens with your normal Claude settings; review before continuing."
+- **Transcripts.** Claude Code keeps each managed conversation under `~/.claude/projects/<folder>/`. They grow with every run and are not removed when the session closes; delete old ones by hand (docs/security.md).
 - **Audit and limits.** Every run is audited (session, link, duration, turns, exit status). Hitting a cap fails the task with `rate_limited` and tells the sender.
 - **Links per managed session.** A managed session has exactly one link. Closing that link closes the session.
 
@@ -352,7 +364,7 @@ Inbox, tasks and files are scoped by `(session_id, link_id)`.
 ### Other protections
 
 - **Identity:** connection binding, reattach, wake and run tokens (section 3.2). No session ID ever appears in `ps`.
-- **Managed runs:** the section 6 restrictions (strict MCP config, run mode tool rules, CLI denied, caps, folder checks).
+- **Managed runs:** the section 6 restrictions (`--restricted`, only the cravv-connect MCP server, `--tools` per run mode, explicit permission mode, no CLAUDE.md, hooks or memory, allowlisted environment, CLI denied, caps, folder checks, process groups, single-use run tokens, peer-PID check).
 - **Threat-model additions to document:**
   - a managed `shell` session lets the peer act as your user;
   - on Linux, the identity seed in `store.db` is readable by same-user processes (v1 already says so).
@@ -390,3 +402,22 @@ Inbox, tasks and files are scoped by `(session_id, link_id)`.
 - Elicitation is used where supported. Everywhere else the confirmation-code fallback (section 7.2) applies, and a bare decline is never treated as a decision.
 - Managed sessions use a daemon-chosen `--session-id`.
 - `--max-turns` was not listed in `--help`, so run caps rely on `run_timeout` plus the per-hour and per-day caps. `--max-turns` is used only if a later Claude version documents it.
+
+### Managed run containment (security review, 2026-09-26, Claude Code 2.1.283, macOS)
+
+Probed with one-line prompts in a temporary folder that held a canary `CLAUDE.md` ("every reply must begin with PINEAPPLE42") and a `.claude/settings.json` with `SessionStart` and `UserPromptSubmit` hooks that touch marker files, `permissions.allow` for Bash, Write, Edit, WebFetch and `Read(//**)`, and `defaultMode: bypassPermissions`; a canary file in a sibling folder; and a stub `cravv-connect` stdio MCP server that records calls. The environment was cut to `HOME PATH USER LOGNAME SHELL LANG TMPDIR TERM` (the OAuth login in the keychain still worked).
+
+| Probe | Flags | Result |
+|---|---|---|
+| `--safe-mode` | `--safe-mode --restricted --strict-mcp-config --mcp-config ...` | The MCP server was not loaded (no tools, stub never started). Not usable. |
+| Control | `--setting-sources project --strict-mcp-config --tools ""` (no `--restricted`) | The canary CLAUDE.md was honored (reply began with PINEAPPLE42) and both project hooks ran: the canaries work. |
+| read-only | final read-only flags | MCP `ping` worked. Read and Grep of the sibling folder: denied ("outside working directory"). Read inside: allowed. Tools present: Glob, Grep, Read and the MCP tool only. No CLAUDE.md, no hooks. |
+| read-only, symlinks | a symlink in the folder to the sibling file, and one to the sibling folder | Read and Grep through both: denied. |
+| edit-in-folder | final edit flags | MCP worked; Write inside: allowed; Write outside: denied; Edit of the folder's `.claude/settings.json`: denied (needs a person); Bash and WebFetch: absent. |
+| shell | final shell flags with `--session-id` | MCP worked; Bash `cat` of the sibling file: allowed (shell is your user). No hooks ran. |
+| resume | `--resume` of that session with read-only flags | Continued the conversation. |
+| `--session-id` of an existing session | | Exit 1, stderr `Error: Session ID <uuid> is already in use.` |
+| `--resume` of an unknown session | | Exit 1, stderr `No conversation found with session ID: <uuid>` |
+| `TestClaudeContainment` (`CRAVV_CLAUDE_TEST=1`) | the exact argv of read-only and edit-in-folder | Passed: MCP works; no outside read or write, no Bash, no hook, no CLAUDE.md, no edit of the folder's settings. `TestClaudeSmoke` (session-id then resume) passed. |
+
+**Decisions:** every run uses `--restricted --strict-mcp-config --mcp-config <config> --disable-slash-commands --permission-prompts none`, an explicit `--permission-mode` (dontAsk for read-only, acceptEdits otherwise), `--tools` listing the mode's built-in tools, and the environment variables `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (section 6.1). `--bare` is not used: it reads no OAuth or keychain login. The user's own settings hooks cannot be observed without editing their settings; `--restricted` documents that it ignores the user settings file, and the debug log showed 0 hooks registered.

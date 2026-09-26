@@ -7942,3 +7942,40 @@ e2e: a Mac chat starts a managed session on the GPU box (fake claude), run token
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 MSG
 ```
+
+---
+
+## Security review fixes (after Task 20)
+
+A security review of Phase 3 found that the child run was not contained as
+section 6.1 claimed (`--strict-mcp-config` keeps other MCP servers out but
+not hooks, settings, CLAUDE.md or a wider `defaultMode`). Fixed on main:
+
+- **Run flags** (probed on claude 2.1.283, v2 spec section 12): every run is
+  `claude -p --session-id|--resume <uuid> --output-format json --restricted
+  --strict-mcp-config --mcp-config <cfg> --disable-slash-commands
+  --permission-prompts none`, then per mode:
+  read-only `--permission-mode dontAsk --tools Read,Glob,Grep --allowedTools
+  mcp__cravv-connect__* --disallowedTools Bash(cravv-connect:*)`;
+  edit-in-folder `--permission-mode acceptEdits --tools
+  Read,Glob,Grep,Edit,Write` (same allow and deny);
+  shell `--permission-mode acceptEdits --tools Read,Glob,Grep,Edit,Write,Bash
+  --allowedTools Bash,mcp__cravv-connect__*`. The environment adds
+  `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
+  `--safe-mode` drops `--mcp-config` servers and `--bare` cannot use an
+  OAuth login, so neither is used. `TestClaudeContainment`
+  (`CRAVV_CLAUDE_TEST=1`) checks the result against the real claude.
+- **Environment:** only an allowlist (`internal/childenv`) reaches a run.
+- **Process groups:** killed after every run, recorded in `runs/*.group`,
+  killed on Close, StopAll and at startup (same boot only).
+- **Startup window:** a stop between a run's checks and its start stops it.
+- **Peer PID:** a daemon connection from inside a live run may only register
+  and bind with its run token.
+- **Run tokens:** single-use per connection; stale run configs removed at
+  startup; runs have no inbox tools or methods; files are sent from the
+  managed session's folder.
+- **Started:** learned from the agent (its result, or its "already in use" or
+  "No conversation found" error, with one retry the other way).
+- **Caps:** checked and recorded in one transaction; tasks-ask is granted
+  as messages.
+- **Open:** CLI and web UI warn that the conversation was driven by a peer.
