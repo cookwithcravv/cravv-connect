@@ -73,6 +73,7 @@ type Daemon struct {
 	sessions *SessionRegistry
 	shared   *SessionService
 	inbox    *InboxService
+	attend   *AttentionService
 
 	svc        atomic.Pointer[services]
 	registered atomic.Bool
@@ -511,6 +512,7 @@ func (d *Daemon) Close() error {
 
 func (d *Daemon) Sessions() *SessionRegistry    { return d.sessions }
 func (d *Daemon) Shared() *SessionService       { return d.shared }
+func (d *Daemon) Attention() *AttentionService  { return d.attend }
 func (d *Daemon) Inbox() *InboxService          { return d.inbox }
 func (d *Daemon) Tasks() *TaskService           { return d.svc.Load().tasks }
 func (d *Daemon) Files() *FileService           { return d.svc.Load().files }

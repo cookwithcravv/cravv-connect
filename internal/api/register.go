@@ -25,11 +25,20 @@ func NewServer(p Ports, clock core.Clock, logger *slog.Logger) *ipc.Server {
 		Clock:  clock,
 		Killed: p.Control.Killed,
 		OnDisconnect: func(cs *ipc.ConnState) {
+			ctx := context.Background()
+			if id := cs.Shared(); id != "" {
+				if err := p.Shared.Detach(ctx, id, cs.ID()); err != nil {
+					logger.Warn("shared session detach", "err", err)
+				}
+			}
 			if name := cs.Session(); name != "" {
-				if err := p.Sessions.Disconnect(context.Background(), name); err != nil {
+				if err := p.Sessions.Disconnect(ctx, name); err != nil {
 					logger.Warn("session disconnect", "session", name, "err", err)
 				}
 			}
+		},
+		CheckShared: func(cs *ipc.ConnState) error {
+			return p.Shared.Current(context.Background(), cs.Shared(), cs.ID())
 		},
 		Logger: logger,
 	})
@@ -43,6 +52,9 @@ func Register(s *ipc.Server, p Ports, clock core.Clock) {
 	h := &handlers{p: p, clock: clock}
 	for _, group := range []func(*ipc.Server){
 		h.registerSession,
+		h.registerShared,
+		h.registerDiscovery,
+		h.registerLinks,
 		h.registerAuth,
 		h.registerChat,
 		h.registerInbox,

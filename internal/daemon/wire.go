@@ -238,6 +238,7 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 	d.shared = NewSessionService(db, opts.Clock)
 	d.shared.AddObserver(sessionLinks{d})
 	d.inbox = NewInboxService(db, d.sessions, db, opts.Clock)
+	d.attend = NewAttentionService(d.shared, db, db, d.inbox)
 	d.sessions.OnExpired(func(ctx context.Context, rec store.SessionRecord) {
 		if rec.Agent == CLIAgent {
 			return // CLI sessions keep their claimed tasks (a later cli@<dir> continues them)

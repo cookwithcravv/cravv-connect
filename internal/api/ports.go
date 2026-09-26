@@ -19,6 +19,44 @@ type SessionPort interface {
 	Disconnect(ctx context.Context, name string) error
 }
 
+// SharedPort manages shared sessions. A session is bound to the IPC
+// connection (conn) that shared or reattached it; no method takes a session
+// ID from a client.
+type SharedPort interface {
+	// Share creates a session for the attachment (agent, projectDir) on conn
+	// and returns it with its ID (kept in the connection state, never sent).
+	Share(ctx context.Context, conn uint64, agent, projectDir, name, purpose, visibility string) (id string, res ipc.ShareResult, err error)
+	// Current fails unless session id is still bound to conn.
+	Current(ctx context.Context, id string, conn uint64) error
+	Close(ctx context.Context, id string) error
+	Set(ctx context.Context, id string, purpose, visibility *string) (ipc.SharedSessionView, error)
+	Reattach(ctx context.Context, conn uint64, token, agent, projectDir string) (id string, view ipc.SharedSessionView, err error)
+	Detach(ctx context.Context, id string, conn uint64) error
+	// Listen blocks until the session holding the wake token has something
+	// pending (counts only), the timeout passes (0: none) or ctx ends.
+	Listen(ctx context.Context, wakeToken string, timeout time.Duration) (ipc.ListenResult, error)
+}
+
+// DiscoveryPort lists the sessions a paired machine lets this one see.
+type DiscoveryPort interface {
+	Sessions(ctx context.Context, machine string) (ipc.SessionsListResult, error)
+}
+
+// LinkPort manages links. sessionID "" means every link (the human's CLI);
+// otherwise only that shared session's links are visible.
+type LinkPort interface {
+	Connect(ctx context.Context, sessionID, target, permission, note string) (ipc.LinkView, error)
+	List(ctx context.Context, sessionID string) ([]ipc.LinkView, error)
+	Disconnect(ctx context.Context, sessionID string, link int64) error
+	// Restrict lowers what the peer may do (no password).
+	Restrict(ctx context.Context, sessionID string, link int64, permission string) (ipc.LinkView, error)
+	// Permit sets any level; raising needs unlocked (the password).
+	Permit(ctx context.Context, link int64, permission string, unlocked bool) (ipc.LinkView, error)
+	// Decide accepts or rejects a pending request. Accepting needs unlocked
+	// (Phase 1 has only the password path).
+	Decide(ctx context.Context, link int64, accept bool, permission string, unlocked bool) (ipc.LinkView, error)
+}
+
 // ChatPort sends chat. to is "alias" or "alias/session".
 type ChatPort interface {
 	Send(ctx context.Context, fromSession, to, text string) (string, error)
@@ -119,18 +157,21 @@ type AuthPort interface {
 
 // Ports aggregates every port the API needs.
 type Ports struct {
-	Sessions SessionPort
-	Chat     ChatPort
-	Inbox    InboxPort
-	Tasks    TaskPort
-	Files    FilePort
-	Peers    PeerPort
-	Pairing  PairingPort
-	Control  ControlPort
-	Status   StatusPort
-	Audit    AuditPort
-	Hook     HookPort
-	Auth     AuthPort
+	Sessions  SessionPort
+	Shared    SharedPort
+	Discovery DiscoveryPort
+	Links     LinkPort
+	Chat      ChatPort
+	Inbox     InboxPort
+	Tasks     TaskPort
+	Files     FilePort
+	Peers     PeerPort
+	Pairing   PairingPort
+	Control   ControlPort
+	Status    StatusPort
+	Audit     AuditPort
+	Hook      HookPort
+	Auth      AuthPort
 	// Lifecycle is optional: nil means daemon.shutdown is not supported.
 	Lifecycle LifecyclePort
 }

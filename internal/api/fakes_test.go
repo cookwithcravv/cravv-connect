@@ -29,6 +29,7 @@ type world struct {
 	trustSet     core.TrustLevel
 	unread       map[string]int
 	pending      int
+	lw           *linkWorld
 }
 
 func newWorld() *world {
@@ -37,12 +38,13 @@ func newWorld() *world {
 		peers:        map[string]store.Peer{},
 		files:        map[string]store.FileRecord{},
 		disconnected: make(chan string, 4),
+		lw:           newLinkWorld(),
 	}
 }
 
 func (w *world) ports() Ports {
 	return Ports{
-		Sessions: fSessions{w}, Chat: fChat{w}, Inbox: fInbox{w}, Tasks: fTasks{w}, Files: fFiles{w},
+		Sessions: fSessions{w}, Shared: fShared{w.lw}, Discovery: fDiscovery{w.lw}, Links: fLinks{w.lw}, Chat: fChat{w}, Inbox: fInbox{w}, Tasks: fTasks{w}, Files: fFiles{w},
 		Peers: fPeers{w}, Pairing: fPairing{w}, Control: fControl{w}, Status: fStatus{w},
 		Audit: fAudit{w}, Hook: fHook{w}, Auth: fAuth{w},
 	}

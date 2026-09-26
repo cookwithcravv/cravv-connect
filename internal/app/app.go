@@ -23,7 +23,7 @@ import (
 // construction never touches d.
 func Ports(d *daemon.Daemon) api.Ports {
 	return api.Ports{
-		Sessions: sessions{d}, Chat: chat{d}, Inbox: inbox{d}, Tasks: tasks{d}, Files: files{d},
+		Sessions: sessions{d}, Shared: shared{d}, Discovery: discovery{d}, Links: links{d}, Chat: chat{d}, Inbox: inbox{d}, Tasks: tasks{d}, Files: files{d},
 		Peers: peers{d}, Pairing: pairing{d}, Control: control{d}, Status: status{d},
 		Audit: auditReader{d}, Hook: hook{d}, Auth: guard{d},
 	}

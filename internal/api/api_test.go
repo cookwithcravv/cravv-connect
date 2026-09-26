@@ -117,6 +117,19 @@ func TestEveryMethodRegisteredWithGate(t *testing.T) {
 		ipc.MethodAuditRead:       ipc.GateAllowWhenKilled,
 		ipc.MethodHookCounts:      ipc.GateAllowWhenKilled,
 		ipc.MethodDaemonShutdown:  ipc.GateAllowWhenKilled,
+		ipc.MethodSessionShare:    ipc.GateSession,
+		ipc.MethodSessionClose:    ipc.GateShared,
+		ipc.MethodSessionSet:      ipc.GateShared,
+		ipc.MethodSessionReattach: ipc.GateSession,
+		ipc.MethodSessionListen:   ipc.GateNone,
+		ipc.MethodMachines:        ipc.GateAllowWhenKilled,
+		ipc.MethodSessionsList:    ipc.GateNone,
+		ipc.MethodLinkConnect:     ipc.GateShared,
+		ipc.MethodLinks:           ipc.GateNone,
+		ipc.MethodLinkDisconnect:  ipc.GateNone,
+		ipc.MethodLinkRestrict:    ipc.GateNone,
+		ipc.MethodLinkPermit:      ipc.GateUnlock,
+		ipc.MethodLinkDecide:      ipc.GateNone,
 	}
 	got := srv.Methods()
 	if len(got) != len(want) {

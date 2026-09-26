@@ -1,0 +1,191 @@
+package e2e
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cravv/cravv-connect/internal/ipc"
+)
+
+func sessionNames(r ipc.SessionsListResult) string {
+	var names []string
+	for _, s := range r.Sessions {
+		names = append(names, s.Name+":"+s.State)
+	}
+	return strings.Join(names, ",")
+}
+
+// Discovery shows only the sessions a machine may see; a session it cannot
+// see is refused exactly like a missing one.
+func TestShareAndDiscoverVisibility(t *testing.T) {
+	t.Parallel()
+	_, a, b := NewPair(t, PairOptions{})
+	lead := a.Share("claude", "lead", "private")
+	b.Share("claude", "trainer", "all-peers")
+	secret := b.Share("codex", "secret", "private")
+
+	var r ipc.SessionsListResult
+	Call(t, a.Conn(), ipc.MethodSessionsList, ipc.MachineParams{Machine: "bob"}, &r)
+	if got := sessionNames(r); got != "trainer:open" {
+		t.Fatalf("alice sees %q, want only trainer", got)
+	}
+	if r.Sessions[0].Kind != "live" || !strings.Contains(r.Sessions[0].Wrapped, "trainer work") {
+		t.Fatalf("entry %+v", r.Sessions[0])
+	}
+	wantKind(t, TryCall(lead.C, ipc.MethodLinkConnect, ipc.LinkConnectParams{Target: "bob/secret", Permission: "messages"}, nil), ipc.KindNotFound)
+	wantKind(t, TryCall(lead.C, ipc.MethodLinkConnect, ipc.LinkConnectParams{Target: "bob/nothing", Permission: "messages"}, nil), ipc.KindNotFound)
+
+	vis := "peers:alice"
+	Call(t, secret.C, ipc.MethodSessionSet, ipc.SessionSetParams{Visibility: &vis}, nil)
+	Call(t, a.Conn(), ipc.MethodSessionsList, ipc.MachineParams{Machine: "bob"}, &r)
+	if got := sessionNames(r); got != "trainer:open,secret:open" {
+		t.Fatalf("after session.set alice sees %q", got)
+	}
+	// Session names are unique among open sessions on a machine.
+	c, _ := b.Session("claude")
+	wantKind(t, TryCall(c, ipc.MethodSessionShare, ipc.SessionShareParams{Name: "trainer"}, nil), ipc.KindBadRequest)
+}
+
+// A link request is decided once, on the accepting side; accepting needs
+// the password in Phase 1. The requester sees the granted permission.
+func TestLinkRequestAcceptedWithPassword(t *testing.T) {
+	t.Parallel()
+	_, a, b := NewPair(t, PairOptions{})
+	lead := a.Share("claude", "lead", "private")
+	trainer := b.Share("claude", "trainer", "all-peers")
+	out := Connect(t, lead, "bob/trainer", "tasks-ask", "please run the training job")
+	if out.State != "pending" || out.Direction != "out" || out.RemoteSession != "trainer" {
+		t.Fatalf("requester's link %+v", out)
+	}
+	in := b.WaitLink(wait, "request", func(l ipc.LinkView) bool { return l.State == "pending" && l.Direction == "in" })
+	if in.Proposed != "tasks-ask" || in.Session != "trainer" || in.RemoteSession != "lead" || !strings.Contains(in.Wrapped, "please run the training job") {
+		t.Fatalf("request as bob sees it %+v", in)
+	}
+	var n ipc.ListenResult
+	n = b.Listen(trainer.Res.WakeToken, 5*time.Second)
+	if n.Requests != 1 || n.Unread < 1 {
+		t.Fatalf("listen counts %+v", n)
+	}
+	wantKind(t, TryCall(b.Conn(), ipc.MethodLinkDecide, ipc.LinkDecideParams{Link: in.Link, Accept: true}, nil), ipc.KindAuthRequired)
+	got := b.Decide(in.Link, true, "")
+	if got.State != "active" || got.PermissionIn != "tasks-ask" {
+		t.Fatalf("accepted %+v", got)
+	}
+	a.WaitLink(wait, "accepted", func(l ipc.LinkView) bool {
+		return l.Link == out.Link && l.State == "active" && l.PermissionOut == "tasks-ask" && l.PermissionIn == "messages"
+	})
+	// Only the session's own links are visible to its connection.
+	var mine ipc.LinksResult
+	Call(t, trainer.C, ipc.MethodLinks, nil, &mine)
+	if len(mine.Links) != 1 || mine.Links[0].Link != in.Link {
+		t.Fatalf("trainer's links %+v", mine.Links)
+	}
+	other := b.Share("codex", "other", "private")
+	Call(t, other.C, ipc.MethodLinks, nil, &mine)
+	if len(mine.Links) != 0 {
+		t.Fatalf("another session sees %+v", mine.Links)
+	}
+	wantKind(t, TryCall(other.C, ipc.MethodLinkDisconnect, ipc.LinkParams{Link: in.Link}, nil), ipc.KindNotFound)
+}
+
+func TestDisconnectClosesBothSides(t *testing.T) {
+	t.Parallel()
+	_, a, b := NewPair(t, PairOptions{})
+	l := LinkUp(t, a, b, "messages")
+	Call(t, l.A.C, ipc.MethodLinkDisconnect, ipc.LinkParams{Link: l.ANum}, nil)
+	if got := a.Link(l.ANum); got.State != "closed" || got.Reason != "disconnected" {
+		t.Fatalf("alice %+v", got)
+	}
+	b.WaitLink(wait, "closed by peer", func(v ipc.LinkView) bool {
+		return v.Link == l.BNum && v.State == "closed" && v.Reason == core.CloseClosedByPeer
+	})
+}
+
+// v2 success criterion 3: when a linked session closes, the other side
+// learns within 5 seconds while both machines are online.
+func TestSessionCloseReachesPeerWithinFiveSeconds(t *testing.T) {
+	t.Parallel()
+	_, a, b := NewPair(t, PairOptions{})
+	l := LinkUp(t, a, b, "messages")
+	start := time.Now()
+	Call(t, l.B.C, ipc.MethodSessionClose, nil, nil)
+	a.WaitLink(5*time.Second, "session_closed", func(v ipc.LinkView) bool {
+		return v.Link == l.ANum && v.State == "closed" && v.Reason == core.CloseSessionClosed
+	})
+	t.Logf("peer learned of the close after %s", time.Since(start).Round(time.Millisecond))
+	wantKind(t, TryCall(l.B.C, ipc.MethodSessionClose, nil, nil), ipc.KindNotShared)
+}
+
+// v2 success criterion 3: when a machine drops, the link closes on the
+// other side after the presence timeout (150 seconds, on a fake clock).
+func TestPresenceTimeoutWhenMachineDrops(t *testing.T) {
+	t.Parallel()
+	clock := core.NewFakeClock(time.Now())
+	_, a, b := NewPairWithClock(t, PairOptions{}, clock)
+	l := LinkUp(t, a, b, "messages")
+	ctx := context.Background()
+	// Bob drops first, so no pong from before the drop can arrive late.
+	b.Stop()
+	if err := a.Daemon.Presence().Tick(ctx); err != nil { // the link's timeout starts now
+		t.Fatal(err)
+	}
+	for range 5 { // 150 seconds of pings nobody answers
+		clock.Advance(core.PresenceInterval)
+		if err := a.Daemon.Presence().Tick(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := a.Link(l.ANum); got.State != "active" {
+		t.Fatalf("closed before the timeout: %+v", got)
+	}
+	clock.Advance(time.Second)
+	if err := a.Daemon.Presence().Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.Link(l.ANum); got.State != "closed" || got.Reason != core.ClosePresenceTimeout {
+		t.Fatalf("after the timeout: %+v", got)
+	}
+}
+
+// A session whose connection drops is away: its links stay open, and a
+// reattach with the token brings it back with the same links.
+func TestAwayAndReattachKeepLinks(t *testing.T) {
+	t.Parallel()
+	_, a, b := NewPair(t, PairOptions{})
+	l := LinkUp(t, a, b, "messages")
+	l.B.C.Close()
+	a.WaitLink(wait, "peer away", func(v ipc.LinkView) bool { return v.Link == l.ANum && v.RemoteAway && v.State == "active" })
+	back := b.Reattach("claude", l.B)
+	a.WaitLink(wait, "peer back", func(v ipc.LinkView) bool { return v.Link == l.ANum && !v.RemoteAway && v.State == "active" })
+	var mine ipc.LinksResult
+	Call(t, back.C, ipc.MethodLinks, nil, &mine)
+	if len(mine.Links) != 1 || mine.Links[0].State != "active" {
+		t.Fatalf("links after reattach %+v", mine.Links)
+	}
+	// Another agent or folder cannot take the session.
+	c, _ := b.Session("codex")
+	wantKind(t, TryCall(c, ipc.MethodSessionReattach, ipc.SessionReattachParams{ReattachToken: l.B.Res.ReattachToken}, nil), ipc.KindNotFound)
+}
+
+// An away session closes when the away grace (10 minutes) runs out, and its
+// links close with it.
+func TestAwayGraceExpiryClosesLinks(t *testing.T) {
+	t.Parallel()
+	clock := core.NewFakeClock(time.Now())
+	_, a, b := NewPairWithClock(t, PairOptions{}, clock)
+	l := LinkUp(t, a, b, "messages")
+	l.B.C.Close()
+	a.WaitLink(wait, "peer away", func(v ipc.LinkView) bool { return v.Link == l.ANum && v.RemoteAway })
+	clock.Advance(core.AwayGrace + time.Second)
+	if err := b.Daemon.Maintain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	a.WaitLink(wait, "session_closed", func(v ipc.LinkView) bool {
+		return v.Link == l.ANum && v.State == "closed" && v.Reason == core.CloseSessionClosed
+	})
+	c, _ := b.Session("claude")
+	wantKind(t, TryCall(c, ipc.MethodSessionReattach, ipc.SessionReattachParams{ReattachToken: l.B.Res.ReattachToken}, nil), ipc.KindNotFound)
+}

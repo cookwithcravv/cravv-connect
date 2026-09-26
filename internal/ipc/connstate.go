@@ -17,6 +17,7 @@ type ConnState struct {
 	mu            sync.Mutex
 	clock         core.Clock
 	session       string
+	agent         string
 	projectDir    string
 	shared        string
 	unlockedUntil time.Time
@@ -68,6 +69,20 @@ func (c *ConnState) SetSession(name, projectDir string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.session, c.projectDir = name, projectDir
+}
+
+// Agent returns the agent name the connection registered with.
+func (c *ConnState) Agent() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.agent
+}
+
+// SetAgent records the agent name the connection registered with.
+func (c *ConnState) SetAgent(agent string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.agent = agent
 }
 
 // Unlock opens the password window for ttl and returns its end.

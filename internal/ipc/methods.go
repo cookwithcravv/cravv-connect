@@ -46,6 +46,21 @@ const (
 	MethodAuditRead       = "audit.read"
 	MethodHookCounts      = "hook.counts"
 	MethodDaemonShutdown  = "daemon.shutdown"
+
+	// v2: shared sessions, discovery and links.
+	MethodSessionShare    = "session.share"
+	MethodSessionClose    = "session.close"
+	MethodSessionSet      = "session.set"
+	MethodSessionReattach = "session.reattach"
+	MethodSessionListen   = "session.listen"
+	MethodMachines        = "machines"
+	MethodSessionsList    = "sessions.list"
+	MethodLinkConnect     = "link.connect"
+	MethodLinks           = "links"
+	MethodLinkDisconnect  = "link.disconnect"
+	MethodLinkRestrict    = "link.restrict"
+	MethodLinkPermit      = "link.permit"
+	MethodLinkDecide      = "link.decide"
 )
 
 // Empty is the params or result of methods that carry nothing ({}).
@@ -275,4 +290,120 @@ type StatusResult struct {
 	InboxUnread      int        `json:"inbox_unread"`
 	PendingApprovals int        `json:"pending_approvals"`
 	Errors           []string   `json:"errors,omitempty"`
+}
+
+// SessionShareParams shares the chat on this connection. Visibility is
+// "private" (the default), "all-peers" or "peers:<alias>[,<alias>...]".
+type SessionShareParams struct {
+	Name       string `json:"name"`
+	Purpose    string `json:"purpose,omitempty"`
+	Visibility string `json:"visibility,omitempty"`
+}
+
+// SharedSessionView is a local shared session. It never carries its ID.
+type SharedSessionView struct {
+	Name       string `json:"name"`
+	Purpose    string `json:"purpose,omitempty"`
+	Visibility string `json:"visibility"`
+	State      string `json:"state"`
+	Kind       string `json:"kind"`
+	Agent      string `json:"agent"`
+}
+
+// ShareResult carries the two secrets for the client that shared: the wake
+// token for the listener (counts only) and the reattach token for taking the
+// session back after a reconnect. Neither may be put on a command line.
+type ShareResult struct {
+	Session       SharedSessionView `json:"session"`
+	WakeToken     string            `json:"wake_token"`
+	ReattachToken string            `json:"reattach_token"`
+}
+
+// SessionSetParams changes the session; a nil field is left unchanged.
+type SessionSetParams struct {
+	Purpose    *string `json:"purpose,omitempty"`
+	Visibility *string `json:"visibility,omitempty"`
+}
+
+type SessionReattachParams struct {
+	ReattachToken string `json:"reattach_token"`
+}
+
+// SessionListenParams blocks until the session holding the wake token has
+// something pending, or for TimeoutS seconds (0: until the connection ends).
+type SessionListenParams struct {
+	WakeToken string `json:"wake_token"`
+	TimeoutS  int    `json:"timeout_s,omitempty"`
+}
+
+// ListenResult is counts only: never bodies, names or IDs.
+type ListenResult struct {
+	Unread   int `json:"unread"`
+	Requests int `json:"requests"`
+}
+
+type MachineParams struct {
+	Machine string `json:"machine"`
+}
+
+// RemoteSessionView is a session a peer lets this machine see. Name is
+// validated ([a-z0-9-]); the peer's free-text purpose is only in Wrapped.
+type RemoteSessionView struct {
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	Agent   string `json:"agent,omitempty"`
+	State   string `json:"state"`
+	Wrapped string `json:"wrapped,omitempty"`
+}
+
+type SessionsListResult struct {
+	Machine  string              `json:"machine"`
+	Sessions []RemoteSessionView `json:"sessions"`
+}
+
+// LinkConnectParams asks target ("machine/session") for a link from the
+// session shared on this connection; Permission is what this side proposes
+// to do there.
+type LinkConnectParams struct {
+	Target     string `json:"target"`
+	Permission string `json:"permission"`
+	Note       string `json:"note,omitempty"`
+}
+
+type LinkParams struct {
+	Link int64 `json:"link"`
+}
+
+type LinkPermissionParams struct {
+	Link       int64  `json:"link"`
+	Permission string `json:"permission"`
+}
+
+// LinkDecideParams accepts or rejects a pending request. Permission is the
+// level granted ("" grants what was proposed).
+type LinkDecideParams struct {
+	Link       int64  `json:"link"`
+	Accept     bool   `json:"accept"`
+	Permission string `json:"permission,omitempty"`
+}
+
+// LinkView is one link. RemoteSession is validated ([a-z0-9-]); the peer's
+// free-text purpose and request note are only in Wrapped.
+type LinkView struct {
+	Link          int64  `json:"link"`
+	Machine       string `json:"machine"`
+	Session       string `json:"session"`
+	RemoteSession string `json:"remote_session"`
+	Direction     string `json:"direction"`
+	State         string `json:"state"`
+	PermissionIn  string `json:"permission_in,omitempty"`
+	PermissionOut string `json:"permission_out,omitempty"`
+	Proposed      string `json:"proposed,omitempty"`
+	RemoteAway    bool   `json:"remote_away,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+	Wrapped       string `json:"wrapped,omitempty"`
+}
+
+type LinksResult struct {
+	Links []LinkView `json:"links"`
 }

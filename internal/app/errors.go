@@ -4,6 +4,7 @@ import (
 	"github.com/cravv/cravv-connect/internal/auth"
 	"github.com/cravv/cravv-connect/internal/daemon"
 	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cravv/cravv-connect/internal/store"
 )
 
 // Wire kinds for daemon and auth errors that have no core sentinel.
@@ -24,6 +25,15 @@ func init() {
 		kind string
 	}{
 		{daemon.ErrBadAlias, ipc.KindBadRequest},
+		{daemon.ErrBadSessionName, ipc.KindBadRequest},
+		{daemon.ErrBadPurpose, ipc.KindBadRequest},
+		{daemon.ErrBadVisibility, ipc.KindBadRequest},
+		{daemon.ErrAlreadyShared, ipc.KindBadRequest},
+		{daemon.ErrBadPermission, ipc.KindBadRequest},
+		{daemon.ErrBadNote, ipc.KindBadRequest},
+		{daemon.ErrBadTarget, ipc.KindBadRequest},
+		{store.ErrNameTaken, ipc.KindBadRequest},
+		{daemon.ErrDiscoveryTimeout, KindOffline},
 		{daemon.ErrOffline, KindOffline},
 		{daemon.ErrOfflineForPairing, KindOffline},
 		{daemon.ErrPairingFailed, KindPairingFailed},

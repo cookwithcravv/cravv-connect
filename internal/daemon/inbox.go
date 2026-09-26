@@ -69,6 +69,9 @@ func (s *InboxService) waitChan() <-chan struct{} {
 	return s.changed
 }
 
+// Changed returns a channel that is closed at the next Notify.
+func (s *InboxService) Changed() <-chan struct{} { return s.waitChan() }
+
 // OriginallyFor is the note attached to a session message that became machine-wide.
 func OriginallyFor(session string) string {
 	return fmt.Sprintf("(originally for %s)", session)
