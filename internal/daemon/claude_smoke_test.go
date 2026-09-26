@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cravv/cravv-connect/internal/childenv"
 	"github.com/cravv/cravv-connect/internal/core"
 )
 
@@ -33,11 +34,12 @@ func TestClaudeSmoke(t *testing.T) {
 	if err := os.WriteFile(path, cfg, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { removeTranscripts(t, home, dir) })
 	uuid := newUUID()
 	for i, resume := range []bool{false, true} {
 		cmd := adapter.Command(RunSpec{Folder: dir, AgentSession: uuid, Resume: resume, RunMode: core.RunReadOnly, MCPConfig: path},
 			"Reply with the single word ok and nothing else.")
-		out := ExecRunner{}.Run(context.Background(), cmd, os.Environ(), 3*time.Minute)
+		out := ExecRunner{}.Run(context.Background(), cmd, append(childenv.Filter(os.Environ()), cmd.Env...), 3*time.Minute)
 		res := adapter.Result(out.Stdout)
 		t.Logf("run %d (resume %v): exit %d in %s, result %+v", i+1, resume, out.ExitCode, out.Duration.Round(time.Millisecond), res)
 		if out.Err != nil || out.ExitCode != 0 || !res.Parsed || res.IsError || res.SessionID != uuid {

@@ -49,6 +49,9 @@ func init() {
 // Main runs the fake agent and exits when EnvMode is set; otherwise it
 // returns at once.
 func Main() {
+	if log := os.Getenv(EnvMCPLog); log != "" {
+		os.Exit(serveMCP(log))
+	}
 	mode := os.Getenv(EnvMode)
 	if mode == "" {
 		return
