@@ -58,6 +58,15 @@ func newSessionListCmd(env *Env) *cobra.Command {
 	}
 }
 
+// openWarning is shown before a managed session's conversation opens:
+// what a peer wrote into it now reaches a session with your own settings.
+func openWarning(machine string) string {
+	if machine == "" {
+		machine = "another machine"
+	}
+	return fmt.Sprintf("This conversation was driven by %s. It opens with your normal Claude settings; review before continuing.", terminalSafe(machine))
+}
+
 func newSessionOpenCmd(env *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "open <name>",
@@ -76,6 +85,7 @@ func newSessionOpenCmd(env *Env) *cobra.Command {
 				if len(r.Command) == 0 {
 					return errors.New("the daemon returned no command to open")
 				}
+				fmt.Fprintln(env.Stderr, openWarning(r.Machine))
 				fmt.Fprintf(env.Stderr, "Opening %s in %s. Its queue waits until you exit.\n", terminalSafe(r.Name), terminalSafe(r.Folder))
 				if err := runInteractive(ctx, env, r.Folder, r.Command); err != nil {
 					return fmt.Errorf("%s: %w", r.Command[0], err)

@@ -30,6 +30,7 @@ type ManagedInfo struct {
 // OpenInfo is how to open a managed session's conversation interactively.
 type OpenInfo struct {
 	Name    string
+	Machine string // the machine whose peer drove the conversation (local alias)
 	Folder  string
 	Command []string // program and arguments, such as claude --resume <uuid>
 }
@@ -139,5 +140,5 @@ func (h *SessionHost) Open(ctx context.Context, name string) (OpenInfo, func(), 
 	}
 	adapter := h.d.Adapter()
 	_ = h.d.Audit.Record(audit.Event{Type: EvManagedOpen, Peer: m.Peer, ItemID: s.ID, Detail: map[string]any{"session": s.Name}})
-	return OpenInfo{Name: s.Name, Folder: s.ProjectDir, Command: append([]string{adapter.Program()}, adapter.OpenArgs(m.AgentSession)...)}, release, nil
+	return OpenInfo{Name: s.Name, Machine: h.alias(ctx, m.Peer), Folder: s.ProjectDir, Command: append([]string{adapter.Program()}, adapter.OpenArgs(m.AgentSession)...)}, release, nil
 }

@@ -45,6 +45,7 @@ type offerRow struct {
 type managedData struct {
 	Sessions    []ipc.ManagedView
 	Open        string // the session whose open command is shown
+	OpenMachine string // the machine that drove it
 	Offers      []offerRow
 	Peers       []ipc.PeerView
 	Permissions []core.Permission
@@ -64,6 +65,14 @@ func loadManaged(ctx context.Context, rq *Request) (any, error) {
 	d.Sessions = sessions.Sessions
 	if d.Open != "" && !core.ValidSessionName(d.Open) {
 		d.Open = ""
+	}
+	for _, s := range d.Sessions {
+		if s.Name == d.Open {
+			d.OpenMachine = s.Machine
+		}
+	}
+	if d.OpenMachine == "" {
+		d.OpenMachine = "another machine"
 	}
 	var offers ipc.OffersListResult
 	if err := rq.Call(ctx, ipc.MethodOffersList, ipc.OffersListParams{}, &offers); err != nil {

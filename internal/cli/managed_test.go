@@ -113,7 +113,7 @@ func TestSessionOpenHoldsTheQueueWhileOpen(t *testing.T) {
 	released := make(chan struct{}, 1)
 	fd.handle(ipc.MethodManagedOpen, ipc.GateNone, func(cs *ipc.ConnState, raw json.RawMessage) (any, error) {
 		cs.OnClose(func() { released <- struct{}{} })
-		return ipc.ManagedOpenResult{Name: "trainer-ab12", Folder: "/srv/train", Command: []string{"/opt/claude", "--resume", "u-1"}}, nil
+		return ipc.ManagedOpenResult{Name: "trainer-ab12", Machine: "gpu-box", Folder: "/srv/train", Command: []string{"/opt/claude", "--resume", "u-1"}}, nil
 	})
 	fd.start()
 	var ranIn string
@@ -133,6 +133,9 @@ func TestSessionOpenHoldsTheQueueWhileOpen(t *testing.T) {
 	r := fd.run(nil, "session", "open", "trainer-ab12")
 	if r.code != 0 || ranIn != "/srv/train" || !slices.Equal(ran, []string{"/opt/claude", "--resume", "u-1"}) || !heldDuringRun {
 		t.Fatalf("code %d %q; ran %q in %q; held %v", r.code, r.stderr, ran, ranIn, heldDuringRun)
+	}
+	if !strings.Contains(r.stderr, "This conversation was driven by gpu-box. It opens with your normal Claude settings; review before continuing.") {
+		t.Fatalf("no warning before opening: %q", r.stderr)
 	}
 	select {
 	case <-released:

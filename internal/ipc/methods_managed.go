@@ -130,9 +130,11 @@ type ManagedNameParams struct {
 }
 
 // ManagedOpenResult is how to open the session's conversation: run Command
-// in Folder. The session's queue waits until this connection ends.
+// in Folder. The session's queue waits until this connection ends. Machine
+// is the local alias of the machine whose peer drove the conversation.
 type ManagedOpenResult struct {
 	Name    string   `json:"name"`
+	Machine string   `json:"machine,omitempty"`
 	Folder  string   `json:"folder"`
 	Command []string `json:"command"`
 }

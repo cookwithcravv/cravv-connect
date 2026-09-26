@@ -114,7 +114,7 @@ func (a managed) Open(ctx context.Context, name string) (ipc.ManagedOpenResult, 
 	if err != nil {
 		return ipc.ManagedOpenResult{}, nil, err
 	}
-	return ipc.ManagedOpenResult{Name: info.Name, Folder: info.Folder, Command: info.Command}, release, nil
+	return ipc.ManagedOpenResult{Name: info.Name, Machine: info.Machine, Folder: info.Folder, Command: info.Command}, release, nil
 }
 
 func (a managed) Close(ctx context.Context, name string) error {

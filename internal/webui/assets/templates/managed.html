@@ -5,6 +5,7 @@
 <p>The page cannot open a terminal. To open <strong>{{.Open}}</strong>, run this in a terminal on this machine:</p>
 <pre>cravv-connect session open {{.Open}}</pre>
 <p class="muted">Its queue waits while you have it open and runs again when you exit.</p>
+<p class="warn">This conversation was driven by {{.OpenMachine}}. It opens with your normal Claude settings; review before continuing.</p>
 </div>{{end}}
 {{if .Sessions}}
 <div class="table-wrap"><table>

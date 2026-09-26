@@ -415,7 +415,7 @@ func TestHostOpenHoldsTheQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Folder != e.proj || !slices.Equal(info.Command, []string{e.self, "--resume", m.AgentSession}) {
+	if info.Folder != e.proj || info.Machine != "gpu-box" || !slices.Equal(info.Command, []string{e.self, "--resume", m.AgentSession}) {
 		t.Fatalf("open info %+v", info)
 	}
 	list, err := e.host.List(ctx)

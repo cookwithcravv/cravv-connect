@@ -52,7 +52,8 @@ func TestManagedPageShowsSessionsAndOffers(t *testing.T) {
 		t.Fatal("a session that never ran has no conversation to open")
 	}
 	open := b.get("/managed?open=trainer-ab12").body
-	wantContains(t, open, "<pre>cravv-connect session open trainer-ab12</pre>", "Its queue waits while you have it open")
+	wantContains(t, open, "<pre>cravv-connect session open trainer-ab12</pre>", "Its queue waits while you have it open",
+		"This conversation was driven by mac. It opens with your normal Claude settings; review before continuing.")
 	if bad := b.get("/managed?open=" + url.QueryEscape("x</pre><script>")).body; strings.Contains(bad, "session open x") {
 		t.Fatal("an invalid session name is echoed")
 	}
