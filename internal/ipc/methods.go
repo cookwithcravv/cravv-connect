@@ -39,7 +39,6 @@ const (
 	MethodApprovalsList   = "approvals.list"
 	MethodApprovalsDecide = "approvals.decide"
 	MethodFilesList       = "files.list"
-	MethodFilesAccept     = "files.accept"
 	MethodAllowPathAdd    = "allow_path.add"
 	MethodResetIdentity   = "reset_identity"
 	MethodAuditRead       = "audit.read"

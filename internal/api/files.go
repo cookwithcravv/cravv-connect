@@ -9,7 +9,6 @@ import (
 func (h *handlers) registerFiles(s *ipc.Server) {
 	s.Register(ipc.MethodFileSend, ipc.Typed(h.fileSend), ipc.GateShared)
 	s.Register(ipc.MethodFilesList, ipc.Typed(h.filesList), ipc.GateNone)
-	s.Register(ipc.MethodFilesAccept, ipc.Typed(h.filesAccept), ipc.GateUnlock)
 }
 
 func (h *handlers) fileSend(ctx context.Context, cs *ipc.ConnState, p ipc.FileSendParams) (any, error) {
@@ -36,11 +35,4 @@ func (h *handlers) filesList(ctx context.Context, _ *ipc.ConnState, _ ipc.Empty)
 		out.Files = append(out.Files, h.fileView(ctx, f))
 	}
 	return out, nil
-}
-
-func (h *handlers) filesAccept(ctx context.Context, cs *ipc.ConnState, p ipc.FileIDParams) (any, error) {
-	if err := required("file_id", p.FileID); err != nil {
-		return nil, err
-	}
-	return nil, h.p.Files.Accept(ctx, p.FileID, cs.Unlocked())
 }

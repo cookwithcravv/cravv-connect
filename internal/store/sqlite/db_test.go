@@ -306,3 +306,49 @@ VALUES (?, 'm1', ?, 'pending', 0, 0, 0)`, id, []byte(envelope)); err != nil {
 		t.Fatalf("outbox after upgrade: %v", left)
 	}
 }
+
+// v1 held incoming files for a human to accept (`files accept`); v2 never
+// holds files and has no accept. Upgrading declines every held file
+// locally: a v1 one (no link) with no_link_after_upgrade, one held by an
+// earlier v2 build (on a link) with held_files_retired. Nothing else changes.
+func TestUpgradeDeclinesHeldFiles(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "store.db")
+	raw := openAtVersion(t, path, 7)
+	file := func(id, direction, state, link string) {
+		if _, err := raw.ExecContext(ctx, `INSERT INTO files (file_id, direction, peer, msg_id, blob_id, name, size, chunks, sha256, key,
+task_id, state, local_path, next_chunk, attempts, reason, created_at, link_id, session_id)
+VALUES (?, ?, 'm1', ?, 'b', 'a.txt', 1, 1, x'00', x'00', '', ?, '/tmp/a', 0, 0, 'held for a human to accept', 1000, ?, '')`,
+			id, direction, "msg-"+id, state, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	file("v1-held", "in", "held", "")
+	file("v2-held", "in", "held", "L1")
+	file("v1-done", "in", "done", "")
+	file("v2-down", "in", "downloading", "L1")
+	raw.Close()
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	defer db.Close()
+	for id, want := range map[string]struct {
+		state  store.FileState
+		reason string
+	}{
+		"v1-held": {store.FileDeclined, "no_link_after_upgrade"},
+		"v2-held": {store.FileDeclined, "held_files_retired"},
+		"v1-done": {store.FileDone, "held for a human to accept"},
+		"v2-down": {store.FileDownloading, "held for a human to accept"},
+	} {
+		got, err := db.GetFile(ctx, id)
+		if err != nil || got.State != want.state || got.Reason != want.reason {
+			t.Errorf("%s after upgrade: %s (%s), %v; want %s (%s)", id, got.State, got.Reason, err, want.state, want.reason)
+		}
+	}
+	if held, err := db.ListFiles(ctx, store.FileHeld); err != nil || len(held) != 0 {
+		t.Fatalf("held files after upgrade: %+v, %v", held, err)
+	}
+}

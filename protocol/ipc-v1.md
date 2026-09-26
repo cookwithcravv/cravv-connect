@@ -184,7 +184,7 @@ The daemon checks the password again inside every human-only action, so a
 missing gate fails with `auth_required` instead of opening it: accepting a
 link (`link.decide`, at any level), raising a link (`link.permit`), editing
 offers (`offers.set`, `offers.remove`), deciding held tasks
-(`approvals.decide`), `files.accept`, `resume`, `allow_path.add`,
+(`approvals.decide`), `resume`, `allow_path.add`,
 `reset_identity` and the pairing methods. The chat tier (`review.decide`)
 is the one other way to accept a link or approve a task: it needs a real
 answer from the human's elicitation form or a confirmation code, and it
@@ -224,7 +224,6 @@ run's connection may call it.
 | `chat.send` | shared session | no | yes |
 | `daemon.shutdown` | nothing | yes | no |
 | `file.send` | shared session | no | yes |
-| `files.accept` | password | no | no |
 | `files.list` | nothing | no | no |
 | `hook.counts` | nothing | yes | no |
 | `inbox.check` | shared session | no | no |
@@ -408,7 +407,6 @@ whitespace fail with `bad_request`; `result` and `reason` may be empty.
 | `task.cancel` | `{task_id}` | `TaskView` |
 | `file.send` | `{link, path}` | `{file_id}` |
 | `files.list` | `{}` | `{files: [FileView]}` |
-| `files.accept` | `{file_id}` | `{}` |
 
 - **Links.** Sends go on one of the session's own links, which must be
   `active`: any other state fails at once with `link_closed`; a link of
@@ -435,9 +433,10 @@ whitespace fail with `bad_request`; `result` and `reason` may be empty.
   (case-insensitive), symlinks that resolve outside those folders,
   non-regular files, files with more than one hard link, and files over
   100 MiB.
-- **`files.accept`** downloads a file held for a human. Links never hold
-  files (every active link may carry files), so only files held before an
-  upgrade from v1 can be accepted.
+- **No held files.** Links never hold files (every active link may carry
+  files), and there is no `files.accept`: the upgrade to v2 declined the
+  files older versions held (`reason` `no_link_after_upgrade`, or
+  `held_files_retired` for one on a link).
 
 ### 6.5 Machines, pairing and controls
 
@@ -659,7 +658,7 @@ claimed it yet, so a slow session and a stuck one look different.
   `version` is the daemon binary's version (a v1 daemon leaves it out):
   `setup` and `daemon start` restart a running daemon whose version is not
   their own.
-- File `state` is `held`, `downloading`, `done`, `failed`, `declined`
+- File `state` is `downloading`, `done`, `failed`, `declined`
   (inbound) or `uploading`, `sent`, `failed` (outbound).
 
 ## 8. Error kinds

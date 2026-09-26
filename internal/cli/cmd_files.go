@@ -34,22 +34,5 @@ func newFilesCmd(env *Env) *cobra.Command {
 			})
 		},
 	}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "accept <file-id>",
-		Short: "Download a file held for a human before the upgrade to v2 (asks for your password)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			return withConn(ctx, env, func(c Caller) error {
-				if err := withUnlock(ctx, env, c, func() error {
-					return c.Call(ctx, ipc.MethodFilesAccept, ipc.FileIDParams{FileID: args[0]}, nil)
-				}); err != nil {
-					return err
-				}
-				fmt.Fprintf(env.Stdout, "Accepted %s; it downloads in the background.\n", terminalSafe(args[0]))
-				return nil
-			})
-		},
-	})
 	return cmd
 }

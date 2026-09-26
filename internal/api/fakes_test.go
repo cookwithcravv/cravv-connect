@@ -176,13 +176,6 @@ func (f fFiles) Send(_ context.Context, session string, link int64, dir, path st
 	f.record(fmt.Sprintf("file %s %d %s %s", session, link, dir, path))
 	return core.FileRef{FileID: "F1", Name: "a.txt", Size: 3}, nil
 }
-func (f fFiles) Accept(_ context.Context, id string, unlocked bool) error {
-	if !unlocked {
-		return core.ErrAuthRequired
-	}
-	f.record("accept " + id)
-	return nil
-}
 func (f fFiles) List(context.Context) ([]store.FileRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

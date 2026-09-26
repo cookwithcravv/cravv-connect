@@ -273,7 +273,6 @@ Needs the password:
 | Ask for a link on a session's behalf from the web UI | Sessions page, Connect |
 | Create, change or remove a managed-session offer | `cravv-connect offers set`, `offers remove` |
 | List, approve or deny held tasks outside the chat | `cravv-connect approvals`, `approve <id>`, `deny <id>` |
-| Accept a file held before the upgrade to v2 | `cravv-connect files accept <id>` |
 | Turn the kill switch off | `cravv-connect resume` |
 | Allow another folder for outgoing files | `cravv-connect allow-path <dir>` |
 | New identity | `cravv-connect reset-identity` |

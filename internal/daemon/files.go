@@ -357,14 +357,10 @@ func (s *FileService) handleOffer(ctx context.Context, peer store.Peer, l store.
 		Name: pathguard.SanitizeName(b.Name), Size: b.Size, Chunks: b.Chunks, SHA256: b.SHA256, Key: b.Key,
 		TaskID: b.TaskID, LinkID: l.ID, Session: l.Session, LocalPath: local, CreatedAt: s.d.Clock.Now(),
 	}
+	// No link level holds files (v2 spec 3.4: messages includes files), and
+	// nothing can accept a held one: a hold would decline.
 	switch decision {
-	case DecisionHold:
-		rec.State, rec.Reason = store.FileHeld, "held for a human to accept"
-		if err := s.d.Files.PutFile(ctx, rec); err != nil {
-			return Retryable(err)
-		}
-		return Retryable(s.notice(ctx, rec))
-	case DecisionReject:
+	case DecisionHold, DecisionReject:
 		rec.State, rec.Reason = store.FileDeclined, "not permitted"
 		if err := s.d.Files.PutFile(ctx, rec); err != nil {
 			return Retryable(err)
@@ -406,62 +402,6 @@ func (s *FileService) redeliverOffer(ctx context.Context, peer store.Peer, l sto
 		return s.notice(ctx, cur)
 	}
 	return s.declined(ctx, peer, cur)
-}
-
-// Accept downloads a held file. It is a human-only action: unlocked must be
-// true (set by the IPC layer after auth.unlock), otherwise core.ErrAuthRequired.
-func (s *FileService) Accept(ctx context.Context, fileID string, unlocked bool) error {
-	if !unlocked {
-		return core.ErrAuthRequired
-	}
-	rec, err := s.d.Files.GetFile(ctx, fileID)
-	if err != nil {
-		return err
-	}
-	if rec.Direction != store.TaskInbound || rec.State != store.FileHeld {
-		return fmt.Errorf("file %s is %s, not held: %w", fileID, rec.State, core.ErrBadTransition)
-	}
-	peer, err := s.d.Peers.GetPeer(ctx, rec.Peer)
-	if err != nil {
-		return fmt.Errorf("peer %s: %w", rec.Peer.Short(), err)
-	}
-	if peer.Paused {
-		return fmt.Errorf("%s: %w", peer.Alias, core.ErrPaused)
-	}
-	l, err := s.d.Links.GetLink(ctx, rec.Peer, rec.LinkID)
-	if err != nil || l.State != store.LinkActive {
-		return fmt.Errorf("file %s: %w", fileID, core.ErrLinkClosed)
-	}
-	if s.d.Policy.Decide(l.PermissionIn, core.KindFileOffer) == DecisionReject {
-		return fmt.Errorf("link %d allows %s: %w", l.Num, l.PermissionIn, core.ErrNotPermitted)
-	}
-	// The state is checked again inside each update, so of two concurrent
-	// accepts exactly one moves the file on.
-	fromHeld := func(state store.FileState, reason string) func(f *store.FileRecord) error {
-		return func(f *store.FileRecord) error {
-			if f.State != store.FileHeld {
-				return fmt.Errorf("file %s is %s, not held: %w", fileID, f.State, core.ErrBadTransition)
-			}
-			f.State, f.Reason = state, reason
-			return nil
-		}
-	}
-	if aerr := s.admit(ctx, rec); aerr != nil {
-		rec, err = s.d.Files.UpdateFile(ctx, fileID, fromHeld(store.FileDeclined, aerr.Error()))
-		if err != nil {
-			return err
-		}
-		if err := s.declined(ctx, peer, rec); err != nil {
-			return err
-		}
-		return aerr
-	}
-	if _, err := s.d.Files.UpdateFile(ctx, fileID, fromHeld(store.FileDownloading, "")); err != nil {
-		return err
-	}
-	_ = s.d.Audit.Record(audit.Event{Type: audit.EvFileAccept, Peer: rec.Peer, Alias: peer.Alias, ItemID: fileID, Hash: hex.EncodeToString(rec.SHA256)})
-	s.startDownload(fileID)
-	return nil
 }
 
 // PeerCutOff implements PeerCutOffObserver: the peer's held files are declined

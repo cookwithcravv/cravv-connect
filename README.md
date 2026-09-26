@@ -348,7 +348,6 @@ any local process can run the CLI's.
 | `session close <name>` | Close a managed session and its link |
 | `ui [--no-browser]` | Open the local web UI |
 | `files` | List incoming and outgoing files |
-| `files accept <file-id>` | Download a file held for a human before the upgrade to v2 (no link holds files now; password) |
 | `allow-path <dir>` | Allow sending files from another folder (password) |
 | `kill` / `resume` | Kill switch on; off (password) |
 | `reset-identity` | New machine identity; every peer must pair again (password) |

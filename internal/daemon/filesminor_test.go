@@ -2,12 +2,8 @@ package daemon
 
 import (
 	"context"
-	"errors"
-	"sync"
-	"sync/atomic"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/audit"
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/store"
 )
@@ -28,34 +24,6 @@ func TestHandleOfferNoticeIsRetrySafe(t *testing.T) {
 	}
 	if r := e.record(t, body.FileID); r.State != store.FileDeclined {
 		t.Fatalf("state %s", r.State)
-	}
-}
-
-// Two concurrent accepts of one held file: exactly one wins.
-func TestAcceptIsAtomic(t *testing.T) {
-	ctx := context.Background()
-	for round := 0; round < 5; round++ {
-		e := d2FileSvc(t, 0)
-		body := e.blobs.put(t, "a.txt", []byte("a"))
-		e.hold(t, body.FileID, body)
-		var wg sync.WaitGroup
-		var ok atomic.Int32
-		for i := 0; i < 8; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				if err := e.files.Accept(ctx, body.FileID, true); err == nil {
-					ok.Add(1)
-				} else if !errors.Is(err, core.ErrBadTransition) {
-					t.Error(err)
-				}
-			}()
-		}
-		wg.Wait()
-		e.files.Wait()
-		if ok.Load() != 1 || len(e.te.audit.ofType(audit.EvFileAccept)) != 1 {
-			t.Fatalf("round %d: %d accepts succeeded, %d audited", round, ok.Load(), len(e.te.audit.ofType(audit.EvFileAccept)))
-		}
 	}
 }
 

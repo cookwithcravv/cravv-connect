@@ -237,6 +237,17 @@ CREATE TABLE managed_runs (
 CREATE INDEX managed_runs_peer ON managed_runs(peer, started_at);
 CREATE INDEX managed_runs_link ON managed_runs(link_id, started_at);
 `,
+	// v2 never holds incoming files for a human, and `files accept` is gone:
+	// every held file is declined locally. One held by v1 has no link
+	// (no_link_after_upgrade, like v1 tasks); one held by an earlier v2 build
+	// is on a link (held_files_retired). Nothing is sent: the peer learns
+	// nothing it could act on, and the file shows as declined here.
+	`
+UPDATE files SET
+	state = 'declined',
+	reason = CASE WHEN link_id = '' THEN 'no_link_after_upgrade' ELSE 'held_files_retired' END
+WHERE state = 'held' AND direction = 'in';
+`,
 }
 
 // migrate creates schema_migrations and applies every migration whose

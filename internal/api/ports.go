@@ -95,12 +95,10 @@ type TaskPort interface {
 	Decide(ctx context.Context, id string, approve, unlocked bool) error
 }
 
-// FilePort sends, lists, and accepts files. Send uses link number link of
-// the shared session sessionID.
+// FilePort sends and lists files. Send uses link number link of the
+// shared session sessionID.
 type FilePort interface {
 	Send(ctx context.Context, sessionID string, link int64, projectDir, path string) (core.FileRef, error)
-	// Accept releases a held file. unlocked is the connection's unlock state.
-	Accept(ctx context.Context, id string, unlocked bool) error
 	List(ctx context.Context) ([]store.FileRecord, error)
 }
 

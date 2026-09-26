@@ -155,8 +155,6 @@ func renderFileNotice(it store.InboxItem) Rendered {
 	switch n.State {
 	case store.FileDone:
 		text = fmt.Sprintf("file %q (%d bytes) saved to %s", n.Name, n.Size, n.Path)
-	case store.FileHeld:
-		text = fmt.Sprintf("file %q (%d bytes) is held until a human runs: cravv-connect files accept %s", n.Name, n.Size, n.FileID)
 	default:
 		text = fmt.Sprintf("file %q (%d bytes) %s: %s", n.Name, n.Size, n.State, n.Reason)
 	}

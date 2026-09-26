@@ -128,9 +128,6 @@ func (a files) Send(ctx context.Context, sessionID string, link int64, dir, path
 	}
 	return a.d.Files().SendFile(ctx, l, dir, path, "")
 }
-func (a files) Accept(ctx context.Context, id string, unlocked bool) error {
-	return a.d.Files().Accept(ctx, id, unlocked)
-}
 
 // List never hands a content key to the API; the daemon already zeroes it and
 // this adapter does too, so no view can leak one.

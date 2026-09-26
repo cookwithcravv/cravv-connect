@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
 )
 
 // Human-only actions (spec 7.2, v2 spec 10) refuse unless the caller says a
@@ -24,15 +23,6 @@ func TestHumanOnlyActionsNeedUnlock(t *testing.T) {
 	}
 	if tk := e.te.state(t, held); tk.State != core.TaskAwaitingApproval {
 		t.Fatalf("task decided without unlock: %s", tk.State)
-	}
-
-	body := e.blobs.put(t, "a.txt", []byte("a"))
-	e.hold(t, body.FileID, body)
-	if err := e.files.Accept(ctx, body.FileID, false); !errors.Is(err, core.ErrAuthRequired) {
-		t.Fatalf("Accept without unlock err = %v", err)
-	}
-	if r := e.record(t, body.FileID); r.State != store.FileHeld {
-		t.Fatalf("file accepted without unlock: %s", r.State)
 	}
 
 	if err := NewAllowPaths(e.te.st, nil).Add(ctx, t.TempDir(), false); !errors.Is(err, core.ErrAuthRequired) {

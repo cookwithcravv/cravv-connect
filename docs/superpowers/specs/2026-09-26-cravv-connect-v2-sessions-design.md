@@ -54,7 +54,7 @@ Machines work as in v1: identity keys, one-time pairing with a bind code and the
 Pairing now only authorizes **discovery** (listing visible sessions) and **link requests**. It grants nothing that reaches an agent.
 
 The v1 per-machine trust levels (`chat-only`, `ask-first`, `autonomous`) are **removed**.
-- **On upgrade:** pairings are kept but carry no links.
+- **On upgrade:** pairings are kept but carry no links. Unfinished v1 tasks fail and files v1 held for a human are declined, both locally with the reason `no_link_after_upgrade`. v2 never holds a file (a link's permission covers files), so there is no `files accept`.
 - **Link-less v1 traffic:** `chat`, `task.*` or `file.offer` arriving without a `link_id` gets a `control.unsupported{min_version: 2}` reply (rate-limited to one per peer per hour), and the item is dropped. The v1 sender shows "peer needs upgrade". This lets the other machine know it has to upgrade.
 
 The v1 `--json` agent CLI commands (`send`, `inbox`, `wait`, `task ...`) are replaced by link-scoped equivalents that act on a shared session through the same connection-bound identity (section 3.2).

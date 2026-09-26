@@ -120,7 +120,6 @@ func TestEveryMethodRegisteredWithGate(t *testing.T) {
 		ipc.MethodApprovalsList:   ipc.GateUnlock,
 		ipc.MethodApprovalsDecide: ipc.GateUnlock,
 		ipc.MethodFilesList:       ipc.GateNone,
-		ipc.MethodFilesAccept:     ipc.GateUnlock,
 		ipc.MethodAllowPathAdd:    ipc.GateUnlock,
 		ipc.MethodResetIdentity:   ipc.GateUnlock | ipc.GateAllowWhenKilled,
 		ipc.MethodAuditRead:       ipc.GateAllowWhenKilled,
@@ -413,12 +412,11 @@ func TestFilesAndControl(t *testing.T) {
 	if err := c.Call(bg, ipc.MethodFilesList, nil, &fl); err != nil || len(fl.Files) != 1 || fl.Files[0].Peer != "gpu-box" || fl.Files[0].State != "held" {
 		t.Fatalf("files.list: %v %+v", err, fl)
 	}
-	if err := c.Call(bg, ipc.MethodFilesAccept, ipc.FileIDParams{FileID: "F2"}, nil); !errors.Is(err, core.ErrAuthRequired) {
-		t.Fatalf("accept without unlock: %v", err)
-	}
 	unlock(t, c)
-	if err := c.Call(bg, ipc.MethodFilesAccept, ipc.FileIDParams{FileID: "F2"}, nil); err != nil {
-		t.Fatal(err)
+	// files.accept is gone: v2 never holds files (migration 8 declined the
+	// ones older versions held).
+	if err := c.Call(bg, "files.accept", ipc.FileIDParams{FileID: "F2"}, nil); !errors.Is(err, ipc.ErrBadRequest) || !strings.Contains(err.Error(), "unknown method") {
+		t.Fatalf("files.accept: %v", err)
 	}
 	if err := c.Call(bg, ipc.MethodAllowPathAdd, ipc.AllowPathParams{Path: "rel/dir"}, nil); !errors.Is(err, ipc.ErrBadRequest) {
 		t.Fatalf("relative allow-path: %v", err)

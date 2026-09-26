@@ -274,19 +274,15 @@ func TestLog(t *testing.T) {
 	}
 }
 
-func TestFilesListAndAccept(t *testing.T) {
+func TestFilesList(t *testing.T) {
 	fd := newFakeDaemon(t)
 	fd.reply(ipc.MethodFilesList, ipc.GateNone, ipc.FilesListResult{Files: []ipc.FileView{
-		{FileID: "F1", Direction: "in", Peer: "gpu-box", Name: "report.pdf", State: "held", Size: 2048},
+		{FileID: "F1", Direction: "in", Peer: "gpu-box", Name: "report.pdf", State: "declined", Size: 2048},
 	}})
-	fd.reply(ipc.MethodFilesAccept, ipc.GateUnlock, nil)
 	fd.start()
-	want := "FILE ID  DIR  PEER     STATE  SIZE  NAME\nF1       in   gpu-box  held   2048  report.pdf\n"
+	want := "FILE ID  DIR  PEER     STATE     SIZE  NAME\nF1       in   gpu-box  declined  2048  report.pdf\n"
 	if r := fd.run(nil, "files"); r.stdout != want {
 		t.Fatalf("%q", r.stdout)
-	}
-	if r := fd.run(&fakePrompter{passwords: []string{"pw"}}, "files", "accept", "F1"); r.stdout != "Accepted F1; it downloads in the background.\n" {
-		t.Fatalf("%q %q", r.stdout, r.stderr)
 	}
 }
 

@@ -464,46 +464,19 @@ func TestReceiveQuotaAndDisk(t *testing.T) {
 	}
 }
 
-// No link level holds files any more (messages includes files), but a file
-// held by an older version is still released by a human with the password,
-// and only while its link is active.
-func TestHeldFileAcceptedWithPassword(t *testing.T) {
+// No link level holds files any more (messages includes files), and there
+// is no accept. A held file left over (the upgrade declines them) is
+// declined when its link closes.
+func TestHeldFileDeclinedWhenLinkCloses(t *testing.T) {
 	ctx := context.Background()
 	e := d2FileSvc(t, 0)
-	content := []byte("hello")
-	body := e.blobs.put(t, "readme.md", content)
+	body := e.blobs.put(t, "readme.md", []byte("hello"))
 	e.hold(t, body.FileID, body)
-	if err := e.files.Accept(ctx, body.FileID, false); !errors.Is(err, core.ErrAuthRequired) {
-		t.Fatalf("accept without the password: %v", err)
-	}
-	if err := e.files.Accept(ctx, body.FileID, true); err != nil {
-		t.Fatal(err)
-	}
-	e.files.Wait()
-	r := e.record(t, body.FileID)
-	if r.State != store.FileDone {
-		t.Fatalf("after accept: %s (%s)", r.State, r.Reason)
-	}
-	if got, _ := os.ReadFile(r.LocalPath); !bytes.Equal(got, content) {
-		t.Fatal("accepted file content differs")
-	}
-	if len(e.te.audit.ofType(audit.EvFileAccept)) != 1 {
-		t.Fatal("accept not audited")
-	}
-	if err := e.files.Accept(ctx, body.FileID, true); !errors.Is(err, core.ErrBadTransition) {
-		t.Fatalf("second accept err = %v", err)
-	}
-	// Closing the link declines what it still held.
-	other := core.NewID()
-	e.hold(t, other, body)
 	if err := e.te.links.Disconnect(ctx, "", e.te.link.Num); err != nil {
 		t.Fatal(err)
 	}
-	if r := e.record(t, other); r.State != store.FileDeclined || r.Reason != ReasonLinkClosed {
+	if r := e.record(t, body.FileID); r.State != store.FileDeclined || r.Reason != ReasonLinkClosed {
 		t.Fatalf("held file after the link closed: %s (%s)", r.State, r.Reason)
-	}
-	if err := e.files.Accept(ctx, other, true); !errors.Is(err, core.ErrBadTransition) {
-		t.Fatalf("accept after the link closed: %v", err)
 	}
 }
 
