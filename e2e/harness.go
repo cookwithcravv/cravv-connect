@@ -360,31 +360,19 @@ func Eventually(t *testing.T, timeout time.Duration, what string, cond func() bo
 	}
 }
 
-// PairOptions are the trust levels each side grants the other.
-type PairOptions struct {
-	ATrustsB core.TrustLevel // what B may do on A (default ask-first)
-	BTrustsA core.TrustLevel // what A may do on B (default ask-first)
-}
-
 // Pair runs the real pairing flow over IPC. a must be online (registered with
 // the admin token); b may have no mailbox yet and registers with the invite a
 // sends inside the encrypted exchange. Afterwards a knows b by b.Name and b
-// knows a by a.Name.
-func Pair(t *testing.T, a, b *Node, o PairOptions) {
+// knows a by a.Name. Pairing grants no links.
+func Pair(t *testing.T, a, b *Node) {
 	t.Helper()
-	PairBetween(t, a, b, o, nil)
+	PairBetween(t, a, b, nil)
 }
 
 // PairBetween is Pair with between (when not nil) run after b finalized and
 // before a does, the window in which b knows a but a does not know b yet.
-func PairBetween(t *testing.T, a, b *Node, o PairOptions, between func()) {
+func PairBetween(t *testing.T, a, b *Node, between func()) {
 	t.Helper()
-	if o.ATrustsB == 0 {
-		o.ATrustsB = core.TrustAskFirst
-	}
-	if o.BTrustsA == 0 {
-		o.BTrustsA = core.TrustAskFirst
-	}
 	a.WaitOnline()
 	ca, cb := a.Unlocked(), b.Unlocked()
 
@@ -416,14 +404,12 @@ func PairBetween(t *testing.T, a, b *Node, o PairOptions, between func()) {
 	}
 
 	var fb ipc.PairFinalizeResult
-	Call(t, cb, ipc.MethodPairFinalize, ipc.PairFinalizeParams{
-		PendingID: joined.PendingID, Alias: a.Name, Trust: o.BTrustsA.String()}, &fb)
+	Call(t, cb, ipc.MethodPairFinalize, ipc.PairFinalizeParams{PendingID: joined.PendingID, Alias: a.Name}, &fb)
 	if between != nil {
 		between()
 	}
 	var fa ipc.PairFinalizeResult
-	Call(t, ca, ipc.MethodPairFinalize, ipc.PairFinalizeParams{
-		PendingID: got.res.PendingID, Alias: b.Name, Trust: o.ATrustsB.String()}, &fa)
+	Call(t, ca, ipc.MethodPairFinalize, ipc.PairFinalizeParams{PendingID: got.res.PendingID, Alias: b.Name}, &fa)
 	if fa.Alias != b.Name || fb.Alias != a.Name {
 		t.Fatalf("aliases %q and %q, want %q and %q", fa.Alias, fb.Alias, b.Name, a.Name)
 	}
@@ -432,27 +418,27 @@ func PairBetween(t *testing.T, a, b *Node, o PairOptions, between func()) {
 
 // NewPair starts a relay and two paired machines, alice (registered with the
 // admin token) and bob (registered with alice's invite).
-func NewPair(t *testing.T, o PairOptions) (*Relay, *Node, *Node) {
+func NewPair(t *testing.T) (*Relay, *Node, *Node) {
 	t.Helper()
-	return NewPairOn(t, NewRelay(t), o)
+	return NewPairOn(t, NewRelay(t))
 }
 
 // NewPairOn is NewPair on a relay the test started (for example with NewRelayWith).
-func NewPairOn(t *testing.T, r *Relay, o PairOptions) (*Relay, *Node, *Node) {
+func NewPairOn(t *testing.T, r *Relay) (*Relay, *Node, *Node) {
 	t.Helper()
 	a := NewNode(t, r, "alice", NodeOptions{AdminToken: AdminToken})
 	b := NewNode(t, r, "bob", NodeOptions{})
-	Pair(t, a, b, o)
+	Pair(t, a, b)
 	return r, a, b
 }
 
 // NewPairWithClock is NewPair with one shared injected clock for both daemons.
-func NewPairWithClock(t *testing.T, o PairOptions, clock core.Clock) (*Relay, *Node, *Node) {
+func NewPairWithClock(t *testing.T, clock core.Clock) (*Relay, *Node, *Node) {
 	t.Helper()
 	r := NewRelay(t)
 	a := NewNode(t, r, "alice", NodeOptions{AdminToken: AdminToken, Clock: clock})
 	b := NewNode(t, r, "bob", NodeOptions{Clock: clock})
-	Pair(t, a, b, o)
+	Pair(t, a, b)
 	return r, a, b
 }
 

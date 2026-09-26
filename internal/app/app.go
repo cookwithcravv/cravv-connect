@@ -163,9 +163,6 @@ func (a peers) Unpair(ctx context.Context, alias string) error { return a.d.Peer
 func (a peers) Rename(ctx context.Context, alias, newAlias string) error {
 	return a.d.Peers().SetAlias(ctx, alias, newAlias)
 }
-func (a peers) SetTrust(ctx context.Context, alias string, level core.TrustLevel, unlocked bool) error {
-	return a.d.Peers().SetTrust(ctx, alias, level, unlocked)
-}
 
 type pairing struct{ d *daemon.Daemon }
 
@@ -189,8 +186,8 @@ func (a pairing) Await(ctx context.Context, id string) (ipc.PendingPeerResult, e
 func (a pairing) Join(ctx context.Context, code string, unlocked bool) (ipc.PendingPeerResult, error) {
 	return proposal(a.d.Pairing().Join(ctx, code, unlocked))
 }
-func (a pairing) Finalize(ctx context.Context, id, alias string, trust core.TrustLevel, unlocked bool) (string, error) {
-	return a.d.Pairing().Finalize(ctx, id, alias, trust, unlocked)
+func (a pairing) Finalize(ctx context.Context, id, alias string, unlocked bool) (string, error) {
+	return a.d.Pairing().Finalize(ctx, id, alias, unlocked)
 }
 
 type control struct{ d *daemon.Daemon }

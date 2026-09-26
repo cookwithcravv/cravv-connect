@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cravv/cravv-connect/internal/store"
 )
 
 // t0 is a fixed base time for all store tests (UTC, whole milliseconds).
@@ -200,4 +202,33 @@ func openAtVersion(t *testing.T, path string, v int) *sql.DB {
 		}
 	}
 	return raw
+}
+
+// Upgrading a v1 store keeps every pairing and drops the trust levels:
+// what a peer may do is now set per link.
+func TestUpgradeKeepsPeersAndDropsTrust(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "store.db")
+	raw := openAtVersion(t, path, 4)
+	if _, err := raw.ExecContext(ctx, `INSERT INTO peers (machine_id, ik, alias, trust_in, prekey_json, relay_url, paused, paused_by_peer, paired_at)
+VALUES ('m1', x'01', 'gpu-box', 3, '{}', 'https://relay.example.com', 0, 0, 1000)`); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	defer db.Close()
+	p, err := db.GetPeer(ctx, "m1")
+	if err != nil || p.Alias != "gpu-box" || p.RelayURL != "https://relay.example.com" {
+		t.Fatalf("peer after upgrade = %+v, %v", p, err)
+	}
+	var n int
+	if err := db.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('peers') WHERE name = 'trust_in'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("trust_in column still there (%d, %v)", n, err)
+	}
+	if links, err := db.ListLinks(ctx, store.LinkFilter{}); err != nil || len(links) != 0 {
+		t.Fatalf("an upgraded pairing carries links: %+v, %v", links, err)
+	}
 }

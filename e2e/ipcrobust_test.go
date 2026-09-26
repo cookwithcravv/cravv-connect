@@ -16,7 +16,7 @@ import (
 // several byte-budgeted pages, with none lost and the IPC stream intact.
 func TestLargeChatsArriveInPages(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "messages")
 	sb := l.B.C
 	const n = 20 // 20 x 256 KiB of wrapped text cannot fit one 4 MiB page
@@ -50,7 +50,7 @@ func TestLargeChatsArriveInPages(t *testing.T) {
 // A cancelled inbox.wait does not swallow the next message.
 func TestCancelledWaitKeepsMessage(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "messages")
 	sb := l.B.C
 	Inbox(t, sb) // read the link request notice

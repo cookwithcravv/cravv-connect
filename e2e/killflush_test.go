@@ -38,7 +38,7 @@ func TestKillRefusesSendsDuringFlush(t *testing.T) {
 	release := func() { releaseOnce.Do(func() { close(gb.release) }) }
 	r := NewRelayWith(t, func(b relayserver.Backend) relayserver.Backend { gb.Backend = b; return gb })
 	t.Cleanup(release)
-	_, a, b := NewPairOn(t, r, PairOptions{})
+	_, a, b := NewPairOn(t, r)
 	l := LinkUp(t, a, b, "tasks-auto")
 	sa := l.A.C
 

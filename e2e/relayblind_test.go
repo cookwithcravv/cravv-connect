@@ -52,7 +52,7 @@ func TestRelayNeverSeesPlaintext(t *testing.T) {
 	r := NewRelayWith(t, func(b relayserver.Backend) relayserver.Backend { rec.Backend = b; return rec })
 	a := NewNode(t, r, "zelda-q7k", NodeOptions{AdminToken: AdminToken})
 	b := NewNode(t, r, "yorick-q7k", NodeOptions{})
-	Pair(t, a, b, PairOptions{})
+	Pair(t, a, b)
 	l := LinkChats(t, a, b, a.Share("claude", "plainsess-a1x9", "private"), b.Share("codex", "plainsess-b2y8", "all-peers"), "tasks-auto")
 	sa, sb := l.A.C, l.B.C
 

@@ -35,7 +35,7 @@ func unlock(ctx context.Context, env *Env, c Caller) error {
 
 // withUnlock runs fn; if the daemon says a password is required, it asks for
 // it once and runs fn again. Commands never ask for a password the daemon does
-// not need (for example, lowering trust).
+// not need (for example, rejecting a link request).
 func withUnlock(ctx context.Context, env *Env, c Caller, fn func() error) error {
 	err := fn()
 	if !errors.Is(err, core.ErrAuthRequired) {

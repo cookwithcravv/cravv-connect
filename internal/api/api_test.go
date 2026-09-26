@@ -33,7 +33,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	h := &harness{w: newWorld(), clock: core.NewFakeClock(time.Unix(1_700_000_000, 0)), sock: filepath.Join(dir, "d.sock")}
-	h.w.peers["gpu-box"] = store.Peer{MachineID: gpuID, Alias: "gpu-box", TrustIn: core.TrustAskFirst}
+	h.w.peers["gpu-box"] = store.Peer{MachineID: gpuID, Alias: "gpu-box"}
 	srv := NewServer(h.w.ports(), h.clock, nil)
 	ln, err := ipc.Listen(h.sock)
 	if err != nil {
@@ -111,7 +111,6 @@ func TestEveryMethodRegisteredWithGate(t *testing.T) {
 		ipc.MethodPeerResume:      ipc.GateNone,
 		ipc.MethodPeerUnpair:      ipc.GateNone,
 		ipc.MethodPeerAlias:       ipc.GateNone,
-		ipc.MethodPeerTrust:       ipc.GateNone,
 		ipc.MethodKill:            ipc.GateAllowWhenKilled,
 		ipc.MethodResume:          ipc.GateUnlock | ipc.GateAllowWhenKilled,
 		ipc.MethodAuthUnlock:      ipc.GateAllowWhenKilled,
@@ -266,14 +265,11 @@ func TestUnlockGatesPairing(t *testing.T) {
 	if err := c.Call(bg, ipc.MethodPairStart, nil, &ps); err != nil || ps.Code == "" {
 		t.Fatalf("pair.start: %v", err)
 	}
-	if err := c.Call(bg, ipc.MethodPairFinalize, ipc.PairFinalizeParams{PendingID: "P1", Alias: "Bad Alias!", Trust: "ask-first"}, nil); !errors.Is(err, ipc.ErrBadRequest) {
+	if err := c.Call(bg, ipc.MethodPairFinalize, ipc.PairFinalizeParams{PendingID: "P1", Alias: "Bad Alias!"}, nil); !errors.Is(err, ipc.ErrBadRequest) {
 		t.Fatalf("bad alias: %v", err)
 	}
-	if err := c.Call(bg, ipc.MethodPairFinalize, ipc.PairFinalizeParams{PendingID: "P1", Alias: "gpu", Trust: "root"}, nil); !errors.Is(err, ipc.ErrBadRequest) {
-		t.Fatalf("bad trust: %v", err)
-	}
 	var fin ipc.PairFinalizeResult
-	if err := c.Call(bg, ipc.MethodPairFinalize, ipc.PairFinalizeParams{PendingID: "P1", Alias: "gpu", Trust: "ask-first"}, &fin); err != nil || fin.Alias != "gpu" {
+	if err := c.Call(bg, ipc.MethodPairFinalize, ipc.PairFinalizeParams{PendingID: "P1", Alias: "gpu"}, &fin); err != nil || fin.Alias != "gpu" {
 		t.Fatalf("finalize: %v %+v", err, fin)
 	}
 	h.clock.Advance(core.UnlockTTL)
@@ -283,33 +279,6 @@ func TestUnlockGatesPairing(t *testing.T) {
 	other := h.dial(t)
 	if err := other.Call(bg, ipc.MethodApprovalsList, nil, nil); !errors.Is(err, core.ErrAuthRequired) {
 		t.Fatalf("unlock leaked to another connection: %v", err)
-	}
-}
-
-func TestTrustRaiseNeedsUnlockLowerDoesNot(t *testing.T) {
-	h := newHarness(t)
-	c := h.dial(t)
-	if err := c.Call(bg, ipc.MethodPeerTrust, ipc.PeerTrustParams{Alias: "gpu-box", Level: "chat-only"}, nil); err != nil {
-		t.Fatalf("lower: %v", err)
-	}
-	if h.w.trustSet != core.TrustChatOnly {
-		t.Fatalf("trust %v", h.w.trustSet)
-	}
-	if err := c.Call(bg, ipc.MethodPeerTrust, ipc.PeerTrustParams{Alias: "gpu-box", Level: "autonomous"}, nil); !errors.Is(err, core.ErrAuthRequired) {
-		t.Fatalf("raise without unlock: %v", err)
-	}
-	if err := c.Call(bg, ipc.MethodPeerTrust, ipc.PeerTrustParams{Alias: "gpu-box", Level: "ask-first"}, nil); err != nil {
-		t.Fatalf("same level: %v", err)
-	}
-	unlock(t, c)
-	if err := c.Call(bg, ipc.MethodPeerTrust, ipc.PeerTrustParams{Alias: "gpu-box", Level: "autonomous"}, nil); err != nil {
-		t.Fatalf("raise with unlock: %v", err)
-	}
-	if err := c.Call(bg, ipc.MethodPeerTrust, ipc.PeerTrustParams{Alias: "nobody", Level: "chat-only"}, nil); !errors.Is(err, core.ErrNotFound) {
-		t.Fatalf("unknown peer: %v", err)
-	}
-	if err := c.Call(bg, ipc.MethodPeerTrust, ipc.PeerTrustParams{Alias: "gpu-box", Level: "max"}, nil); !errors.Is(err, ipc.ErrBadRequest) {
-		t.Fatalf("bad level: %v", err)
 	}
 }
 

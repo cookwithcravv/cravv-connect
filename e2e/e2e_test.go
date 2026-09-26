@@ -48,7 +48,7 @@ func wantKind(t *testing.T, err error, kind string) {
 
 // Criteria 1 and 4: pairing needs the password on both sides; the first
 // machine registers with the admin token, the second with the invite sent
-// inside the encrypted pairing exchange; raising trust needs the password.
+// inside the encrypted pairing exchange; pairing alone grants no links.
 func TestPairingNeedsPasswordAndRegistersWithInvite(t *testing.T) {
 	t.Parallel()
 	r := NewRelay(t)
@@ -65,27 +65,21 @@ func TestPairingNeedsPasswordAndRegistersWithInvite(t *testing.T) {
 	if b.Status().RelayConnected {
 		t.Fatal("bob has a mailbox before pairing, want none (no token, no invite)")
 	}
-	Pair(t, a, b, PairOptions{ATrustsB: core.TrustAskFirst, BTrustsA: core.TrustChatOnly})
+	Pair(t, a, b)
 
 	if !b.Status().RelayConnected {
 		t.Fatal("bob not connected after registering with the invite")
 	}
 	pa, ok := a.PeerView("bob")
-	if !ok || pa.TrustIn != "ask-first" || pa.MachineID != string(b.Daemon.Identity().MachineID()) {
+	if !ok || pa.MachineID != string(b.Daemon.Identity().MachineID()) {
 		t.Fatalf("alice sees bob as %+v (found %v)", pa, ok)
 	}
-	pb, ok := b.PeerView("alice")
-	if !ok || pb.TrustIn != "chat-only" {
-		t.Fatalf("bob sees alice as %+v (found %v)", pb, ok)
+	if _, ok := b.PeerView("alice"); !ok {
+		t.Fatal("bob does not know alice")
 	}
-
-	// Raising trust needs the password; lowering does not.
-	plain := b.Conn()
-	wantKind(t, TryCall(plain, ipc.MethodPeerTrust, ipc.PeerTrustParams{Alias: "alice", Level: "autonomous"}, nil), ipc.KindAuthRequired)
-	Call(t, b.Unlocked(), ipc.MethodPeerTrust, ipc.PeerTrustParams{Alias: "alice", Level: "autonomous"}, nil)
-	Call(t, plain, ipc.MethodPeerTrust, ipc.PeerTrustParams{Alias: "alice", Level: "ask-first"}, nil)
-	if pb, _ := b.PeerView("alice"); pb.TrustIn != "ask-first" {
-		t.Fatalf("trust after lowering = %q, want ask-first", pb.TrustIn)
+	// Pairing grants no links: the machines see each other, nothing more.
+	if len(a.AllLinks()) != 0 || len(b.AllLinks()) != 0 {
+		t.Fatal("pairing created links")
 	}
 
 	for _, n := range []*Node{a, b} {
@@ -115,7 +109,7 @@ func TestPairingNeedsPasswordAndRegistersWithInvite(t *testing.T) {
 // the local alias, the peer's session name, the link number and permission.
 func TestChatBothWays(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "messages")
 
 	id := sendChat(t, l.A.C, l.ANum, "hello from alice <b>&</b>")
@@ -150,7 +144,7 @@ func TestChatBothWays(t *testing.T) {
 // session, on either machine.
 func TestCrossSessionIsolation(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "tasks-auto")
 	other := b.Share("codex", "other", "private")
 
@@ -177,7 +171,7 @@ func TestCrossSessionIsolation(t *testing.T) {
 // through inbox.wait.
 func TestTaskOverTasksAutoLink(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "tasks-auto")
 
 	var created ipc.TaskCreateResult
@@ -239,7 +233,7 @@ func TestTaskOverTasksAutoLink(t *testing.T) {
 // (password in Phase 1); a tasks-auto link queues it at once.
 func TestTasksAskNeedsApprovalTasksAutoDoesNot(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "tasks-ask")
 
 	var created ipc.TaskCreateResult
@@ -297,7 +291,7 @@ func TestTasksAskNeedsApprovalTasksAutoDoesNot(t *testing.T) {
 // peer can no longer create tasks there. Raising back needs the password.
 func TestRestrictLowersAndRaisingNeedsPassword(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "tasks-auto")
 	var v ipc.LinkView
 	Call(t, l.B.C, ipc.MethodLinkRestrict, ipc.LinkPermissionParams{Link: l.BNum, Permission: "messages"}, &v)
@@ -323,7 +317,7 @@ func TestRestrictLowersAndRaisingNeedsPassword(t *testing.T) {
 // messages link, and secrets never leave.
 func TestFileTransfer(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "messages")
 
 	data := make([]byte, 3*core.FileChunkBytes+12345)
@@ -377,7 +371,7 @@ func TestFileTransfer(t *testing.T) {
 // sessions link again.
 func TestPauseClosesLinksAndResumeAllowsNewOnes(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "messages")
 
 	Call(t, l.B.C, ipc.MethodPeerPause, ipc.AliasParams{Alias: "alice"}, nil)
@@ -408,7 +402,7 @@ func TestPauseClosesLinksAndResumeAllowsNewOnes(t *testing.T) {
 // Criterion 5: unpair removes the peer on both sides and closes the links.
 func TestUnpair(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "messages")
 
 	Call(t, l.A.C, ipc.MethodPeerUnpair, ipc.AliasParams{Alias: "bob"}, nil)
@@ -432,7 +426,7 @@ func TestUnpair(t *testing.T) {
 // resume needs the password.
 func TestKillSwitch(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "tasks-auto")
 
 	var created ipc.TaskCreateResult
@@ -483,7 +477,7 @@ func TestKillSwitch(t *testing.T) {
 // comes back on the same address they are delivered and confirmed.
 func TestRelayOfflineThenRestart(t *testing.T) {
 	t.Parallel()
-	r, a, b := NewPair(t, PairOptions{})
+	r, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "messages")
 
 	r.Stop()
@@ -509,7 +503,7 @@ func TestRelayOfflineThenRestart(t *testing.T) {
 // after a lost sent reply); the receiver shows it once.
 func TestDuplicateDeliveryShownOnce(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "messages")
 	ctx := context.Background()
 
@@ -567,7 +561,7 @@ func TestDuplicateDeliveryShownOnce(t *testing.T) {
 func TestStalePrekeyResend(t *testing.T) {
 	t.Parallel()
 	clock := core.NewFakeClock(time.Now())
-	_, a, b := NewPairWithClock(t, PairOptions{}, clock)
+	_, a, b := NewPairWithClock(t, clock)
 	lead := a.Share("claude", "lead", "private")
 	b.Share("claude", "trainer", "all-peers")
 	ctx := context.Background()
@@ -646,7 +640,7 @@ func TestStalePrekeyResend(t *testing.T) {
 // humans see why in status.
 func TestLinklessV1TrafficGetsControlUnsupported(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	trainer := b.Share("claude", "trainer", "all-peers")
 	ctx := context.Background()
 	bobID := b.Daemon.Identity().MachineID()

@@ -13,7 +13,6 @@ import (
 	"github.com/cravv/cravv-connect/internal/audit"
 	"github.com/cravv/cravv-connect/internal/auth"
 	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/daemon"
 	"github.com/cravv/cravv-connect/internal/ipc"
 	"github.com/cravv/cravv-connect/internal/store"
@@ -32,15 +31,15 @@ func TestDaemonNotRunning(t *testing.T) {
 func TestPeersTable(t *testing.T) {
 	fd := newFakeDaemon(t)
 	fd.reply(ipc.MethodPeerList, ipc.GateAllowWhenKilled, ipc.PeerListResult{Peers: []ipc.PeerView{
-		{Alias: "gpu-box", MachineID: "abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrst", TrustIn: "autonomous", Online: true, PairedAt: paired},
-		{Alias: "mac", MachineID: "m2", TrustIn: "ask-first", PausedByPeer: true, PairedAt: paired},
+		{Alias: "gpu-box", MachineID: "abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrst", Online: true, PairedAt: paired},
+		{Alias: "mac", MachineID: "m2", PausedByPeer: true, PairedAt: paired},
 	}})
 	fd.start()
 	r := fd.run(nil, "peers")
 	want := "" +
-		"ALIAS    TRUST       STATE           MACHINE ID                                            PAIRED\n" +
-		"gpu-box  autonomous  online          abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrst  2026-09-26 10:00 UTC\n" +
-		"mac      ask-first   paused by peer  m2                                                    2026-09-26 10:00 UTC\n"
+		"ALIAS    STATE           MACHINE ID                                            PAIRED\n" +
+		"gpu-box  online          abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrst  2026-09-26 10:00 UTC\n" +
+		"mac      paused by peer  m2                                                    2026-09-26 10:00 UTC\n"
 	if r.code != 0 || r.stdout != want {
 		t.Fatalf("code %d\n%s\nwant\n%s", r.code, r.stdout, want)
 	}
@@ -61,7 +60,7 @@ func TestPairFlow(t *testing.T) {
 	fd.reply(ipc.MethodPairAwait, ipc.GateUnlock, ipc.PendingPeerResult{PendingID: "P1", SuggestedName: "GPU Box!!", MachineID: "abcdefghijklmnopqrstuvwxyz"})
 	fd.reply(ipc.MethodPairFinalize, ipc.GateUnlock, ipc.PairFinalizeResult{Alias: "gpu-box"})
 	fd.start()
-	p := &fakePrompter{passwords: []string{"wrong", "pw"}, lines: []string{"", "banana", ""}}
+	p := &fakePrompter{passwords: []string{"wrong", "pw"}, lines: []string{""}}
 	r := fd.run(p, "pair")
 	if r.code != 0 {
 		t.Fatalf("code %d stderr %s", r.code, r.stderr)
@@ -73,16 +72,15 @@ func TestPairFlow(t *testing.T) {
 		"The code works once and expires in 10 minutes.\n" +
 		"Waiting for the other machine...\n" +
 		"Connected to machine abcdefghijklmnop.\n" +
-		"Trust levels: chat-only (messages only), ask-first (you approve each task), autonomous (tasks run without asking).\n" +
-		"Paired with gpu-box (trust: ask-first).\n" +
+		"Paired with gpu-box. Its sessions can now ask to link with yours; you decide each link.\n" +
 		"Machine ID: abcdefghijklmnopqrstuvwxyz\n"
 	if r.stdout != want {
 		t.Fatalf("stdout\n%s\nwant\n%s", r.stdout, want)
 	}
-	if !strings.Contains(r.stderr, "Incorrect password, try again.") || !strings.Contains(r.stderr, "Please type chat-only") {
+	if !strings.Contains(r.stderr, "Incorrect password, try again.") {
 		t.Fatalf("stderr %q", r.stderr)
 	}
-	if got := fd.params(ipc.MethodPairFinalize); got != `{"pending_id":"P1","alias":"gpu-box","trust":"ask-first"}` {
+	if got := fd.params(ipc.MethodPairFinalize); got != `{"pending_id":"P1","alias":"gpu-box"}` {
 		t.Fatalf("finalize params %s", got)
 	}
 	// The password was asked once for the whole flow (one unlocked connection).
@@ -96,9 +94,9 @@ func TestJoinPassesCode(t *testing.T) {
 	fd.reply(ipc.MethodJoinStart, ipc.GateUnlock, ipc.PendingPeerResult{PendingID: "P2", SuggestedName: "mac", MachineID: "m"})
 	fd.reply(ipc.MethodPairFinalize, ipc.GateUnlock, ipc.PairFinalizeResult{Alias: "laptop"})
 	fd.start()
-	p := &fakePrompter{passwords: []string{"pw"}, lines: []string{"laptop", "autonomous"}}
+	p := &fakePrompter{passwords: []string{"pw"}, lines: []string{"laptop"}}
 	r := fd.run(p, "join", "cravv-7k3f-9qxm-tr2a")
-	if r.code != 0 || !strings.Contains(r.stdout, "Paired with laptop (trust: autonomous).") {
+	if r.code != 0 || !strings.Contains(r.stdout, "Paired with laptop.") {
 		t.Fatalf("%d %s %s", r.code, r.stdout, r.stderr)
 	}
 	if fd.params(ipc.MethodJoinStart) != `{"code":"cravv-7k3f-9qxm-tr2a"}` {
@@ -117,31 +115,6 @@ func TestLockedStopsRetrying(t *testing.T) {
 	}
 	if len(p.passwords) != 1 {
 		t.Fatalf("asked %d times, want 3", 4-len(p.passwords))
-	}
-}
-
-func trustHandler(fd *fakeDaemon) {
-	fd.handle(ipc.MethodPeerTrust, ipc.GateNone, func(cs *ipc.ConnState, p json.RawMessage) (any, error) {
-		var tp ipc.PeerTrustParams
-		json.Unmarshal(p, &tp)
-		if tp.Level == "autonomous" && !cs.Unlocked() {
-			return nil, core.ErrAuthRequired
-		}
-		return nil, nil
-	})
-}
-
-func TestTrustAsksPasswordOnlyWhenNeeded(t *testing.T) {
-	fd := newFakeDaemon(t)
-	trustHandler(fd)
-	fd.start()
-	r := fd.run(&fakePrompter{}, "trust", "gpu-box", "chat-only")
-	if r.code != 0 || r.stdout != "Trust for gpu-box is now chat-only.\n" || len(r.prompt.asked) != 0 {
-		t.Fatalf("lower: %d %q %v", r.code, r.stdout, r.prompt.asked)
-	}
-	r = fd.run(&fakePrompter{passwords: []string{"pw"}}, "trust", "gpu-box", "autonomous")
-	if r.code != 0 || len(r.prompt.asked) != 1 {
-		t.Fatalf("raise: %d %v %s", r.code, r.prompt.asked, r.stderr)
 	}
 }
 
@@ -263,7 +236,7 @@ func TestAllowPathMakesAbsolute(t *testing.T) {
 func TestStatusHumanAndJSON(t *testing.T) {
 	fd := newFakeDaemon(t)
 	st := ipc.StatusResult{MachineID: "abcdefghijklmnopqrstuvwxyz", DeviceName: "mac", RelayURL: "https://relay.example.com",
-		RelayConnected: true, Peers: []ipc.PeerView{{Alias: "gpu-box", TrustIn: "autonomous", Online: true}},
+		RelayConnected: true, Peers: []ipc.PeerView{{Alias: "gpu-box", Online: true}},
 		Sessions: []string{"claude@glow-v2"}, OutboxPending: 1, InboxUnread: 2, PendingApprovals: 3, Errors: []string{"clock skew"}}
 	fd.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, st)
 	fd.start()
@@ -271,7 +244,7 @@ func TestStatusHumanAndJSON(t *testing.T) {
 		"Machine:     mac (abcdefghijklmnop)\n" +
 		"Relay:       https://relay.example.com (connected)\n" +
 		"Kill switch: off\n" +
-		"Peers:       gpu-box (autonomous, online)\n" +
+		"Peers:       gpu-box (online)\n" +
 		"Sessions:    claude@glow-v2\n" +
 		"Outbox:      1 pending, 0 held\n" +
 		"Inbox:       2 unread\n" +

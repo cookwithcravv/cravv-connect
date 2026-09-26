@@ -24,7 +24,6 @@ func PeerViewOf(p store.Peer, relayConnected bool) ipc.PeerView {
 	return ipc.PeerView{
 		Alias:        p.Alias,
 		MachineID:    string(p.MachineID),
-		TrustIn:      p.TrustIn.String(),
 		Online:       relayConnected && !p.Paused && !p.PausedByPeer,
 		Paused:       p.Paused,
 		PausedByPeer: p.PausedByPeer,

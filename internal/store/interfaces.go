@@ -12,12 +12,12 @@ import (
 	"github.com/cravv/cravv-connect/internal/core"
 )
 
-// Peer is a paired machine as seen from this machine.
+// Peer is a paired machine as seen from this machine. Pairing authorizes
+// discovery and link requests only; what a peer may do is set per link.
 type Peer struct {
 	MachineID    core.MachineID
 	IK           ed25519.PublicKey
 	Alias        string
-	TrustIn      core.TrustLevel // what THEY may do on THIS machine
 	Prekey       core.SignedPrekeyWire
 	RelayURL     string
 	Paused       bool // paused by me

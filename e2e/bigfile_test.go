@@ -34,7 +34,7 @@ func fileSHA256(t *testing.T, path string) [sha256.Size]byte {
 // start, a chunk boundary and the end, so it is never held in memory.
 func TestMaxSizeFileTransfer(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "messages")
 	sa, sb := l.A.C, l.B.C
 

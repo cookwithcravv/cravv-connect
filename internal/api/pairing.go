@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/ipc"
 )
 
@@ -39,11 +38,7 @@ func (h *handlers) pairFinalize(ctx context.Context, cs *ipc.ConnState, p ipc.Pa
 	if err := validAlias(p.Alias); err != nil {
 		return nil, err
 	}
-	trust, err := core.ParseTrust(p.Trust)
-	if err != nil {
-		return nil, badRequest("trust must be chat-only, ask-first or autonomous")
-	}
-	alias, err := h.p.Pairing.Finalize(ctx, p.PendingID, p.Alias, trust, cs.Unlocked())
+	alias, err := h.p.Pairing.Finalize(ctx, p.PendingID, p.Alias, cs.Unlocked())
 	if err != nil {
 		return nil, err
 	}

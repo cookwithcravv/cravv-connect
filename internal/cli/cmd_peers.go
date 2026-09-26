@@ -13,7 +13,6 @@ import (
 func init() {
 	Register(newPeersCmd)
 	Register(newAliasCmd)
-	Register(newTrustCmd)
 	Register(newPauseCmd)
 	Register(newResumePeerCmd)
 	Register(newUnpairCmd)
@@ -58,9 +57,9 @@ func newPeersCmd(env *Env) *cobra.Command {
 					return nil
 				}
 				tw := tabwriter.NewWriter(env.Stdout, 0, 4, 2, ' ', 0)
-				fmt.Fprintln(tw, "ALIAS\tTRUST\tSTATE\tMACHINE ID\tPAIRED")
+				fmt.Fprintln(tw, "ALIAS\tSTATE\tMACHINE ID\tPAIRED")
 				for _, p := range r.Peers {
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", terminalSafe(p.Alias), terminalSafe(string(p.TrustIn)), peerState(p), terminalSafe(string(p.MachineID)), fmtTime(p.PairedAt))
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", terminalSafe(p.Alias), peerState(p), terminalSafe(string(p.MachineID)), fmtTime(p.PairedAt))
 				}
 				return tw.Flush()
 			})
@@ -79,26 +78,6 @@ func newAliasCmd(env *Env) *cobra.Command {
 					return err
 				}
 				fmt.Fprintf(env.Stdout, "Renamed %s to %s.\n", args[0], args[1])
-				return nil
-			})
-		},
-	}
-}
-
-func newTrustCmd(env *Env) *cobra.Command {
-	return &cobra.Command{
-		Use:   "trust <alias> <chat-only|ask-first|autonomous>",
-		Short: "Set what a peer may do on this machine (raising asks for your password)",
-		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			return withConn(ctx, env, func(c Caller) error {
-				if err := withUnlock(ctx, env, c, func() error {
-					return c.Call(ctx, ipc.MethodPeerTrust, ipc.PeerTrustParams{Alias: args[0], Level: args[1]}, nil)
-				}); err != nil {
-					return err
-				}
-				fmt.Fprintf(env.Stdout, "Trust for %s is now %s.\n", args[0], args[1])
 				return nil
 			})
 		},

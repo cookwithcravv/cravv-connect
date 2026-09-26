@@ -22,7 +22,7 @@ const (
 	CutOffUnpaired     = "peer unpaired"
 )
 
-// PeerService owns the local view of paired peers: aliases, trust, pause, and unpair.
+// PeerService owns the local view of paired peers: aliases, pause, and unpair.
 type PeerService struct {
 	peers     store.PeerStore
 	mailboxes MailboxProvider
@@ -102,32 +102,6 @@ func (s *PeerService) SetAlias(ctx context.Context, alias, newAlias string) erro
 	}
 	p.Alias = clean
 	return s.peers.PutPeer(ctx, p)
-}
-
-// SetTrust changes what the peer may do on this machine. Raising needs unlocked=true
-// (the IPC layer sets it after auth.unlock); lowering always works.
-func (s *PeerService) SetTrust(ctx context.Context, alias string, level core.TrustLevel, unlocked bool) error {
-	if !level.Valid() {
-		return fmt.Errorf("invalid trust level %d", int(level))
-	}
-	p, _, err := s.Resolve(ctx, alias)
-	if err != nil {
-		return err
-	}
-	old := p.TrustIn
-	if level == old {
-		return nil
-	}
-	if level > old && !unlocked {
-		return core.ErrAuthRequired
-	}
-	p.TrustIn = level
-	if err := s.peers.PutPeer(ctx, p); err != nil {
-		return err
-	}
-	s.record(audit.Event{Type: audit.EvTrust, Peer: p.MachineID, Alias: p.Alias,
-		Detail: map[string]any{"from": old.String(), "to": level.String()}})
-	return nil
 }
 
 // Pause stops traffic with a peer in both directions. control.paused is sent (best effort)

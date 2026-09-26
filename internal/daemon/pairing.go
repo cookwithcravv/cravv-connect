@@ -45,7 +45,7 @@ type PairingConfig struct {
 	RelayURL   string
 }
 
-// Proposal is what the human sees before choosing an alias and trust level.
+// Proposal is what the human sees before choosing an alias.
 type Proposal struct {
 	PendingID     string
 	SuggestedName string // sanitized alias suggestion (never shown raw)
@@ -217,15 +217,13 @@ func (s *PairingService) Join(ctx context.Context, code string, unlocked bool) (
 	return p.proposal, nil
 }
 
-// Finalize stores the peer under alias with the chosen incoming trust, registers this
-// machine's mailbox first if needed (joiner), allows the peer on the relay, and audits.
-// It returns the alias actually used.
-func (s *PairingService) Finalize(ctx context.Context, pendingID, alias string, trust core.TrustLevel, unlocked bool) (string, error) {
+// Finalize stores the peer under alias, registers this machine's mailbox
+// first if needed (joiner), allows the peer on the relay, and audits. The
+// pairing grants discovery and link requests only. It returns the alias
+// actually used.
+func (s *PairingService) Finalize(ctx context.Context, pendingID, alias string, unlocked bool) (string, error) {
 	if !unlocked {
 		return "", core.ErrAuthRequired
-	}
-	if !trust.Valid() {
-		return "", fmt.Errorf("invalid trust level %d", int(trust))
 	}
 	p, err := s.lookup(pendingID)
 	if err != nil {
@@ -260,7 +258,6 @@ func (s *PairingService) Finalize(ctx context.Context, pendingID, alias string, 
 		MachineID: p.proposal.MachineID,
 		IK:        ed25519.PublicKey(p.peer.IK),
 		Alias:     clean,
-		TrustIn:   trust,
 		Prekey:    p.peer.Prekey,
 		RelayURL:  p.peer.RelayURL,
 		PairedAt:  s.clock.Now(),
@@ -280,7 +277,7 @@ func (s *PairingService) Finalize(ctx context.Context, pendingID, alias string, 
 	}
 	s.forget(pendingID)
 	_ = s.audit.Record(audit.Event{TS: s.clock.Now(), Type: audit.EvPair, Peer: peer.MachineID, Alias: clean,
-		Detail: map[string]any{"trust": trust.String(), "role": p.role}})
+		Detail: map[string]any{"role": p.role}})
 	return clean, nil
 }
 

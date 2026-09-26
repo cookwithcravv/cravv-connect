@@ -27,7 +27,7 @@ func TestSendBeforePeerFinalizes(t *testing.T) {
 	if err != nil || len(lead) != 1 {
 		t.Fatalf("alice's sessions %+v, %v", lead, err)
 	}
-	PairBetween(t, a, b, PairOptions{}, func() {
+	PairBetween(t, a, b, func() {
 		b.WaitOnline()
 		b.Share("codex", "worker", "private")
 		mine, err := b.Daemon.Shared().List(ctx, core.SessionOpen)

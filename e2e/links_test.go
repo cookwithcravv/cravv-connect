@@ -22,7 +22,7 @@ func sessionNames(r ipc.SessionsListResult) string {
 // see is refused exactly like a missing one.
 func TestShareAndDiscoverVisibility(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	lead := a.Share("claude", "lead", "private")
 	b.Share("claude", "trainer", "all-peers")
 	secret := b.Share("codex", "secret", "private")
@@ -53,7 +53,7 @@ func TestShareAndDiscoverVisibility(t *testing.T) {
 // the password in Phase 1. The requester sees the granted permission.
 func TestLinkRequestAcceptedWithPassword(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	lead := a.Share("claude", "lead", "private")
 	trainer := b.Share("claude", "trainer", "all-peers")
 	out := Connect(t, lead, "bob/trainer", "tasks-ask", "please run the training job")
@@ -93,7 +93,7 @@ func TestLinkRequestAcceptedWithPassword(t *testing.T) {
 
 func TestDisconnectClosesBothSides(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "messages")
 	Call(t, l.A.C, ipc.MethodLinkDisconnect, ipc.LinkParams{Link: l.ANum}, nil)
 	if got := a.Link(l.ANum); got.State != "closed" || got.Reason != "disconnected" {
@@ -108,7 +108,7 @@ func TestDisconnectClosesBothSides(t *testing.T) {
 // learns within 5 seconds while both machines are online.
 func TestSessionCloseReachesPeerWithinFiveSeconds(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "messages")
 	start := time.Now()
 	Call(t, l.B.C, ipc.MethodSessionClose, nil, nil)
@@ -124,7 +124,7 @@ func TestSessionCloseReachesPeerWithinFiveSeconds(t *testing.T) {
 func TestPresenceTimeoutWhenMachineDrops(t *testing.T) {
 	t.Parallel()
 	clock := core.NewFakeClock(time.Now())
-	_, a, b := NewPairWithClock(t, PairOptions{}, clock)
+	_, a, b := NewPairWithClock(t, clock)
 	l := LinkUp(t, a, b, "messages")
 	ctx := context.Background()
 	// Bob drops first, so no pong from before the drop can arrive late.
@@ -154,7 +154,7 @@ func TestPresenceTimeoutWhenMachineDrops(t *testing.T) {
 // reattach with the token brings it back with the same links.
 func TestAwayAndReattachKeepLinks(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	l := LinkUp(t, a, b, "messages")
 	l.B.C.Close()
 	a.WaitLink(wait, "peer away", func(v ipc.LinkView) bool { return v.Link == l.ANum && v.RemoteAway && v.State == "active" })
@@ -175,7 +175,7 @@ func TestAwayAndReattachKeepLinks(t *testing.T) {
 func TestAwayGraceExpiryClosesLinks(t *testing.T) {
 	t.Parallel()
 	clock := core.NewFakeClock(time.Now())
-	_, a, b := NewPairWithClock(t, PairOptions{}, clock)
+	_, a, b := NewPairWithClock(t, clock)
 	l := LinkUp(t, a, b, "messages")
 	l.B.C.Close()
 	a.WaitLink(wait, "peer away", func(v ipc.LinkView) bool { return v.Link == l.ANum && v.RemoteAway })

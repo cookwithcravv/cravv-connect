@@ -170,6 +170,11 @@ ALTER TABLE files ADD COLUMN link_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE files ADD COLUMN session_id TEXT NOT NULL DEFAULT '';
 CREATE INDEX tasks_link ON tasks(link_id);
 `,
+	// v2 removes machine trust levels: pairings are kept, and what a peer may
+	// do is set per link.
+	`
+ALTER TABLE peers DROP COLUMN trust_in;
+`,
 }
 
 // migrate creates schema_migrations and applies every migration whose

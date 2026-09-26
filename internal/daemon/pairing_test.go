@@ -230,11 +230,11 @@ func TestPairingFullExchange(t *testing.T) {
 		t.Fatalf("suggested names %q / %q", propA.SuggestedName, propB.SuggestedName)
 	}
 
-	aliasA, err := a.svc.Finalize(ctx, pendingA, "", core.TrustAskFirst, true)
+	aliasA, err := a.svc.Finalize(ctx, pendingA, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	aliasB, err := b.svc.Finalize(ctx, propB.PendingID, "My Mac", core.TrustAutonomous, true)
+	aliasB, err := b.svc.Finalize(ctx, propB.PendingID, "My Mac", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,14 +250,14 @@ func TestPairingFullExchange(t *testing.T) {
 	}
 
 	pa := mustGetPeer(t, a.peers, b.id.MachineID())
-	if pa.TrustIn != core.TrustAskFirst || pa.RelayURL != "https://relay.test" || !pa.PairedAt.Equal(testEpoch) {
+	if pa.RelayURL != "https://relay.test" || !pa.PairedAt.Equal(testEpoch) {
 		t.Fatalf("stored peer on A = %+v", pa)
 	}
 	if err := keys.SignedPrekeyFromWire(pa.Prekey).Verify(b.id.Public()); err != nil {
 		t.Fatalf("A stored an unverifiable prekey for B: %v", err)
 	}
 	pb := mustGetPeer(t, b.peers, a.id.MachineID())
-	if pb.TrustIn != core.TrustAutonomous || pb.Alias != "my-mac" {
+	if pb.Alias != "my-mac" {
 		t.Fatalf("stored peer on B = %+v", pb)
 	}
 	if !a.mb.isAllowed(b.id.Public()) {
@@ -281,7 +281,7 @@ func TestPairingFullExchange(t *testing.T) {
 			t.Fatalf("audit = %v", s.audit.types())
 		}
 	}
-	if _, err := a.svc.Finalize(ctx, pendingA, "again", core.TrustAskFirst, true); !errors.Is(err, core.ErrNotFound) {
+	if _, err := a.svc.Finalize(ctx, pendingA, "again", true); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("second finalize err = %v", err)
 	}
 	if _, err := newPairSide(t, rooms, "late", true).svc.Join(ctx, code, true); err == nil {
@@ -368,10 +368,10 @@ func TestPairingExpiredPending(t *testing.T) {
 	}
 	a.clock.Advance(core.RoomTTL + time.Second)
 	b.clock.Advance(core.RoomTTL + time.Second)
-	if _, err := a.svc.Finalize(ctx, pendingA, "b", core.TrustAskFirst, true); !errors.Is(err, ErrPairingExpired) {
+	if _, err := a.svc.Finalize(ctx, pendingA, "b", true); !errors.Is(err, ErrPairingExpired) {
 		t.Fatalf("creator finalize err = %v, want ErrPairingExpired", err)
 	}
-	if _, err := b.svc.Finalize(ctx, prop.PendingID, "a", core.TrustAskFirst, true); !errors.Is(err, ErrPairingExpired) {
+	if _, err := b.svc.Finalize(ctx, prop.PendingID, "a", true); !errors.Is(err, ErrPairingExpired) {
 		t.Fatalf("joiner finalize err = %v, want ErrPairingExpired", err)
 	}
 	if len(b.reg.invites) != 0 {
@@ -394,13 +394,10 @@ func TestPairingFinalizeValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.svc.Finalize(ctx, pendingA, "x", core.TrustAskFirst, true); !errors.Is(err, ErrPairingInProgress) {
+	if _, err := a.svc.Finalize(ctx, pendingA, "x", true); !errors.Is(err, ErrPairingInProgress) {
 		t.Fatalf("finalize before exchange err = %v", err)
 	}
-	if _, err := a.svc.Finalize(ctx, pendingA, "x", core.TrustLevel(7), true); err == nil {
-		t.Fatal("invalid trust accepted")
-	}
-	if _, err := a.svc.Finalize(ctx, "nope", "x", core.TrustAskFirst, true); !errors.Is(err, core.ErrNotFound) {
+	if _, err := a.svc.Finalize(ctx, "nope", "x", true); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("unknown pending err = %v", err)
 	}
 	if _, err := a.svc.Join(ctx, "not a code", true); err == nil {
@@ -450,10 +447,10 @@ func TestPairingExpiryStartsWhenExchangeCompletes(t *testing.T) {
 	// The human takes a few minutes to choose an alias: still valid.
 	a.clock.Advance(3 * time.Minute)
 	b.clock.Advance(3 * time.Minute)
-	if _, err := a.svc.Finalize(ctx, pendingA, "b", core.TrustAskFirst, true); err != nil {
+	if _, err := a.svc.Finalize(ctx, pendingA, "b", true); err != nil {
 		t.Fatalf("creator finalize: %v", err)
 	}
-	if _, err := b.svc.Finalize(ctx, prop.PendingID, "a", core.TrustAskFirst, true); err != nil {
+	if _, err := b.svc.Finalize(ctx, prop.PendingID, "a", true); err != nil {
 		t.Fatalf("joiner finalize: %v", err)
 	}
 }
@@ -500,16 +497,16 @@ func TestPairingNeedsUnlock(t *testing.T) {
 	if _, err := a.svc.Await(ctx, pendingA); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.svc.Finalize(ctx, pendingA, "b", core.TrustAutonomous, false); !errors.Is(err, core.ErrAuthRequired) {
+	if _, err := a.svc.Finalize(ctx, pendingA, "b", false); !errors.Is(err, core.ErrAuthRequired) {
 		t.Fatalf("Finalize locked err = %v", err)
 	}
 	if peers, _ := a.peers.ListPeers(ctx); len(peers) != 0 {
 		t.Fatalf("locked finalize stored a peer: %+v", peers)
 	}
-	if _, err := a.svc.Finalize(ctx, pendingA, "b", core.TrustAutonomous, true); err != nil {
+	if _, err := a.svc.Finalize(ctx, pendingA, "b", true); err != nil {
 		t.Fatalf("unlocked finalize after a locked attempt: %v", err)
 	}
-	if _, err := b.svc.Finalize(ctx, prop.PendingID, "a", core.TrustAskFirst, true); err != nil {
+	if _, err := b.svc.Finalize(ctx, prop.PendingID, "a", true); err != nil {
 		t.Fatal(err)
 	}
 }

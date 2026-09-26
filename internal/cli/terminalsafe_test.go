@@ -79,7 +79,7 @@ func TestListingsHostileStrings(t *testing.T) {
 	fd := newFakeDaemon(t)
 	fd.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, ipc.StatusResult{
 		MachineID: "abc", DeviceName: hostileName, RelayURL: "https://r\x1b[8m",
-		Peers:    []ipc.PeerView{{Alias: hostileName, TrustIn: "autonomous"}},
+		Peers:    []ipc.PeerView{{Alias: hostileName}},
 		Sessions: []string{hostileName}, Errors: []string{hostileBlock},
 	})
 	fd.reply(ipc.MethodAuditRead, ipc.GateAllowWhenKilled, ipc.AuditReadResult{Events: []audit.Event{
@@ -89,7 +89,7 @@ func TestListingsHostileStrings(t *testing.T) {
 		{FileID: hostileID, Direction: "in", Peer: hostileName, Name: hostileBlock, State: "held\n", Size: 1},
 	}})
 	fd.reply(ipc.MethodPeerList, ipc.GateNone, ipc.PeerListResult{Peers: []ipc.PeerView{
-		{Alias: hostileName, TrustIn: "autonomous", MachineID: "m\x1b[8m"},
+		{Alias: hostileName, MachineID: "m\x1b[8m"},
 	}})
 	fd.start()
 	for _, args := range [][]string{{"status"}, {"log"}, {"files"}, {"peers"}} {

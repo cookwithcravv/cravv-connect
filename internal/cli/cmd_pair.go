@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/ipc"
 	"github.com/spf13/cobra"
 )
@@ -72,7 +71,9 @@ func newJoinCmd(env *Env) *cobra.Command {
 	}
 }
 
-// finalizePeer asks the human for a local alias and a trust level.
+// finalizePeer asks the human for a local alias. Pairing lets the two
+// machines discover shared sessions and ask for links; each link is decided
+// on its own.
 func finalizePeer(ctx context.Context, env *Env, c Caller, p ipc.PendingPeerResult) error {
 	w := env.Stdout
 	fmt.Fprintf(w, "Connected to machine %s.\n", terminalSafe(shortID(string(p.MachineID))))
@@ -80,28 +81,13 @@ func finalizePeer(ctx context.Context, env *Env, c Caller, p ipc.PendingPeerResu
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(w, "Trust levels: chat-only (messages only), ask-first (you approve each task), autonomous (tasks run without asking).")
-	var trust string
-	for try := 0; ; try++ {
-		trust, err = env.Prompt.Line("Trust level", core.TrustAskFirst.String())
-		if err != nil {
-			return err
-		}
-		if _, perr := core.ParseTrust(trust); perr == nil {
-			break
-		}
-		if try == 2 {
-			return fmt.Errorf("unknown trust level %q", trust)
-		}
-		fmt.Fprintln(env.Stderr, "Please type chat-only, ask-first or autonomous.")
-	}
 	var res ipc.PairFinalizeResult
 	if err := withUnlock(ctx, env, c, func() error {
-		return c.Call(ctx, ipc.MethodPairFinalize, ipc.PairFinalizeParams{PendingID: p.PendingID, Alias: alias, Trust: trust}, &res)
+		return c.Call(ctx, ipc.MethodPairFinalize, ipc.PairFinalizeParams{PendingID: p.PendingID, Alias: alias}, &res)
 	}); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "Paired with %s (trust: %s).\n", terminalSafe(res.Alias), terminalSafe(trust))
+	fmt.Fprintf(w, "Paired with %s. Its sessions can now ask to link with yours; you decide each link.\n", terminalSafe(res.Alias))
 	fmt.Fprintf(w, "Machine ID: %s\n", terminalSafe(string(p.MachineID)))
 	return nil
 }

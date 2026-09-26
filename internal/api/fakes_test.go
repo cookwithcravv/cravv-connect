@@ -27,7 +27,6 @@ type world struct {
 	lastProject  string
 	lastWait     time.Duration
 	disconnected chan string
-	trustSet     core.TrustLevel
 	unread       map[string]int
 	pending      int
 	lw           *linkWorld
@@ -222,12 +221,6 @@ func (f fPeers) Rename(_ context.Context, a, b string) error {
 	f.record("rename " + a + " " + b)
 	return nil
 }
-func (f fPeers) SetTrust(_ context.Context, _ string, l core.TrustLevel, _ bool) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.trustSet = l
-	return nil
-}
 
 type fPairing struct{ *world }
 
@@ -246,7 +239,7 @@ func (fPairing) Join(_ context.Context, _ string, unlocked bool) (ipc.PendingPee
 	}
 	return ipc.PendingPeerResult{PendingID: "P2", SuggestedName: "mac", MachineID: "m"}, nil
 }
-func (fPairing) Finalize(_ context.Context, _, alias string, _ core.TrustLevel, unlocked bool) (string, error) {
+func (fPairing) Finalize(_ context.Context, _, alias string, unlocked bool) (string, error) {
 	if !unlocked {
 		return "", core.ErrAuthRequired
 	}

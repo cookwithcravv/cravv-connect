@@ -5,7 +5,7 @@ import "errors"
 // Sentinel errors shared across packages. Match them with errors.Is.
 var (
 	ErrNotFound       = errors.New("not found")
-	ErrNotPermitted   = errors.New("not permitted by trust level")
+	ErrNotPermitted   = errors.New("not permitted on this link")
 	ErrPaused         = errors.New("peer is paused")
 	ErrPausedByPeer   = errors.New("paused by peer")
 	ErrKilled         = errors.New("kill switch is on")

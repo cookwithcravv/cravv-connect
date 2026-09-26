@@ -103,9 +103,6 @@ type PeerPort interface {
 	Resume(ctx context.Context, alias string) error
 	Unpair(ctx context.Context, alias string) error
 	Rename(ctx context.Context, alias, newAlias string) error
-	// SetTrust changes the trust level. unlocked reports whether this IPC
-	// connection holds a fresh password unlock; raising trust requires it.
-	SetTrust(ctx context.Context, alias string, level core.TrustLevel, unlocked bool) error
 }
 
 // PairingPort runs the bind-code flow on both sides.
@@ -115,7 +112,7 @@ type PairingPort interface {
 	Start(ctx context.Context, unlocked bool) (ipc.PairStartResult, error)
 	Await(ctx context.Context, pendingID string) (ipc.PendingPeerResult, error)
 	Join(ctx context.Context, code string, unlocked bool) (ipc.PendingPeerResult, error)
-	Finalize(ctx context.Context, pendingID, alias string, trust core.TrustLevel, unlocked bool) (string, error)
+	Finalize(ctx context.Context, pendingID, alias string, unlocked bool) (string, error)
 }
 
 // ControlPort holds machine-wide controls. AddAllowPath validates the

@@ -125,9 +125,9 @@ func (n *simNode) received() []string {
 func simPair(t *testing.T, a, b *simNode, aliasOfB, aliasOfA string) {
 	t.Helper()
 	mustPut(t, a.db, store.Peer{MachineID: b.id.MachineID(), IK: b.id.Public(), Alias: aliasOfB,
-		TrustIn: core.TrustAskFirst, Prekey: b.pk.Wire(), RelayURL: "https://relay.test", PairedAt: testEpoch})
+		Prekey: b.pk.Wire(), RelayURL: "https://relay.test", PairedAt: testEpoch})
 	mustPut(t, b.db, store.Peer{MachineID: a.id.MachineID(), IK: a.id.Public(), Alias: aliasOfA,
-		TrustIn: core.TrustAskFirst, Prekey: a.pk.Wire(), RelayURL: "https://relay.test", PairedAt: testEpoch})
+		Prekey: a.pk.Wire(), RelayURL: "https://relay.test", PairedAt: testEpoch})
 }
 
 // settle runs send passes and deliveries until nothing moves, advancing the clock past

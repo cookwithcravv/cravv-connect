@@ -101,7 +101,7 @@ func onlyWrapped(t *testing.T, what, out, text string) {
 // over the link, restrict and disconnect.
 func TestMCPToolsEndToEnd(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	ma, mb := newMCPAgent(t, a), newMCPAgent(t, b)
 
 	if msg, isErr := ma.try("send_message", map[string]any{"link": 1, "text": "x"}); !isErr || !strings.Contains(msg, "session_share") {
@@ -208,7 +208,7 @@ func TestMCPToolsEndToEnd(t *testing.T) {
 // receives.
 func TestMCPReattachesAfterDaemonRestart(t *testing.T) {
 	t.Parallel()
-	_, a, b := NewPair(t, PairOptions{})
+	_, a, b := NewPair(t)
 	ma := newMCPAgent(t, a)
 	ma.call("session_share", map[string]any{"name": "lead"})
 	sb := b.Share("claude", "trainer", "all-peers")

@@ -52,7 +52,7 @@ func printStatus(env *Env, st ipc.StatusResult) {
 	fmt.Fprintf(w, "Kill switch: %s\n", kill)
 	peers := make([]string, 0, len(st.Peers))
 	for _, p := range st.Peers {
-		peers = append(peers, fmt.Sprintf("%s (%s, %s)", terminalSafe(p.Alias), terminalSafe(string(p.TrustIn)), peerState(p)))
+		peers = append(peers, fmt.Sprintf("%s (%s)", terminalSafe(p.Alias), peerState(p)))
 	}
 	if len(peers) == 0 {
 		peers = append(peers, "none")

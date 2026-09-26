@@ -11,7 +11,7 @@ import (
 	"github.com/cravv/cravv-connect/internal/store"
 )
 
-const peerCols = `machine_id, ik, alias, trust_in, prekey_json, relay_url, paused, paused_by_peer, paired_at`
+const peerCols = `machine_id, ik, alias, prekey_json, relay_url, paused, paused_by_peer, paired_at`
 
 func (d *DB) PutPeer(ctx context.Context, p store.Peer) error {
 	pk, err := json.Marshal(p.Prekey)
@@ -30,13 +30,13 @@ func (d *DB) PutPeer(ctx context.Context, p store.Peer) error {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `
-INSERT INTO peers (`+peerCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO peers (`+peerCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(machine_id) DO UPDATE SET
-	ik = excluded.ik, alias = excluded.alias, trust_in = excluded.trust_in,
+	ik = excluded.ik, alias = excluded.alias,
 	prekey_json = excluded.prekey_json, relay_url = excluded.relay_url,
 	paused = excluded.paused, paused_by_peer = excluded.paused_by_peer,
 	paired_at = excluded.paired_at`,
-			string(p.MachineID), []byte(p.IK), p.Alias, int(p.TrustIn), string(pk), p.RelayURL,
+			string(p.MachineID), []byte(p.IK), p.Alias, string(pk), p.RelayURL,
 			boolInt(p.Paused), boolInt(p.PausedByPeer), toMS(p.PairedAt))
 		return err
 	})
@@ -76,13 +76,13 @@ func (d *DB) DeletePeer(ctx context.Context, id core.MachineID) error {
 
 func scanPeer(s rowScanner) (store.Peer, error) {
 	var (
-		p                  store.Peer
-		id, pk             string
-		ik                 []byte
-		trust, paused, pbp int
-		pairedAt           int64
+		p           store.Peer
+		id, pk      string
+		ik          []byte
+		paused, pbp int
+		pairedAt    int64
 	)
-	if err := s.Scan(&id, &ik, &p.Alias, &trust, &pk, &p.RelayURL, &paused, &pbp, &pairedAt); err != nil {
+	if err := s.Scan(&id, &ik, &p.Alias, &pk, &p.RelayURL, &paused, &pbp, &pairedAt); err != nil {
 		return store.Peer{}, notFound(err)
 	}
 	if err := json.Unmarshal([]byte(pk), &p.Prekey); err != nil {
@@ -90,7 +90,6 @@ func scanPeer(s rowScanner) (store.Peer, error) {
 	}
 	p.MachineID = core.MachineID(id)
 	p.IK = ed25519.PublicKey(ik)
-	p.TrustIn = core.TrustLevel(trust)
 	p.Paused = paused != 0
 	p.PausedByPeer = pbp != 0
 	p.PairedAt = fromMS(pairedAt)

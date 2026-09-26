@@ -29,7 +29,6 @@ const (
 	MethodPeerResume      = "peer.resume"
 	MethodPeerUnpair      = "peer.unpair"
 	MethodPeerAlias       = "peer.alias"
-	MethodPeerTrust       = "peer.trust"
 	MethodKill            = "kill"
 	MethodResume          = "resume"
 	MethodAuthUnlock      = "auth.unlock"
@@ -137,10 +136,6 @@ type PeerAliasParams struct {
 	Alias    string `json:"alias"`
 	NewAlias string `json:"new_alias"`
 }
-type PeerTrustParams struct {
-	Alias string `json:"alias"`
-	Level string `json:"level"`
-}
 
 type UnlockParams struct {
 	Password string `json:"password"`
@@ -167,7 +162,6 @@ type JoinStartParams struct {
 type PairFinalizeParams struct {
 	PendingID string `json:"pending_id"`
 	Alias     string `json:"alias"`
-	Trust     string `json:"trust"`
 }
 type PairFinalizeResult struct {
 	Alias string `json:"alias"`
@@ -251,7 +245,6 @@ type TaskView struct {
 type PeerView struct {
 	Alias        string    `json:"alias"`
 	MachineID    string    `json:"machine_id"`
-	TrustIn      string    `json:"trust_in"`
 	Online       bool      `json:"online"`
 	Paused       bool      `json:"paused"`
 	PausedByPeer bool      `json:"paused_by_peer"`

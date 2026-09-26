@@ -1,4 +1,4 @@
-// Package audit records security-relevant events (pairing, trust changes,
+// Package audit records security-relevant events (pairing, links,
 // approvals, password attempts, file transfers) as append-only JSONL.
 package audit
 
@@ -24,7 +24,6 @@ type Event struct {
 const (
 	EvPair          = "pair"
 	EvUnpair        = "unpair"
-	EvTrust         = "trust"
 	EvPause         = "pause"
 	EvResume        = "resume"
 	EvKill          = "kill"

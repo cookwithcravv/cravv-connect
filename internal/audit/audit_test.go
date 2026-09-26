@@ -12,7 +12,7 @@ func TestNopRecordsNothing(t *testing.T) {
 func TestEventTypeStrings(t *testing.T) {
 	// These strings are persisted in audit.log and shown by `cravv-connect log`.
 	want := map[string]string{
-		EvPair: "pair", EvUnpair: "unpair", EvTrust: "trust", EvPause: "pause", EvResume: "resume",
+		EvPair: "pair", EvUnpair: "unpair", EvPause: "pause", EvResume: "resume",
 		EvKill: "kill", EvKillResume: "kill_resume", EvApprove: "approve", EvDeny: "deny",
 		EvPassword: "password_attempt", EvTaskIn: "task_in", EvFileIn: "file_in", EvFileOut: "file_out",
 		EvAllowPath: "allow_path", EvResetIdentity: "reset_identity", EvFileAccept: "file_accept",

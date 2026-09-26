@@ -16,7 +16,6 @@ func testPeer(id, alias string) store.Peer {
 		MachineID: core.MachineID(id),
 		IK:        ed25519.PublicKey(bytes.Repeat([]byte{id[0]}, ed25519.PublicKeySize)),
 		Alias:     alias,
-		TrustIn:   core.TrustAskFirst,
 		Prekey:    core.SignedPrekeyWire{ID: "pk-" + id, Pub: []byte{1, 2, 3}, CreatedAt: t0.UnixMilli(), Sig: []byte{9}},
 		RelayURL:  "https://relay.example.com",
 		PairedAt:  t0,
@@ -34,7 +33,7 @@ func TestPeerRoundTripAndUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Alias != "gpu-box" || !bytes.Equal(got.IK, p.IK) || got.TrustIn != core.TrustAskFirst ||
+	if got.Alias != "gpu-box" || !bytes.Equal(got.IK, p.IK) ||
 		got.Prekey.ID != "pk-aaaa" || !bytes.Equal(got.Prekey.Pub, []byte{1, 2, 3}) ||
 		got.RelayURL != p.RelayURL || !got.PairedAt.Equal(t0) || got.Paused || got.PausedByPeer {
 		t.Fatalf("round trip mismatch: %+v", got)
@@ -42,7 +41,6 @@ func TestPeerRoundTripAndUpsert(t *testing.T) {
 	p.Alias = "trainer"
 	p.Paused = true
 	p.PausedByPeer = true
-	p.TrustIn = core.TrustAutonomous
 	if err := ps.PutPeer(ctx, p); err != nil {
 		t.Fatalf("upsert with new alias: %v", err)
 	}
@@ -50,7 +48,7 @@ func TestPeerRoundTripAndUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Paused || !got.PausedByPeer || got.TrustIn != core.TrustAutonomous {
+	if !got.Paused || !got.PausedByPeer {
 		t.Fatalf("upsert did not update fields: %+v", got)
 	}
 	if _, err := ps.GetPeerByAlias(ctx, "gpu-box"); !errors.Is(err, core.ErrNotFound) {
