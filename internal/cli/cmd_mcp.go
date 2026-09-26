@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/cravv/cravv-connect/internal/ipc"
 	"github.com/cravv/cravv-connect/internal/mcpserver"
@@ -31,7 +33,12 @@ func newMCPCmd(env *Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return mcpserver.Run(cmd.Context(), mcpserver.Options{
+			// An agent that quits may stop the server with SIGTERM or
+			// SIGINT: stop serving then, so Run's cleanup (the wake file)
+			// still happens.
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			err = mcpserver.Run(ctx, mcpserver.Options{
 				Dial: func(ctx context.Context) (mcpserver.Conn, error) {
 					p, err := env.Paths()
 					if err != nil {
@@ -45,6 +52,10 @@ func newMCPCmd(env *Env) *cobra.Command {
 				WakeDir:         filepath.Join(paths.Home, "wake"),
 				ListenerProgram: listenerProgram(env, exec.LookPath),
 			})
+			if ctx.Err() != nil && cmd.Context().Err() == nil {
+				return nil // stopped by a signal
+			}
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&projectDir, "project-dir", "", "project folder for this session (default: the current directory)")
