@@ -217,7 +217,7 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 			}
 		},
 		AfterKill: func(context.Context) {
-			d.svc.Load().files.StopDownloads()
+			d.svc.Load().files.StopTransfers()
 			d.disconnect()
 		},
 		AfterResume: func(ctx context.Context) {

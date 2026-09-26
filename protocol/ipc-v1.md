@@ -234,7 +234,9 @@ with `auth_unavailable`.
   with a letter or digit.
 - **`kill`:** needs no password. It fails claimed and running inbound tasks
   with note `killed`, tries for up to 3 seconds to send those updates, stops
-  file downloads, disconnects from the relay, stops handling incoming
+  file downloads, stops file uploads in progress (their `file.send` fails
+  with `killed`, the partial blob is deleted and no offer is sent),
+  disconnects from the relay, stops handling incoming
   messages, and persists across restarts. Updates not sent yet go out after
   `resume`. The switch counts as on from the moment `kill` starts: during
   those 3 seconds other calls already fail with `killed` and incoming

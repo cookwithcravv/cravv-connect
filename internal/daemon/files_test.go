@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +32,8 @@ type d2Blobs struct {
 	getCalls map[uint32]int
 	failGet  map[uint32]int // chunk -> remaining transient failures
 	onGet    func(n uint32) // called before GetChunk serves chunk n (outside the lock)
+	onPut    func(ctx context.Context, n uint32) error // called before PutChunk stores chunk n
+	puts     map[uint32]int
 }
 
 func newD2Blobs() *d2Blobs {
@@ -47,7 +50,19 @@ func (b *d2Blobs) Create(ctx context.Context, recipient ed25519.PublicKey, size 
 
 func (b *d2Blobs) PutChunk(ctx context.Context, blobID string, n uint32, data []byte) error {
 	b.mu.Lock()
+	hook := b.onPut
+	b.mu.Unlock()
+	if hook != nil {
+		if err := hook(ctx, n); err != nil {
+			return err
+		}
+	}
+	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.puts == nil {
+		b.puts = map[uint32]int{}
+	}
+	b.puts[n]++
 	b.blobs[blobID][n] = append([]byte(nil), data...)
 	return nil
 }
@@ -101,6 +116,7 @@ func (b *d2Blobs) put(t *testing.T, name string, content []byte) core.FileOfferB
 }
 
 type d2FileEnv struct {
+	killed   atomic.Bool
 	te       *d2TaskEnv
 	blobs    *d2Blobs
 	filesDir string
@@ -117,6 +133,7 @@ func d2FileSvc(t *testing.T, quota int64) *d2FileEnv {
 		Sender: e.te.sender, Guard: NewAllowPaths(e.te.st, e.te.audit), FilesDir: e.filesDir, Quota: quota,
 		Policy: TrustPolicy{}, Clock: e.te.clock, Audit: e.te.audit,
 		FreeSpace: func(string) (uint64, error) { return e.free, nil },
+		Killed:    e.killed.Load,
 	})
 	return e
 }
@@ -578,5 +595,52 @@ func TestQuotaForgetsOldDownloads(t *testing.T) {
 	e.offer(t, peer, third)
 	if r := e.record(t, third.FileID); r.State != store.FileDone {
 		t.Fatalf("after retention: %s (%s)", r.State, r.Reason)
+	}
+}
+
+// A kill during an upload stops it: the chunk in flight is cancelled, no
+// further chunk is sent, the partial blob is deleted and no file.offer goes out.
+func TestKillStopsUpload(t *testing.T) {
+	ctx := context.Background()
+	e := d2FileSvc(t, 0)
+	peer, _ := d2Peer(t, e.te.st, "gpu-box", core.TrustAutonomous)
+	if err := os.WriteFile(filepath.Join(e.project, "big.bin"), randomBytes(t, 4*core.FileChunkBytes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.blobs.onPut = func(ctx context.Context, n uint32) error {
+		if n != 1 {
+			return nil
+		}
+		e.killed.Store(true)
+		go e.files.StopTransfers()
+		select {
+		case <-ctx.Done(): // the upload's context follows the kill switch
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+			return nil
+		}
+	}
+	_, err := e.files.SendFile(ctx, peer.MachineID, e.project, "big.bin", "")
+	if !errors.Is(err, core.ErrKilled) {
+		t.Fatalf("SendFile during kill err = %v", err)
+	}
+	if offers := e.te.sender.ofKind(core.KindFileOffer); len(offers) != 0 {
+		t.Fatalf("file.offer sent after kill: %+v", offers)
+	}
+	e.blobs.mu.Lock()
+	puts, deleted := e.blobs.puts[2]+e.blobs.puts[3], len(e.blobs.deleted)
+	e.blobs.mu.Unlock()
+	if puts != 0 || deleted != 1 {
+		t.Fatalf("chunks after kill %d, blobs deleted %d", puts, deleted)
+	}
+	recs, _ := e.te.st.ListFiles(ctx)
+	if len(recs) != 1 || recs[0].State != store.FileFailed {
+		t.Fatalf("records = %+v", recs)
+	}
+
+	// While killed, a new upload does not start.
+	e.blobs.onPut = nil
+	if _, err := e.files.SendFile(ctx, peer.MachineID, e.project, "big.bin", ""); !errors.Is(err, core.ErrKilled) {
+		t.Fatalf("SendFile while killed err = %v", err)
 	}
 }

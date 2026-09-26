@@ -21,7 +21,7 @@ type KillHooks struct {
 	// flushes the outbox (up to KillFlushTimeout) so their senders get
 	// task.update failed(killed) now when online (best effort).
 	BeforeKill func(ctx context.Context)
-	// AfterKill stops running file downloads and disconnects from the relay.
+	// AfterKill stops running file transfers and disconnects from the relay.
 	AfterKill func(ctx context.Context)
 	// AfterResume restarts stopped downloads and lets the connection loop dial again.
 	AfterResume func(ctx context.Context)

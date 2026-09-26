@@ -71,6 +71,7 @@ type FileService struct {
 	mu       sync.Mutex
 	baseCtx  context.Context
 	inflight map[string]context.CancelFunc // running downloads by file ID
+	uploads  map[string]context.CancelFunc // running uploads by file ID
 	wg       sync.WaitGroup
 }
 
@@ -91,7 +92,8 @@ func NewFileService(d FileDeps) *FileService {
 	if d.Killed == nil {
 		d.Killed = func() bool { return false }
 	}
-	return &FileService{d: d, baseCtx: context.Background(), inflight: map[string]context.CancelFunc{}}
+	return &FileService{d: d, baseCtx: context.Background(), inflight: map[string]context.CancelFunc{},
+		uploads: map[string]context.CancelFunc{}}
 }
 
 // Start sets the context downloads run under and resumes downloads that were
@@ -122,15 +124,37 @@ func (s *FileService) ResumeDownloads(ctx context.Context) error {
 	return nil
 }
 
-// StopDownloads cancels every running download (kill switch). Stopped
-// downloads stay in the downloading state and continue from their last chunk
-// on ResumeDownloads.
-func (s *FileService) StopDownloads() {
+// StopTransfers cancels every running download and upload (kill switch).
+// Stopped downloads stay in the downloading state and continue from their
+// last chunk on ResumeDownloads; stopped uploads fail for good (their blob is
+// deleted and no file.offer is sent).
+func (s *FileService) StopTransfers() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, cancel := range s.inflight {
 		cancel()
 	}
+	for _, cancel := range s.uploads {
+		cancel()
+	}
+}
+
+// uploadContext derives ctx for one upload so StopTransfers can cancel it.
+// The kill check and the registration happen under s.mu, like startDownload.
+func (s *FileService) uploadContext(ctx context.Context, fileID string) (context.Context, func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.d.Killed() {
+		return nil, nil, core.ErrKilled
+	}
+	uctx, cancel := context.WithCancel(ctx)
+	s.uploads[fileID] = cancel
+	return uctx, func() {
+		s.mu.Lock()
+		delete(s.uploads, fileID)
+		s.mu.Unlock()
+		cancel()
+	}, nil
 }
 
 // Wait blocks until every running download has finished.
@@ -173,13 +197,24 @@ func (s *FileService) SendFile(ctx context.Context, to core.MachineID, projectDi
 		Size: size, Chunks: filecrypt.ChunkCount(size), TaskID: taskID, State: store.FileUploading,
 		LocalPath: abs, CreatedAt: s.d.Clock.Now(),
 	}
+	uctx, done, err := s.uploadContext(ctx, rec.FileID)
+	if err != nil {
+		return core.FileRef{}, err
+	}
+	defer done()
 	if err := s.d.Files.PutFile(ctx, rec); err != nil {
 		return core.FileRef{}, err
 	}
-	blobID, sum, err := s.upload(ctx, peer, rec, key, f)
+	blobID, sum, err := s.upload(uctx, peer, rec, key, f)
 	if err != nil {
 		s.markOutFailed(ctx, rec.FileID, err)
 		return core.FileRef{}, err
+	}
+	if s.d.Killed() {
+		// Killed after the last chunk: the offer must not go out.
+		_ = s.d.Blobs().Delete(context.WithoutCancel(ctx), blobID)
+		s.markOutFailed(ctx, rec.FileID, core.ErrKilled)
+		return core.FileRef{}, core.ErrKilled
 	}
 	_ = s.d.Audit.Record(audit.Event{
 		Type: audit.EvFileOut, Peer: to, Alias: peer.Alias, ItemID: rec.FileID, Hash: hex.EncodeToString(sum),
@@ -205,16 +240,31 @@ func (s *FileService) SendFile(ctx context.Context, to core.MachineID, projectDi
 
 // upload streams at most rec.Size bytes of f, which the guard opened and
 // fstat'ed, so a file that grows is caught by a second fstat, not by reading on.
-func (s *FileService) upload(ctx context.Context, peer store.Peer, rec store.FileRecord, key []byte, f *os.File) (string, []byte, error) {
+// It checks the kill switch before every chunk; ctx is cancelled by
+// StopTransfers. When the kill switch stops it, the partial blob is deleted
+// and the error wraps core.ErrKilled.
+func (s *FileService) upload(ctx context.Context, peer store.Peer, rec store.FileRecord, key []byte, f *os.File) (blobID string, sum []byte, err error) {
 	r := io.LimitReader(f, rec.Size)
 	blobs := s.d.Blobs()
-	blobID, err := blobs.Create(ctx, peer.IK, rec.Size, rec.Chunks)
-	if err != nil {
+	if blobID, err = blobs.Create(ctx, peer.IK, rec.Size, rec.Chunks); err != nil {
+		if s.d.Killed() {
+			err = core.ErrKilled
+		}
 		return "", nil, err
 	}
+	defer func() {
+		if err != nil && s.d.Killed() {
+			// The relay would keep the partial blob until it expires.
+			_ = blobs.Delete(context.WithoutCancel(ctx), blobID)
+			blobID, sum, err = "", nil, fmt.Errorf("upload stopped: %w", core.ErrKilled)
+		}
+	}()
 	h := sha256.New()
 	buf := make([]byte, core.FileChunkBytes)
 	for i := uint32(0); i < rec.Chunks; i++ {
+		if s.d.Killed() {
+			return blobID, nil, core.ErrKilled
+		}
 		want := chunkLen(rec.Size, i)
 		if _, err := io.ReadFull(r, buf[:want]); err != nil {
 			return "", nil, fmt.Errorf("file changed while sending: %w", err)
@@ -444,7 +494,7 @@ func (s *FileService) admit(ctx context.Context, rec store.FileRecord) error {
 }
 
 // startDownload runs one download in the background. The kill check and the
-// registration happen under s.mu, so StopDownloads cancels every download that
+// registration happen under s.mu, so StopTransfers cancels every download that
 // started before the switch flipped and none starts after.
 func (s *FileService) startDownload(fileID string) {
 	s.mu.Lock()

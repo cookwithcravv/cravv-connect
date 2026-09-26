@@ -223,7 +223,8 @@ survives restarts. Tasks an agent claimed here are failed as `killed`, and
 their senders are told if the daemon can reach the relay within 3 seconds.
 The switch counts as on from the start of that window: agent calls are
 refused and incoming frames are left unhandled while the daemon flushes only
-those failure updates. The daemon then disconnects from the relay, stops downloads, and stops
+those failure updates. The daemon then disconnects from the relay, stops downloads, stops uploads
+in progress (the partial blob is deleted and no offer is sent), and stops
 handling incoming frames, which wait at the relay for up to 7 days. Messages
 the relay already accepted are still delivered to peers; nothing new is sent
 until `cravv-connect resume`. Every IPC method except `status`,
