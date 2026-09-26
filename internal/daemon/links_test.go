@@ -361,6 +361,31 @@ func TestUnknownLinkReplies(t *testing.T) {
 	}
 }
 
+// A link.state for a link still pending here (it can overtake the
+// link.accepted) is dropped silently: no unknown_link reply, no change.
+func TestLinkStateOnPendingLinkIgnored(t *testing.T) {
+	ctx := context.Background()
+	n, a, b := linkNet(t)
+	lead := shareOn(t, a, 1, "lead", core.Visibility{})
+	shareOn(t, b, 1, "trainer", core.Visibility{Mode: core.VisibilityAllPeers})
+	out, err := a.links.Connect(ctx, lead.Session.ID, "bob/trainer", core.PermMessages, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.pump()
+	before := len(n.sent(core.KindLinkClosed))
+	if _, err := b.sender.SendEnvelope(ctx, a.id, core.KindLinkState, "", core.LinkStateBody{LinkID: out.ID, State: core.LinkStateAway, PermissionIn: core.PermTasksAuto}); err != nil {
+		t.Fatal(err)
+	}
+	n.pump()
+	if got := len(n.sent(core.KindLinkClosed)); got != before {
+		t.Fatalf("link.state on a pending link got %d link.closed replies", got-before)
+	}
+	if got := a.linkOf(t, b, out.ID); got.State != store.LinkPending || got.RemoteAway || got.PermissionOut != "" {
+		t.Fatalf("pending link changed: %+v", got)
+	}
+}
+
 func TestSetPermission(t *testing.T) {
 	ctx := context.Background()
 	n, a, b := linkNet(t)

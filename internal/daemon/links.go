@@ -413,8 +413,9 @@ func (s *LinkService) HandleClosed(ctx context.Context, peer store.Peer, env cor
 }
 
 // HandleState records the peer's side of an active link: away or active,
-// and what it now lets this side do. A link.state for a link that is not
-// active here gets link.closed{unknown_link}.
+// and what it now lets this side do. A link.state for a link still pending
+// here (it overtook the link.accepted) is dropped silently; one for a link
+// that is unknown or closed gets link.closed{unknown_link}.
 func (s *LinkService) HandleState(ctx context.Context, peer store.Peer, env core.Envelope) error {
 	b, err := decodeEnvBody[core.LinkStateBody](env.Body)
 	if err != nil {
@@ -423,6 +424,9 @@ func (s *LinkService) HandleState(ctx context.Context, peer store.Peer, env core
 	l, err := s.d.Links.GetLink(ctx, peer.MachineID, b.LinkID)
 	if err != nil && !errors.Is(err, core.ErrNotFound) {
 		return Retryable(err)
+	}
+	if err == nil && l.State == store.LinkPending {
+		return nil
 	}
 	if err != nil || l.State != store.LinkActive {
 		s.d.Replies.UnknownLink(ctx, peer, b.LinkID)
