@@ -166,6 +166,32 @@ func TestReattachTakeoverRevokesOldConnection(t *testing.T) {
 	}
 }
 
+// Review focus: a reattach that lands between Detach unbinding the old
+// connection and marking the session away must win. The session stays open
+// and bound to the new connection, and no away event is sent.
+func TestReattachDuringDetachKeepsSessionOpen(t *testing.T) {
+	ctx := context.Background()
+	svc, _, ev, _ := newSessionSvc(t)
+	sh := share(t, svc, 1, "trainer")
+	svc.afterUnbind = func() {
+		if _, err := svc.Reattach(ctx, 2, sh.ReattachToken, "claude", "/p"); err != nil {
+			t.Errorf("reattach: %v", err)
+		}
+	}
+	if err := svc.Detach(ctx, sh.Session.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.Get(ctx, sh.Session.ID); got.State != core.SessionOpen {
+		t.Fatalf("state %s after a reattach raced the detach", got.State)
+	}
+	if _, err := svc.Current(ctx, sh.Session.ID, 2); err != nil {
+		t.Fatalf("new connection lost the session: %v", err)
+	}
+	if ev.all() != "" {
+		t.Fatalf("events %q, want none", ev.all())
+	}
+}
+
 func TestAwayGraceSweepClosesAndFreesName(t *testing.T) {
 	ctx := context.Background()
 	svc, clock, ev, _ := newSessionSvc(t)

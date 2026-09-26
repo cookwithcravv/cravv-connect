@@ -54,6 +54,8 @@ type SessionService struct {
 	mu        sync.Mutex
 	bound     map[string]uint64 // session ID -> connection ID
 	observers []SessionObserver
+
+	afterUnbind func() // test hook: runs in Detach after the unbind
 }
 
 // NewSessionService builds the service.
@@ -190,7 +192,15 @@ func (s *SessionService) Detach(ctx context.Context, id string, conn uint64) err
 	}
 	delete(s.bound, id)
 	s.mu.Unlock()
-	rec, changed, err := s.setState(ctx, id, core.SessionAway, func(r store.SharedSession) bool { return r.State == core.SessionOpen })
+	if s.afterUnbind != nil {
+		s.afterUnbind()
+	}
+	// setState holds s.mu while it checks cond, so a reattach that bound the
+	// session in the meantime is seen here and keeps it open.
+	rec, changed, err := s.setState(ctx, id, core.SessionAway, func(r store.SharedSession) bool {
+		_, rebound := s.bound[id]
+		return r.State == core.SessionOpen && !rebound
+	})
 	if err != nil || !changed {
 		return err
 	}
