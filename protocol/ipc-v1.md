@@ -236,7 +236,10 @@ with `auth_unavailable`.
   with note `killed`, tries for up to 3 seconds to send those updates, stops
   file downloads, disconnects from the relay, stops handling incoming
   messages, and persists across restarts. Updates not sent yet go out after
-  `resume`. While the switch is on, every method outside the kill-safe list
+  `resume`. The switch counts as on from the moment `kill` starts: during
+  those 3 seconds other calls already fail with `killed` and incoming
+  messages are left at the relay; only the daemon's own flush of the
+  `killed` updates still sends. While the switch is on, every method outside the kill-safe list
   fails with `killed`, including `chat.send`, `task.*` and `file.send`.
   Calling `kill` again while it is on succeeds and changes nothing.
 - **`daemon.shutdown`:** needs no password and runs while killed (stopping

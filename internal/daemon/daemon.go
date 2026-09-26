@@ -80,8 +80,10 @@ type Daemon struct {
 }
 
 // Mailbox implements MailboxProvider: the live mailbox, or false when offline or killed.
+// During the kill flush it still returns the live mailbox (the flush sends on it);
+// the IPC gate keeps agents from reaching it then.
 func (d *Daemon) Mailbox() (transport.Mailbox, bool) {
-	if d.kill.Killed() {
+	if !d.kill.SendingAllowed() {
 		return nil, false
 	}
 	d.mu.Lock()
@@ -283,6 +285,11 @@ func (d *Daemon) connectLoop(ctx context.Context, g *services) {
 		inErr := g.inbound.Run(ctx, mb)
 		if inErr != nil {
 			d.log.Warn("inbound stopped", "err", inErr)
+		}
+		if errors.Is(inErr, core.ErrKilled) {
+			// Inbound stops as soon as a kill starts, but the kill flush is
+			// still sending on mb: close it only once the kill is done.
+			d.kill.Settle()
 		}
 		d.setState(nil, mb.Err())
 		mb.Close()

@@ -234,7 +234,9 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 func (d *Daemon) build(id *keys.Identity) *services {
 	db, clock, lg := d.store, d.clock, d.audit
 	g := &services{identity: id, registry: NewHandlerRegistry(), activity: NewPeerActivity(clock)}
-	g.outbound = NewOutbound(id, db, db, d, clock, d.kill.Killed, d.log)
+	// The send loop keeps sending during the kill flush; everything else stops
+	// as soon as Kill starts (Killed).
+	g.outbound = NewOutbound(id, db, db, d, clock, func() bool { return !d.kill.SendingAllowed() }, d.log)
 	g.peers = NewPeerService(db, d, g.outbound, lg, clock)
 	g.prekeys = NewPrekeyManager(db, db, id, g.outbound, clock)
 	g.files = NewFileService(FileDeps{

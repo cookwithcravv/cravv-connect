@@ -22,8 +22,13 @@ func TestKillSwitchPersistsAndRunsHooks(t *testing.T) {
 	var calls []string
 	k.SetHooks(KillHooks{
 		BeforeKill: func(context.Context) {
-			if k.Killed() {
-				t.Error("BeforeKill ran after the switch flipped")
+			// While the flush runs the switch already reads as on (the IPC
+			// gate and inbound stop), but the send loop may still send.
+			if !k.Killed() {
+				t.Error("Killed() false during the kill flush")
+			}
+			if !k.SendingAllowed() {
+				t.Error("sending blocked during the kill flush")
 			}
 			calls = append(calls, "before")
 		},
@@ -35,6 +40,9 @@ func TestKillSwitchPersistsAndRunsHooks(t *testing.T) {
 	}
 	if err := k.Kill(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if k.SendingAllowed() {
+		t.Fatal("sending still allowed after the kill")
 	}
 	if !k.Killed() || len(calls) != 2 || calls[0] != "before" || calls[1] != "after" {
 		t.Fatalf("killed=%v calls=%v", k.Killed(), calls)
@@ -49,7 +57,7 @@ func TestKillSwitchPersistsAndRunsHooks(t *testing.T) {
 	if err := k.Resume(ctx, true); err != nil {
 		t.Fatal(err)
 	}
-	if k.Killed() || calls[len(calls)-1] != "resume" {
+	if k.Killed() || !k.SendingAllowed() || calls[len(calls)-1] != "resume" {
 		t.Fatalf("after resume killed=%v calls=%v", k.Killed(), calls)
 	}
 	if fresh, _ := NewKillSwitch(ctx, st, lg); fresh.Killed() {

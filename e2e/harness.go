@@ -50,18 +50,26 @@ type Relay struct {
 }
 
 // NewRelay starts a relay on a free port and stops it when the test ends.
-func NewRelay(t *testing.T) *Relay {
+func NewRelay(t *testing.T) *Relay { t.Helper(); return NewRelayWith(t, nil) }
+
+// NewRelayWith is NewRelay with the memory backend passed through wrap (when
+// not nil), so a test can observe or slow down what the relay stores.
+func NewRelayWith(t *testing.T, wrap func(relayserver.Backend) relayserver.Backend) *Relay {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := &Relay{t: t, addr: ln.Addr().String()}
+	var backend relayserver.Backend = relayserver.NewMemoryBackend(core.SystemClock{})
+	if wrap != nil {
+		backend = wrap(backend)
+	}
 	srv, err := relayserver.New(relayserver.Config{
 		PublicOrigin: r.URL(),
 		AdminToken:   AdminToken,
 		Clock:        core.SystemClock{},
-	}, relayserver.NewMemoryBackend(core.SystemClock{}))
+	}, backend)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +424,12 @@ func Pair(t *testing.T, a, b *Node, o PairOptions) {
 // admin token) and bob (registered with alice's invite).
 func NewPair(t *testing.T, o PairOptions) (*Relay, *Node, *Node) {
 	t.Helper()
-	r := NewRelay(t)
+	return NewPairOn(t, NewRelay(t), o)
+}
+
+// NewPairOn is NewPair on a relay the test started (for example with NewRelayWith).
+func NewPairOn(t *testing.T, r *Relay, o PairOptions) (*Relay, *Node, *Node) {
+	t.Helper()
 	a := NewNode(t, r, "alice", NodeOptions{AdminToken: AdminToken})
 	b := NewNode(t, r, "bob", NodeOptions{})
 	Pair(t, a, b, o)

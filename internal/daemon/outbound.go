@@ -35,7 +35,7 @@ type Outbound struct {
 	outbox    store.OutboxStore
 	mailboxes MailboxProvider
 	clock     core.Clock
-	killed    func() bool
+	stopped   func() bool // the kill switch is fully on: send nothing
 	logger    *slog.Logger
 	wake      chan struct{}
 
@@ -44,18 +44,21 @@ type Outbound struct {
 	recent []string
 }
 
-// NewOutbound wires an Outbound. killed may be nil (never killed); logger may be nil.
+// NewOutbound wires an Outbound. stopped reports that sending must stop (the kill
+// switch is fully on); it must stay false during the kill flush, so the daemon passes
+// the negation of KillSwitch.SendingAllowed, not Killed. It may be nil (never
+// stopped); logger may be nil.
 func NewOutbound(id *keys.Identity, peers store.PeerStore, outbox store.OutboxStore, mailboxes MailboxProvider,
-	clock core.Clock, killed func() bool, logger *slog.Logger) *Outbound {
-	if killed == nil {
-		killed = func() bool { return false }
+	clock core.Clock, stopped func() bool, logger *slog.Logger) *Outbound {
+	if stopped == nil {
+		stopped = func() bool { return false }
 	}
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	return &Outbound{
 		identity: id, peers: peers, outbox: outbox, mailboxes: mailboxes,
-		clock: clock, killed: killed, logger: logger,
+		clock: clock, stopped: stopped, logger: logger,
 		wake: make(chan struct{}, 1),
 	}
 }
@@ -106,7 +109,7 @@ func (o *Outbound) SendEnvelope(ctx context.Context, to core.MachineID, kind cor
 // SendDirect seals and sends one envelope now, without the outbox. It is best effort and
 // used for notices whose peer record is about to change (control.paused, control.unpaired).
 func (o *Outbound) SendDirect(ctx context.Context, peer store.Peer, kind core.Kind, body any) error {
-	if o.killed() {
+	if o.stopped() {
 		return core.ErrKilled
 	}
 	mb, ok := o.mailboxes.Mailbox()
@@ -160,7 +163,7 @@ func (o *Outbound) Run(ctx context.Context) error {
 // dropped (older than RelayTTL, never confirmed) back to pending. It does nothing while
 // killed or offline.
 func (o *Outbound) SendDue(ctx context.Context) error {
-	if o.killed() {
+	if o.stopped() {
 		return nil
 	}
 	o.pass.Lock()

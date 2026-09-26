@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -711,5 +712,107 @@ func TestMaintainPurgesOldFileRecords(t *testing.T) {
 	}
 	if _, err := os.Stat(onDisk); err != nil {
 		t.Fatalf("file on disk touched: %v", err)
+	}
+}
+
+// gatedSendMailbox blocks Send while gate is set, until release is closed.
+type gatedSendMailbox struct {
+	*d2Mailbox
+	gate    *atomic.Bool
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (m *gatedSendMailbox) Send(ctx context.Context, to core.MachineID, id string, frame []byte) (transport.SendStatus, error) {
+	if m.gate.Load() {
+		m.once.Do(func() { close(m.entered) })
+		<-m.release
+	}
+	return m.d2Mailbox.Send(ctx, to, id, frame)
+}
+
+type gatedSendRelay struct {
+	d2Relay
+	gate    atomic.Bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *gatedSendRelay) Dialer() transport.Dialer { return r }
+
+func (r *gatedSendRelay) Dial(ctx context.Context, s transport.Signer, c transport.Credentials) (transport.Mailbox, error) {
+	mb, err := r.d2Relay.Dial(ctx, s, c)
+	if err != nil {
+		return nil, err
+	}
+	return &gatedSendMailbox{d2Mailbox: mb.(*d2Mailbox), gate: &r.gate, entered: r.entered, release: r.release}, nil
+}
+
+// While the kill flush is still sending, the switch must already read as on
+// (the IPC gate refuses agent calls) and inbound deliveries must not be
+// handled; the flush itself still goes out on the live mailbox.
+func TestKillFlushWindowIsClosed(t *testing.T) {
+	ctx := context.Background()
+	relay := &gatedSendRelay{entered: make(chan struct{}), release: make(chan struct{})}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(relay.release) }) }
+	d := d2NewDaemon(t, t.TempDir(), relay)
+	peer := newTestPeer(t, "gpu-box", core.TrustAutonomous)
+	mustPut(t, d.store, peer.rec)
+	var mu sync.Mutex
+	handled := 0
+	d.svc.Load().registry.Register(core.KindChat, HandlerFunc(func(context.Context, store.Peer, core.Envelope) error {
+		mu.Lock()
+		defer mu.Unlock()
+		handled++
+		return nil
+	}))
+	d2Run(t, d)
+	t.Cleanup(release) // runs before the stop registered by d2Run
+	d2Eventually(t, "connection", func() bool { _, ok := d.Mailbox(); return ok })
+	pk, err := d.svc.Load().prekeys.Current(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	relay.gate.Store(true)
+	if _, err := d.Outbound().SendEnvelope(ctx, peer.rec.MachineID, core.KindChat, "", "", core.ChatBody{Text: "slow"}); err != nil {
+		t.Fatal(err)
+	}
+	<-relay.entered // the send loop is stuck in Send, so the kill flush waits
+	killed := make(chan error, 1)
+	go func() { killed <- d.Kill().Kill(ctx) }()
+	d2Eventually(t, "switch reads as on during the flush", d.Kill().Killed)
+
+	env, err := core.NewEnvelope(core.SystemClock{}, peer.id.MachineID(), d.Identity().MachineID(), core.KindChat, core.ChatBody{Text: "during flush"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fr, err := sealing.Seal(peer.id, pk, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := fr.Marshal()
+	select {
+	case relay.box(0).deliveries <- transport.Delivery{Seq: 1, From: peer.id.Public(), ID: env.ID, Frame: raw}:
+	case <-time.After(5 * time.Second):
+		t.Fatal("inbound not reading")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if relay.box(0).closed() {
+		t.Fatal("mailbox closed while the kill flush was still sending")
+	}
+	release()
+	if err := <-killed; err != nil {
+		t.Fatal(err)
+	}
+	if relay.box(0).sendCount() < 1 {
+		t.Fatal("flush did not send")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if handled != 0 {
+		t.Fatalf("inbound handled %d deliveries during the kill flush", handled)
 	}
 }
