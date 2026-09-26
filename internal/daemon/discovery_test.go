@@ -17,16 +17,6 @@ func discoveryPair(t *testing.T) (*v2Net, *v2Node, *v2Node) {
 	return n, a, b
 }
 
-func shareOn(t *testing.T, v *v2Node, conn uint64, name string, vis core.Visibility) Shared {
-	t.Helper()
-	v.net.clock.Advance(time.Millisecond) // sessions list in creation order
-	sh, err := v.shared.Share(context.Background(), conn, ShareRequest{Agent: "claude", ProjectDir: "/p", Name: name, Purpose: name + " work", Visibility: vis})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return sh
-}
-
 func listedNames(b core.SessionsListedBody) []string {
 	var out []string
 	for _, s := range b.Sessions {

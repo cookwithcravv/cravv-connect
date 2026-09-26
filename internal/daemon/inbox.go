@@ -93,6 +93,24 @@ func (s *InboxService) Deliver(ctx context.Context, it store.InboxItem) (int64, 
 	return seq, nil
 }
 
+// DeliverToSession stores an item for exactly one shared session
+// (it.ToSession is its ID) and wakes waiters. Unlike Deliver it never turns
+// the item into a machine-wide one.
+func (s *InboxService) DeliverToSession(ctx context.Context, it store.InboxItem) (int64, error) {
+	if it.ToSession == "" {
+		return 0, errors.New("inbox: an item for a shared session needs its ID")
+	}
+	if it.ReceivedAt.IsZero() {
+		it.ReceivedAt = s.clock.Now()
+	}
+	seq, err := s.inbox.AddItem(ctx, it)
+	if err != nil {
+		return 0, err
+	}
+	s.Notify()
+	return seq, nil
+}
+
 // Delivered reports whether an item with this message ID is in the inbox.
 func (s *InboxService) Delivered(ctx context.Context, msgID string) (bool, error) {
 	return s.inbox.HasInboxMsg(ctx, msgID)

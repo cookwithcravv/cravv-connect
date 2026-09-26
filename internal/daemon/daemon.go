@@ -48,6 +48,8 @@ type services struct {
 	inbound  *Inbound
 	peers    *PeerService
 	discover *Discovery
+	replies  *LinkReplies
+	links    *LinkService
 	prekeys  *PrekeyManager
 	pairing  *PairingService
 	tasks    *TaskService
@@ -397,6 +399,12 @@ func (d *Daemon) maintain(ctx context.Context, g *services) error {
 	if _, err := g.tasks.ExpireDue(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("expire tasks: %w", err))
 	}
+	if _, err := g.links.ExpireDue(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("expire link requests: %w", err))
+	}
+	if _, err := g.links.PurgeClosed(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("purge closed links: %w", err))
+	}
 	if _, err := g.tasks.AbandonStaleCLIClaims(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("abandon stale cli claims: %w", err))
 	}
@@ -483,6 +491,7 @@ func (d *Daemon) Tasks() *TaskService           { return d.svc.Load().tasks }
 func (d *Daemon) Files() *FileService           { return d.svc.Load().files }
 func (d *Daemon) Peers() *PeerService           { return d.svc.Load().peers }
 func (d *Daemon) Discovery() *Discovery         { return d.svc.Load().discover }
+func (d *Daemon) Links() *LinkService           { return d.svc.Load().links }
 func (d *Daemon) Pairing() *PairingService      { return d.svc.Load().pairing }
 func (d *Daemon) Status() *StatusService        { return d.svc.Load().status }
 func (d *Daemon) Outbound() *Outbound           { return d.svc.Load().outbound }

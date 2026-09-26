@@ -14,6 +14,14 @@ import (
 	"github.com/cravv/cravv-connect/internal/transport"
 )
 
+// Cut-off notes passed to PeerCutOffObserver (and shown to the peer in the
+// updates of the tasks and files the cut-off ends).
+const (
+	CutOffPaused       = "peer paused"
+	CutOffPausedByPeer = "paused by peer"
+	CutOffUnpaired     = "peer unpaired"
+)
+
 // PeerService owns the local view of paired peers: aliases, trust, pause, and unpair.
 type PeerService struct {
 	peers     store.PeerStore
@@ -155,7 +163,7 @@ func (s *PeerService) Pause(ctx context.Context, alias string) error {
 		return nil
 	}
 	_ = s.out.SendDirect(ctx, p, core.KindControlPaused, core.EmptyBody{})
-	cutErr := s.cutOff(ctx, p, "peer paused")
+	cutErr := s.cutOff(ctx, p, CutOffPaused)
 	if err := s.out.Hold(ctx, p.MachineID); err != nil {
 		return err
 	}
@@ -222,7 +230,7 @@ func (s *PeerService) RemoveByPeer(ctx context.Context, id core.MachineID) error
 }
 
 func (s *PeerService) remove(ctx context.Context, p store.Peer, byPeer bool) error {
-	cutErr := s.cutOff(ctx, p, "peer unpaired")
+	cutErr := s.cutOff(ctx, p, CutOffUnpaired)
 	denied := false
 	if mb, ok := s.mailboxes.Mailbox(); ok {
 		denied = mb.Deny(ctx, p.IK) == nil
@@ -259,7 +267,13 @@ func (s *PeerService) MarkPausedByPeer(ctx context.Context, id core.MachineID, p
 		return nil
 	}
 	p.PausedByPeer = paused
-	return s.peers.PutPeer(ctx, p)
+	if err := s.peers.PutPeer(ctx, p); err != nil {
+		return err
+	}
+	if paused {
+		return s.cutOff(ctx, p, CutOffPausedByPeer) // links close on a pause by either side
+	}
+	return nil
 }
 
 // SyncAllowList makes the relay allow-list match local state. Call it on every connect.

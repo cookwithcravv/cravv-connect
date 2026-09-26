@@ -232,6 +232,7 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 		return nil, err
 	}
 	d.shared = NewSessionService(db, opts.Clock)
+	d.shared.AddObserver(sessionLinks{d})
 	d.inbox = NewInboxService(db, d.sessions, db, opts.Clock)
 	d.sessions.OnExpired(func(ctx context.Context, rec store.SessionRecord) {
 		if rec.Agent == CLIAgent {
@@ -257,6 +258,9 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 			g := d.svc.Load()
 			if err := g.tasks.FailActive(ctx, "killed"); err != nil {
 				d.log.Warn("fail tasks on kill", "err", err)
+			}
+			if err := g.links.CloseAll(ctx, core.CloseKilled); err != nil {
+				d.log.Warn("close links on kill", "err", err)
 			}
 			// Send the failed(killed) updates now, while still connected.
 			fctx, cancel := context.WithTimeout(ctx, KillFlushTimeout)
@@ -288,6 +292,11 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	g.outbound = NewOutbound(id, db, db, d, clock, func() bool { return !d.kill.SendingAllowed() }, d.log)
 	g.peers = NewPeerService(db, d, g.outbound, lg, clock)
 	g.discover = NewDiscovery(d.shared, g.peers, g.outbound, clock, d.log)
+	g.replies = NewLinkReplies(g.outbound, clock, d.log)
+	g.links = NewLinkService(LinkDeps{
+		Links: db, Sessions: d.shared, Peers: db, Directory: g.discover, Sender: g.outbound, Replies: g.replies,
+		Inbox: d.inbox, Desktop: d.opts.Desktop, Clock: clock, Audit: lg, Log: d.log,
+	})
 	g.prekeys = NewPrekeyManager(db, db, id, g.outbound, clock)
 	g.files = NewFileService(FileDeps{
 		Blobs: func() transport.BlobStore { return d.blobs(id) }, Peers: db, Files: db, Inbox: d.inbox,
@@ -302,6 +311,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	g.peers.AddTrustObserver(g.tasks)
 	g.peers.AddCutOffObserver(g.tasks)
 	g.peers.AddCutOffObserver(g.files)
+	g.peers.AddCutOffObserver(g.links)
 	g.inbound = NewInbound(id, db, db, g.prekeys, g.registry, g.outbound, clock, d.kill.Killed, d.log)
 	g.pairing = NewPairingService(id, d.rooms(), d, pake.SPAKE2{}, db, g.prekeys, g.outbound, d,
 		PairingConfig{DeviceName: d.opts.Config.DeviceName, RelayURL: d.opts.Config.RelayURL}, clock, lg)
@@ -330,11 +340,31 @@ func registerHandlers(g *services, inbox *InboxService, peers store.PeerStore) {
 	RegisterControlHandlers(r, peers, g.peers, g.outbound)
 	r.Register(core.KindSessionsList, HandlerFunc(g.discover.HandleList))
 	r.Register(core.KindSessionsListed, HandlerFunc(g.discover.HandleListed))
+	r.Register(core.KindLinkRequest, HandlerFunc(g.links.HandleRequest))
+	r.Register(core.KindLinkAccepted, HandlerFunc(g.links.HandleAccepted))
+	r.Register(core.KindLinkRejected, HandlerFunc(g.links.HandleRejected))
+	r.Register(core.KindLinkClosed, HandlerFunc(g.links.HandleClosed))
+	r.Register(core.KindLinkState, HandlerFunc(g.links.HandleState))
 	g.activity.WrapAll(r,
 		core.KindChat, core.KindTaskCreate, core.KindTaskUpdate, core.KindTaskCancel, core.KindFileOffer,
 		core.KindControlPrekey, core.KindControlStalePrekey, core.KindControlDelivered, core.KindControlPaused,
 		core.KindControlResumed, core.KindControlUnpaired, core.KindControlRelayMoved,
-		core.KindSessionsList, core.KindSessionsListed)
+		core.KindSessionsList, core.KindSessionsListed, core.KindLinkRequest, core.KindLinkAccepted,
+		core.KindLinkRejected, core.KindLinkClosed, core.KindLinkState)
+}
+
+// sessionLinks forwards shared-session changes to the current LinkService
+// (ResetIdentity replaces the services; the observer stays registered).
+type sessionLinks struct{ d *Daemon }
+
+func (o sessionLinks) SessionAway(ctx context.Context, s store.SharedSession) {
+	o.d.svc.Load().links.SessionAway(ctx, s)
+}
+func (o sessionLinks) SessionBack(ctx context.Context, s store.SharedSession) {
+	o.d.svc.Load().links.SessionBack(ctx, s)
+}
+func (o sessionLinks) SessionClosed(ctx context.Context, s store.SharedSession) {
+	o.d.svc.Load().links.SessionClosed(ctx, s)
 }
 
 // authErrors reports a verifier that cannot check passwords (set by New).

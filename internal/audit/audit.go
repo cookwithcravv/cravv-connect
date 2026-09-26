@@ -38,6 +38,12 @@ const (
 	EvAllowPath     = "allow_path"
 	EvResetIdentity = "reset_identity"
 	EvFileAccept    = "file_accept"
+
+	EvLinkRequest    = "link_request"
+	EvLinkAccept     = "link_accept"
+	EvLinkReject     = "link_reject"
+	EvLinkClose      = "link_close"
+	EvLinkPermission = "link_permission"
 )
 
 // Logger records audit events.

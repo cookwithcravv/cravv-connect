@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/keys"
@@ -50,6 +51,21 @@ type v2Node struct {
 	registry *HandlerRegistry
 	sender   *v2Sender
 	discover *Discovery
+	inbox    *InboxService
+	desktop  *d2Desktop
+	links    *LinkService
+	lowered  []store.Link // LinkLowered calls
+	closed   []store.Link // LinkClosed calls
+}
+
+func (v *v2Node) LinkLowered(_ context.Context, l store.Link) error {
+	v.lowered = append(v.lowered, l)
+	return nil
+}
+
+func (v *v2Node) LinkClosed(_ context.Context, l store.Link) error {
+	v.closed = append(v.closed, l)
+	return nil
 }
 
 func (n *v2Net) node(name string) *v2Node {
@@ -66,6 +82,20 @@ func (n *v2Net) node(name string) *v2Node {
 	v.discover = NewDiscovery(v.shared, v.peers, v.sender, n.clock, nil)
 	v.registry.Register(core.KindSessionsList, HandlerFunc(v.discover.HandleList))
 	v.registry.Register(core.KindSessionsListed, HandlerFunc(v.discover.HandleListed))
+	v.inbox = NewInboxService(st, NewSessionRegistry(st, st, n.clock), st, n.clock)
+	v.desktop = &d2Desktop{}
+	v.links = NewLinkService(LinkDeps{
+		Links: st, Sessions: v.shared, Peers: st, Directory: v.discover, Sender: v.sender,
+		Replies: NewLinkReplies(v.sender, n.clock, nil), Inbox: v.inbox, Desktop: v.desktop, Clock: n.clock,
+	})
+	v.links.AddLowerObserver(v)
+	v.links.AddCloseObserver(v)
+	v.shared.AddObserver(v.links)
+	v.registry.Register(core.KindLinkRequest, HandlerFunc(v.links.HandleRequest))
+	v.registry.Register(core.KindLinkAccepted, HandlerFunc(v.links.HandleAccepted))
+	v.registry.Register(core.KindLinkRejected, HandlerFunc(v.links.HandleRejected))
+	v.registry.Register(core.KindLinkClosed, HandlerFunc(v.links.HandleClosed))
+	v.registry.Register(core.KindLinkState, HandlerFunc(v.links.HandleState))
 	n.mu.Lock()
 	n.nodes[v.id] = v
 	n.mu.Unlock()
@@ -214,4 +244,62 @@ func v2Body[T any](t *testing.T, f v2Frame) T {
 		t.Fatal(err)
 	}
 	return v
+}
+
+// shareOn shares a session named name on v (connection conn).
+func shareOn(t *testing.T, v *v2Node, conn uint64, name string, vis core.Visibility) Shared {
+	t.Helper()
+	v.net.clock.Advance(time.Millisecond) // sessions list in creation order
+	sh, err := v.shared.Share(context.Background(), conn, ShareRequest{Agent: "claude", ProjectDir: "/p", Name: name, Purpose: name + " work", Visibility: vis})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sh
+}
+
+// linkOf returns v's record of the link with this ID.
+func (v *v2Node) linkOf(t *testing.T, peer *v2Node, id string) store.Link {
+	t.Helper()
+	l, err := v.st.GetLink(context.Background(), peer.id, id)
+	if err != nil {
+		t.Fatalf("%s: link %s: %v", v.name, id, err)
+	}
+	return l
+}
+
+// notices returns the kinds and texts of the session's inbox items.
+func (v *v2Node) notices(t *testing.T, sessionID string) []store.InboxItem {
+	t.Helper()
+	items, err := v.st.SessionItems(context.Background(), sessionID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return items
+}
+
+// v2Linked is an active link between session "lead" on a and "trainer" on b.
+type v2Linked struct {
+	a, b         *v2Node
+	lead, worker Shared
+	aLink, bLink store.Link
+}
+
+// linkUp pairs a and b, shares lead and trainer, and links them with b
+// granting perm (the password path, so any level works).
+func linkUp(t *testing.T, n *v2Net, a, b *v2Node, perm core.Permission) v2Linked {
+	t.Helper()
+	ctx := context.Background()
+	lead := shareOn(t, a, 1, "lead", core.Visibility{})
+	worker := shareOn(t, b, 1, "trainer", core.Visibility{Mode: core.VisibilityAllPeers})
+	out, err := a.links.Connect(ctx, lead.Session.ID, b.name+"/trainer", perm, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.pump()
+	in := b.linkOf(t, a, out.ID)
+	if _, err := b.links.Decide(ctx, in.Num, true, perm, AuthPassword); err != nil {
+		t.Fatal(err)
+	}
+	n.pump()
+	return v2Linked{a: a, b: b, lead: lead, worker: worker, aLink: a.linkOf(t, b, out.ID), bLink: b.linkOf(t, a, out.ID)}
 }

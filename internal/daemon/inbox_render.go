@@ -67,7 +67,35 @@ func DefaultRenderers() *RendererRegistry {
 	r.Register(core.KindTaskCreate, renderTaskCreate)
 	r.Register(core.KindTaskUpdate, renderTaskUpdate)
 	r.Register(core.KindFileOffer, renderFileNotice)
+	for _, k := range []core.Kind{core.KindLinkRequest, core.KindLinkAccepted, core.KindLinkRejected, core.KindLinkClosed} {
+		r.Register(k, renderLinkNotice)
+	}
 	return r
+}
+
+// renderLinkNotice shows a link event. Humans decide requests with the CLI
+// (Phase 2 adds the chat decision path).
+func renderLinkNotice(it store.InboxItem) Rendered {
+	n, err := decodeEnvBody[LinkNotice](it.Body)
+	if err != nil {
+		return Rendered{ViewKind: "link", Text: "(unreadable link notice)"}
+	}
+	var sb strings.Builder
+	switch n.Event {
+	case "request":
+		fmt.Fprintf(&sb, "asks to link with this session as link %d, with permission %s.", n.Link, n.Permission)
+		if n.Note != "" {
+			fmt.Fprintf(&sb, "\nnote: %s", n.Note)
+		}
+		fmt.Fprintf(&sb, "\nA human decides with: cravv-connect link accept %d (or cravv-connect link reject %d)", n.Link, n.Link)
+	case "accepted":
+		fmt.Fprintf(&sb, "accepted link %d. On their session you may: %s.", n.Link, n.Permission)
+	case "rejected":
+		fmt.Fprintf(&sb, "link %d was not accepted: %s.", n.Link, n.Reason)
+	default:
+		fmt.Fprintf(&sb, "link %d closed: %s.", n.Link, n.Reason)
+	}
+	return Rendered{ViewKind: "link", Text: sb.String()}
 }
 
 func renderChat(it store.InboxItem) Rendered {
