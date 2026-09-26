@@ -71,6 +71,9 @@ type Daemon struct {
 
 	svc        atomic.Pointer[services]
 	registered atomic.Bool
+	// authWarning is set by New (before the daemon runs, then read-only) when
+	// the password verifier cannot check passwords.
+	authWarning string
 
 	mu        sync.Mutex
 	mb        transport.Mailbox

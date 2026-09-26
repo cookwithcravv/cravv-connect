@@ -40,3 +40,19 @@ func TestPAMAccountErrorMapping(t *testing.T) {
 		t.Fatalf("accountError(nil) = %v", err)
 	}
 }
+
+type recordedItems map[pam.Item]string
+
+func (r recordedItems) SetItem(i pam.Item, v string) error { r[i] = v; return nil }
+
+// Debian's login stack runs pam_securetty, which fails with PAM_SERVICE_ERR
+// when PAM_TTY is unset: the verifier names a tty before authenticating.
+func TestPAMSetsTTY(t *testing.T) {
+	items := recordedItems{}
+	if err := setPAMItems(items); err != nil {
+		t.Fatal(err)
+	}
+	if items[pam.Tty] != "cravv-connect" {
+		t.Fatalf("PAM_TTY = %q", items[pam.Tty])
+	}
+}

@@ -5,25 +5,39 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+
+	"github.com/cravv/cravv-connect/internal/core"
 )
 
 // ErrAcceptsAnyPassword is returned by SelfTest when the verifier accepted
 // a random password.
 var ErrAcceptsAnyPassword = errors.New("password verifier accepted a random password")
 
-// SelfTest checks that v rejects a random 32-byte hex password for
-// username. It returns an error matching ErrAcceptsAnyPassword if the
-// password is accepted (for example a PAM stack that ends in pam_permit),
-// in which case the daemon must refuse to start. Any rejection, including
-// ErrUnavailable, passes: this only guards against accepting everything.
-// The probe password is never included in the error.
+// ErrCheckNotWorking is returned by SelfTest when the verifier failed for a
+// reason other than a wrong password (no PAM, a service error, a module
+// that cannot run): passwords cannot be checked at all.
+var ErrCheckNotWorking = errors.New("password check is not working")
+
+// SelfTest checks that v rejects a random 32-byte hex password for username
+// as a wrong password. It returns nil when it does; an error matching
+// ErrAcceptsAnyPassword when the password is accepted (for example a PAM
+// stack that ends in pam_permit, or one where only the account check
+// refused), in which case the daemon must refuse to start; and an error
+// matching ErrCheckNotWorking (and wrapping the cause) for any other
+// failure, in which case the daemon starts but every unlock fails and status
+// must say so. The probe password is never included in the error.
 func SelfTest(v Verifier, username string) error {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return fmt.Errorf("auth: self-test: random password: %w", err)
 	}
-	if err := v.Verify(username, hex.EncodeToString(b[:])); err != nil {
+	err := v.Verify(username, hex.EncodeToString(b[:]))
+	switch {
+	case errors.Is(err, core.ErrBadPassword):
 		return nil
+	case err == nil, errors.Is(err, ErrAccountRejected):
+		return fmt.Errorf("auth: self-test for user %q: %w", username, ErrAcceptsAnyPassword)
+	default:
+		return fmt.Errorf("%w: %w", ErrCheckNotWorking, err)
 	}
-	return fmt.Errorf("auth: self-test for user %q: %w", username, ErrAcceptsAnyPassword)
 }

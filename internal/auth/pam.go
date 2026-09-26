@@ -42,6 +42,9 @@ func (v pamVerifier) Verify(username, password string) error {
 		return fmt.Errorf("auth: pam start %q: %w", v.service, err)
 	}
 	defer tx.End()
+	if err := setPAMItems(tx); err != nil {
+		return fmt.Errorf("auth: pam set item: %w", err)
+	}
 	if err := tx.Authenticate(pam.DisallowNullAuthtok); err != nil {
 		if isBadCredential(err) {
 			return core.ErrBadPassword
@@ -51,6 +54,19 @@ func (v pamVerifier) Verify(username, password string) error {
 	// The password is right; now ask the account stack whether the account
 	// may be used at all (expired, disabled, password must be changed).
 	return accountError(tx.AcctMgmt(pam.DisallowNullAuthtok))
+}
+
+// itemSetter is the part of *pam.Transaction setPAMItems uses.
+type itemSetter interface {
+	SetItem(pam.Item, string) error
+}
+
+// setPAMItems names a tty before authenticating. Some stacks need one: on
+// Debian, login's pam_securetty fails with PAM_SERVICE_ERR when PAM_TTY is
+// unset. The value is not a real terminal, so securetty-style rules that
+// allow only listed ttys (root logins) still refuse.
+func setPAMItems(tx itemSetter) error {
+	return tx.SetItem(pam.Tty, "cravv-connect")
 }
 
 // accountError maps a pam_acct_mgmt result: nil stays nil, anything else is

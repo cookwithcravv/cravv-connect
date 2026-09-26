@@ -135,8 +135,12 @@ How it works:
   accounts are refused).
 - The first time the daemon starts with a PAM service, and again whenever
   that service's file in `/etc/pam.d` changes (size or modification time), it
-  checks that a random password is rejected and refuses to start otherwise.
-  This counts as one failed login for that account.
+  checks that a random password is rejected as a wrong password and refuses
+  to start if it is accepted. This counts as one failed login for that
+  account. If PAM fails in any other way, the daemon starts but every unlock
+  fails, and `status` reports "password check is not working"; that result is
+  not remembered, so the test runs again at the next start. The PAM
+  transaction names a pseudo tty (`PAM_TTY=cravv-connect`).
 - PAM needs cgo; a binary built with `CGO_ENABLED=0` refuses every
   password-gated action (the CLI reports "password check unavailable").
 - A successful check unlocks only that one connection, for 10 minutes. It is

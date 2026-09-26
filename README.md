@@ -262,6 +262,31 @@ Keychain, or in `store.db` on Linux.
 1 GiB), and `pam_service` (macOS `chkpasswd`, the default, or `checkpw`;
 Linux `login`, the default, or `system-auth`; any other value is refused).
 
+### Linux password check (PAM)
+
+Human-only actions check your login password through PAM, as the user the
+daemon runs as.
+
+- **Service:** `login` by default (Debian, Ubuntu and most distributions ship
+  `/etc/pam.d/login`). On Fedora, RHEL and Arch, `system-auth` is the usual
+  alternative: set `pam_service = "system-auth"` in `config.toml`. The daemon
+  names a pseudo tty (`PAM_TTY=cravv-connect`) so stacks with
+  `pam_securetty` work.
+- **Self-test:** at start the daemon checks that a random password is
+  rejected as a wrong password. If the stack accepts it, the daemon refuses
+  to start. If PAM fails some other way (a missing module, a service error),
+  the daemon starts, every unlock fails, and `cravv-connect status` shows
+  `password check is not working: <error>`.
+- **SELinux and hardened systems:** `pam_unix` checks the password of a
+  non-root user through the setuid helper `unix_chkpwd`. If SELinux or a
+  hardened setup keeps a user service from running it, every unlock fails;
+  `status` then shows the error above, and the audit log (`ausearch -m avc`)
+  shows the denial.
+- **Account lockout:** a wrong password counts as a failed login for your OS
+  account. With `pam_faillock` (for example RHEL's `deny=3`), the OS may lock
+  the account itself before cravv-connect's own lockout (5 wrong passwords,
+  15 minutes). `faillock --user $USER --reset` clears it.
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -269,6 +294,7 @@ Linux `login`, the default, or `system-auth`; any other value is refused).
 | ``daemon not running: run `cravv-connect daemon start` `` | Start it, or `cravv-connect daemon install` so it starts at login. Logs: `~/.cravv-connect/daemon.log` (launchd, systemd and `daemon start` all run `daemon run --log-file` there), plus `~/.cravv-connect/daemon-stderr.log` (launchd, `daemon start`) or `journalctl --user -u cravv-connect` (systemd) for crashes. |
 | `status` shows "relay offline" | Check the relay URL in `config.toml` and that the relay answers `GET /v1/health`. The daemon retries with backoff up to 5 minutes; messages wait in the outbox. |
 | A new machine never connects | It has no mailbox yet. Either `init --relay-token` (first machine only) or pair with `join`, which registers it with an invite. |
+| `status` shows `password check is not working: ...` | PAM cannot check passwords (see "Linux password check" above; on a build without cgo, rebuild with `make build`). Password-gated actions fail until it is fixed; restart the daemon afterwards. |
 | `password check unavailable: ... built without PAM support` | Rebuild with cgo and the PAM headers (`make build`) and restart the daemon. |
 | `pam service not allowed` | Set `pam_service` in `config.toml` to an allowed value (see above), or remove it. |
 | `refusing to start: ... password verifier accepted a random password` | The daemon checks once per PAM service (and again after its `/etc/pam.d` file changes) that a random password is rejected. Your PAM service accepts anything; use one that checks your login password. |

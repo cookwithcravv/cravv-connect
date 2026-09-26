@@ -123,9 +123,11 @@ with PAM: service `chkpasswd` on macOS and `login` on Linux by default, or
 `pam_service` in `config.toml`, which must be one of `chkpasswd`, `checkpw`
 (macOS) or `login`, `system-auth` (Linux); any other service fails every
 unlock with `auth_unavailable`. The first time the daemon starts with a given
-PAM service, and again after that service's `/etc/pam.d` file changes, it checks that a random password is rejected, and refuses to
-start if it is accepted. After 5 wrong passwords in a row, every attempt fails
-with `locked` for 15 minutes without reaching PAM; the count and the lock
+PAM service, and again after that service's `/etc/pam.d` file changes, it
+checks that a random password is rejected, and refuses to start if it is
+accepted; if PAM fails otherwise, it starts and `status` lists "password
+check is not working" in `errors`. After 5 wrong passwords in a row, every
+attempt fails with `locked` for 15 minutes without reaching PAM; the count and the lock
 survive a daemon restart. Every non-empty attempt is written to the audit log
 (never the password); an empty password fails with `bad_password` without
 being counted. A binary built without cgo has no PAM and fails every unlock

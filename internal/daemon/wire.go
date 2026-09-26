@@ -61,12 +61,13 @@ func New(opts Options) (*Daemon, error) {
 	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 		return nil, statErr
 	}
-	tested := false
+	var tested *selfTestResult
 	if statErr != nil { // no store yet
-		if err := selfTest(opts); err != nil {
+		r, err := selfTest(opts)
+		if err != nil {
 			return nil, err
 		}
-		tested = true
+		tested = &r
 	}
 	if err := os.MkdirAll(opts.Paths.Files, 0o700); err != nil {
 		return nil, err
@@ -75,7 +76,8 @@ func New(opts Options) (*Daemon, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := recordSelfTest(db, opts, serviceID, tested); err != nil {
+	authWarning, err := recordSelfTest(db, opts, serviceID, tested)
+	if err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -83,6 +85,10 @@ func New(opts Options) (*Daemon, error) {
 	if err != nil {
 		db.Close()
 		return nil, err
+	}
+	if authWarning != "" {
+		d.authWarning = authWarning
+		d.log.Warn("password check is not working; password-gated actions will fail", "err", authWarning)
 	}
 	return d, nil
 }
@@ -104,30 +110,50 @@ func selfTestIdentity(cfg config.Config, stat func(string) (os.FileInfo, error))
 	return id + strconv.FormatInt(fi.Size(), 10) + ":" + strconv.FormatInt(fi.ModTime().UnixNano(), 10)
 }
 
-func selfTest(opts Options) error {
-	if err := auth.SelfTest(opts.Verifier, opts.Username); err != nil {
-		return fmt.Errorf("refusing to start: %w", err)
+// selfTestResult is a self-test that did not refuse the start: passed, or
+// found that passwords cannot be checked at all (warning set).
+type selfTestResult struct{ warning string }
+
+// selfTest runs the verifier self-test. A verifier that accepts a random
+// password refuses the start. One that fails for another reason (no PAM, a
+// PAM service error) cannot check passwords: every unlock fails, which is
+// safe, so the daemon starts and reports it in status instead.
+func selfTest(opts Options) (selfTestResult, error) {
+	err := auth.SelfTest(opts.Verifier, opts.Username)
+	switch {
+	case err == nil:
+		return selfTestResult{}, nil
+	case errors.Is(err, auth.ErrCheckNotWorking):
+		return selfTestResult{warning: err.Error()}, nil
+	default:
+		return selfTestResult{}, fmt.Errorf("refusing to start: %w", err)
 	}
-	return nil
 }
 
 // recordSelfTest runs the self-test unless it already passed for serviceID
-// (or just ran), and stores serviceID once it has passed.
-func recordSelfTest(db store.SettingsStore, opts Options, serviceID string, tested bool) error {
+// (or just ran), and stores serviceID once it has passed. It returns the
+// status warning when passwords cannot be checked; that result is not
+// stored, so the test runs again on the next start.
+func recordSelfTest(db store.SettingsStore, opts Options, serviceID string, tested *selfTestResult) (string, error) {
 	ctx := context.Background()
 	v, ok, err := db.GetSetting(ctx, SettingAuthSelfTestOK)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if ok && v == serviceID {
-		return nil
+		return "", nil
 	}
-	if !tested {
-		if err := selfTest(opts); err != nil {
-			return err
+	if tested == nil {
+		r, err := selfTest(opts)
+		if err != nil {
+			return "", err
 		}
+		tested = &r
 	}
-	return db.SetSetting(ctx, SettingAuthSelfTestOK, serviceID)
+	if tested.warning != "" {
+		return tested.warning, nil
+	}
+	return "", db.SetSetting(ctx, SettingAuthSelfTestOK, serviceID)
 }
 
 func normalize(o *Options) error {
@@ -277,7 +303,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 		MachineID: id.MachineID(), DeviceName: d.opts.Config.DeviceName, RelayURL: d.opts.Config.RelayURL,
 		Mailboxes: d, Killed: d.kill.Killed, Peers: db, Outbox: db, Sessions: d.sessions, Inbox: d.inbox,
 		Tasks: g.tasks, Activity: g.activity,
-		Errors: []func() []string{d.relayErrors, g.outbound.Errors, inboundWarnings(g.inbound)},
+		Errors: []func() []string{d.authErrors, d.relayErrors, g.outbound.Errors, inboundWarnings(g.inbound)},
 	})
 	return g
 }
@@ -299,6 +325,14 @@ func registerHandlers(g *services, inbox *InboxService, peers store.PeerStore) {
 		core.KindChat, core.KindTaskCreate, core.KindTaskUpdate, core.KindTaskCancel, core.KindFileOffer,
 		core.KindControlPrekey, core.KindControlStalePrekey, core.KindControlDelivered, core.KindControlPaused,
 		core.KindControlResumed, core.KindControlUnpaired, core.KindControlRelayMoved)
+}
+
+// authErrors reports a verifier that cannot check passwords (set by New).
+func (d *Daemon) authErrors() []string {
+	if d.authWarning == "" {
+		return nil
+	}
+	return []string{d.authWarning}
 }
 
 func (d *Daemon) relayErrors() []string {

@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -180,4 +182,45 @@ func TestSelfTestRerunsWhenPAMConfigChanges(t *testing.T) {
 	want(4, "unreadable file")
 	open()
 	want(4, "still unreadable")
+}
+
+// d2BrokenVerifier fails every check with a PAM-style service error.
+type d2BrokenVerifier struct{ calls atomic.Int32 }
+
+func (v *d2BrokenVerifier) Verify(string, string) error {
+	v.calls.Add(1)
+	return errors.New("pam authenticate: Module is unknown")
+}
+
+// A verifier that errors instead of rejecting a wrong password cannot check
+// passwords: the daemon still starts (so status can say so), status reports
+// it, and the result is not cached.
+func TestBrokenVerifierStartsWithStatusWarning(t *testing.T) {
+	dir := t.TempDir()
+	v := &d2BrokenVerifier{}
+	for i := range 2 {
+		opts := d2Options(dir, &d2Relay{})
+		opts.Verifier = v
+		d, err := New(opts)
+		if err != nil {
+			t.Fatalf("start %d: New refused: %v", i+1, err)
+		}
+		st, err := d.Status().Status(context.Background())
+		d.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, e := range st.Errors {
+			if strings.HasPrefix(e, "password check is not working: ") && strings.Contains(e, "Module is unknown") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("start %d: status errors %q", i+1, st.Errors)
+		}
+	}
+	if n := v.calls.Load(); n != 2 {
+		t.Fatalf("self-test ran %d times over 2 starts, want 2 (not cached)", n)
+	}
 }
