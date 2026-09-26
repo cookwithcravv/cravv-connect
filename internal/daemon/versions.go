@@ -42,6 +42,14 @@ func (r noticingReplier) Unsupported(ctx context.Context, peer store.Peer) {
 	r.GateReplier.Unsupported(ctx, peer)
 }
 
+// Seen clears the outdated notice for a peer that sent valid link traffic:
+// it has upgraded.
+func (v *VersionNotices) Seen(peer store.Peer) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	delete(v.outdated, peer.MachineID)
+}
+
 // HandleUnsupported handles control.unsupported from a peer.
 func (v *VersionNotices) HandleUnsupported(_ context.Context, peer store.Peer, env core.Envelope) error {
 	b, err := decodeEnvBody[core.UnsupportedBody](env.Body)

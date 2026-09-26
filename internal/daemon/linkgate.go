@@ -78,6 +78,7 @@ var errNoLink = errors.New("link-scoped kind handled without a link gate")
 //   - the link's permission_in allows the kind (else OnReject, or dropped).
 //
 // Inner gets the link (LinkFrom) and the decision (DecisionFrom) in its context.
+// Seen, when set, is told the peer sent traffic on an active link.
 type LinkGate struct {
 	Links    LinkLookup
 	Sessions SessionLookup
@@ -85,6 +86,7 @@ type LinkGate struct {
 	Policy   PermissionPolicy
 	Inner    Handler
 	OnReject Handler
+	Seen     func(peer store.Peer)
 }
 
 // Handle implements Handler.
@@ -108,6 +110,9 @@ func (g LinkGate) Handle(ctx context.Context, peer store.Peer, env core.Envelope
 	if err != nil || sess.State == core.SessionClosed {
 		g.Replies.UnknownLink(ctx, peer, env.LinkID)
 		return nil
+	}
+	if g.Seen != nil {
+		g.Seen(peer)
 	}
 	d := g.Policy.Decide(l.PermissionIn, env.Kind)
 	ctx = withLink(withDecision(ctx, d), l)

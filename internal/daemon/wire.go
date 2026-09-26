@@ -332,7 +332,7 @@ func registerHandlers(g *services, inbox *InboxService, sessions SessionLookup, 
 	// without an active link, from the wrong machine, or not permitted on
 	// the link never reaches the service's main handler.
 	gate := func(inner, onReject Handler) Handler {
-		return LinkGate{Links: db, Sessions: sessions, Replies: g.versions.Replier(g.replies), Inner: inner, OnReject: onReject}
+		return LinkGate{Links: db, Sessions: sessions, Replies: g.versions.Replier(g.replies), Inner: inner, OnReject: onReject, Seen: g.versions.Seen}
 	}
 	r.Register(core.KindChat, gate(NewChatHandler(inbox), nil))
 	r.Register(core.KindTaskCreate, gate(HandlerFunc(g.tasks.HandleCreate), HandlerFunc(g.tasks.RejectCreate)))

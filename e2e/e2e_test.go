@@ -683,7 +683,8 @@ func olderNotice(n *Node, alias string) bool {
 
 // v1 peers send chat, task.* and file.offer without a link_id. A v2 machine
 // drops them and answers control.unsupported (at most once an hour); both
-// humans see why in status.
+// humans see why in status. Once valid link traffic arrives from the peer
+// (it upgraded), the "older" notice goes away.
 func TestLinklessV1TrafficGetsControlUnsupported(t *testing.T) {
 	t.Parallel()
 	_, a, b := NewPair(t)
@@ -708,5 +709,13 @@ func TestLinklessV1TrafficGetsControlUnsupported(t *testing.T) {
 	}
 	if st := b.Status(); st.PendingApprovals != 0 {
 		t.Fatal("a link-less task is waiting for approval")
+	}
+
+	lead := a.Share("claude", "lead", "private")
+	l := LinkChats(t, a, b, lead, trainer, "messages")
+	id := sendChat(t, l.A.C, l.ANum, "upgraded")
+	WaitItem(t, l.B.C, wait, "chat on the link", isChat(id))
+	if olderNotice(b, "alice") {
+		t.Fatalf("bob still says alice is older after link traffic: %v", b.Status().Errors)
 	}
 }
