@@ -78,6 +78,8 @@ type Daemon struct {
 	attend   *AttentionService
 	codes    *ConfirmCodes
 	hooks    *HookService
+	offers   *OfferService
+	host     *SessionHost
 
 	svc        atomic.Pointer[services]
 	registered atomic.Bool

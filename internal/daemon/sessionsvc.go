@@ -196,10 +196,11 @@ func (s *SessionService) Detach(ctx context.Context, id string, conn uint64) err
 		s.afterUnbind()
 	}
 	// setState holds s.mu while it checks cond, so a reattach that bound the
-	// session in the meantime is seen here and keeps it open.
+	// session in the meantime is seen here and keeps it open. A managed
+	// session never goes away: its runs come and go.
 	rec, changed, err := s.setState(ctx, id, core.SessionAway, func(r store.SharedSession) bool {
 		_, rebound := s.bound[id]
-		return r.State == core.SessionOpen && !rebound
+		return r.State == core.SessionOpen && !rebound && r.Kind != core.SessionManaged
 	})
 	if err != nil || !changed {
 		return err
@@ -245,14 +246,18 @@ func (s *SessionService) ByWakeToken(ctx context.Context, token string) (store.S
 	return rec, nil
 }
 
-// AwayAll marks every open session away. The daemon calls it at startup:
-// no connection survives a restart, and the away grace starts now.
+// AwayAll marks every open live session away. The daemon calls it at
+// startup: no connection survives a restart, and the away grace starts
+// now. Managed sessions stay open (the SessionHost runs them).
 func (s *SessionService) AwayAll(ctx context.Context) error {
 	open, err := s.store.ListShared(ctx, core.SessionOpen)
 	if err != nil {
 		return err
 	}
 	for _, r := range open {
+		if r.Kind == core.SessionManaged {
+			continue
+		}
 		rec, changed, err := s.setState(ctx, r.ID, core.SessionAway, func(r store.SharedSession) bool { return r.State == core.SessionOpen })
 		if err != nil {
 			return err

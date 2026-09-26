@@ -71,6 +71,7 @@ type LinkDeps struct {
 	Replies   UnknownLinkReplier
 	Inbox     SessionInbox
 	Desktop   DesktopNotifier
+	Managed   ManagedStarter // nil: this machine offers no managed sessions
 	Clock     core.Clock
 	Audit     audit.Logger
 	Log       *slog.Logger
@@ -133,8 +134,8 @@ func (s *LinkService) Connect(ctx context.Context, sessionID, target string, pro
 	if !ok || machine == "" || name == "" {
 		return store.Link{}, ErrBadTarget
 	}
-	if strings.HasPrefix(name, "new:") {
-		return store.Link{}, fmt.Errorf("%s: this machine offers no managed sessions yet: %w", target, core.ErrNotFound)
+	if label, ok := strings.CutPrefix(name, offerTarget); ok {
+		return s.connectOffer(ctx, sess, machine, label, proposed, note)
 	}
 	peer, listed, err := s.d.Directory.List(ctx, machine)
 	if err != nil {
@@ -200,7 +201,8 @@ func (s *LinkService) HandleRequest(ctx context.Context, peer store.Peer, env co
 	if !ok || !b.ProposedPermission.Valid() || !core.ValidNote(b.Note) {
 		return s.reject(ctx, peer, b.LinkID, core.RejectPolicy)
 	}
-	if b.OfferID != "" || !core.ValidID(b.ToSessionID) {
+	if (b.OfferID == "") == (b.ToSessionID == "") || b.OfferID != "" && !core.ValidID(b.OfferID) ||
+		b.ToSessionID != "" && !core.ValidID(b.ToSessionID) {
 		return s.reject(ctx, peer, b.LinkID, core.RejectNotFound)
 	}
 	now := s.d.Clock.Now()
@@ -213,6 +215,9 @@ func (s *LinkService) HandleRequest(ctx context.Context, peer store.Peer, env co
 	}
 	if len(pending) >= core.MaxPendingLinkRequests {
 		return s.reject(ctx, peer, b.LinkID, core.RejectBusy)
+	}
+	if b.OfferID != "" {
+		return s.acceptOffer(ctx, peer, b, from)
 	}
 	sess, err := s.d.Sessions.VisibleTo(ctx, b.ToSessionID, peer.MachineID)
 	if err != nil {
@@ -350,8 +355,9 @@ func (s *LinkService) HandleAccepted(ctx context.Context, peer store.Peer, env c
 		}
 		return nil
 	}
+	// A link to an offer learns its remote session from the answer.
 	to, ok := cleanSessionRef(b.ToSession)
-	if !ok || to.ID != l.RemoteSession || !b.GrantedPermission.Valid() {
+	if !ok || to.ID != l.RemoteSession && l.RemoteSession != "" || !b.GrantedPermission.Valid() {
 		_, err := s.closeLink(ctx, l, closeSpec{local: core.CloseUnknownLink, wire: core.CloseUnknownLink, tell: true})
 		return err
 	}
@@ -361,7 +367,7 @@ func (s *LinkService) HandleAccepted(ctx context.Context, peer store.Peer, env c
 			return core.ErrBadTransition
 		}
 		x.State, x.PermissionOut, x.ExpiresAt, x.UpdatedAt = store.LinkActive, b.GrantedPermission, time.Time{}, now
-		x.RemoteName, x.RemotePurpose = to.Name, to.Purpose
+		x.RemoteSession, x.RemoteName, x.RemotePurpose = to.ID, to.Name, to.Purpose
 		return nil
 	})
 	if errors.Is(err, core.ErrBadTransition) {

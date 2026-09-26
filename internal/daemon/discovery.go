@@ -39,6 +39,7 @@ type Discovery struct {
 	limiter  *RateLimiter
 	log      *slog.Logger
 	timeout  time.Duration
+	offers   OfferLister // nil: no offers are listed
 
 	mu      sync.Mutex
 	waiting map[discoveryKey]chan core.SessionsListedBody
@@ -124,6 +125,9 @@ func (d *Discovery) HandleList(ctx context.Context, peer store.Peer, env core.En
 			SessionID: s.ID, Name: s.Name, Purpose: s.Purpose, Kind: s.Kind, Agent: s.Agent, State: s.State,
 		})
 	}
+	if out.Offers, err = d.listedOffers(ctx, peer.MachineID); err != nil {
+		return err
+	}
 	return d.sender.SendDirect(ctx, peer, core.KindSessionsListed, out)
 }
 
@@ -144,6 +148,11 @@ func (d *Discovery) HandleListed(_ context.Context, peer store.Peer, env core.En
 	for _, s := range body.Sessions {
 		if c, ok := cleanListedSession(s); ok {
 			clean.Sessions = append(clean.Sessions, c)
+		}
+	}
+	for _, o := range body.Offers {
+		if c, ok := cleanListedOffer(o); ok {
+			clean.Offers = append(clean.Offers, c)
 		}
 	}
 	select {

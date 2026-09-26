@@ -243,6 +243,7 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 	d.shared.AddObserver(d.attend)
 	d.codes = NewConfirmCodes(opts.Clock, opts.Desktop, WithCodeState(db))
 	d.hooks = NewHookService(d.shared, d.attend)
+	d.assembleManaged(db, lg)
 	d.svc.Store(d.build(identity))
 	// No connection survives a restart: every open session is away until
 	// its client reattaches (links stay open for the away grace).
@@ -291,7 +292,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	g.replies = NewLinkReplies(g.outbound, clock, d.log)
 	g.links = NewLinkService(LinkDeps{
 		Links: db, Sessions: d.shared, Peers: db, Directory: g.discover, Sender: g.outbound, Replies: g.replies,
-		Inbox: d.inbox, Desktop: d.opts.Desktop, Clock: clock, Audit: lg, Log: d.log,
+		Inbox: d.inbox, Desktop: d.opts.Desktop, Managed: d.host, Clock: clock, Audit: lg, Log: d.log,
 	})
 	g.presence = NewPresenceService(db, db, g.links, g.outbound, clock, d.log)
 	g.versions = NewVersionNotices()
@@ -318,6 +319,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	g.links.AddCloseObserver(g.files)
 	g.links.AddCloseObserver(d.inbox)
 	g.links.AddLowerObserver(g.tasks)
+	d.buildManaged(g)
 	g.inbound = NewInbound(id, db, db, g.prekeys, g.registry, g.outbound, clock, d.kill.Killed, d.log)
 	g.pairing = NewPairingService(id, d.rooms(), d, pake.SPAKE2{}, db, g.prekeys, g.outbound, d,
 		PairingConfig{DeviceName: d.opts.Config.DeviceName, RelayURL: d.opts.Config.RelayURL}, clock, lg)
