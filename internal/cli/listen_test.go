@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -79,8 +80,60 @@ func TestListenWakeFileMustBePrivate(t *testing.T) {
 	if err := os.Symlink(good, link); err != nil {
 		t.Fatal(err)
 	}
-	if r := fd.run(nil, "listen", "--wake-file", link); r.code != 1 || !strings.Contains(r.stdout, "not a regular file") {
+	if r := fd.run(nil, "listen", "--wake-file", link); r.code != 1 || !strings.Contains(r.stdout, "is a symbolic link") {
 		t.Fatalf("symlink: %d %q", r.code, r.stdout)
+	}
+}
+
+// Review focus: the wake file is checked on the descriptor that is read
+// (opened with O_NOFOLLOW, then fstat), so swapping the path for a symlink
+// or a FIFO between a check and the open does not work.
+func TestOpenWakeFileChecksTheOpenedFile(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "wake")
+	if err := os.WriteFile(good, []byte(testWake), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := openWakeFile(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	link := filepath.Join(dir, "link")
+	os.Symlink(good, link)
+	if _, err := openWakeFile(link); err == nil || !strings.Contains(err.Error(), "is a symbolic link") {
+		t.Fatalf("symlink: %v", err)
+	}
+	fifo := filepath.Join(dir, "fifo")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		f, err := openWakeFile(fifo)
+		if f != nil {
+			f.Close()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Fatalf("fifo: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("opening a FIFO blocked")
+	}
+	sub := filepath.Join(dir, "sub")
+	os.Mkdir(sub, 0o700)
+	if _, err := openWakeFile(sub); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("directory: %v", err)
+	}
+	loose := filepath.Join(dir, "loose")
+	os.WriteFile(loose, []byte(testWake), 0o600)
+	os.Chmod(loose, 0o640)
+	if _, err := openWakeFile(loose); err == nil || !strings.Contains(err.Error(), "must be 0600") {
+		t.Fatalf("group-readable: %v", err)
 	}
 }
 

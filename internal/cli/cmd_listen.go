@@ -87,22 +87,41 @@ func readWakeToken(env *Env, path string) (string, error) {
 }
 
 // openWakeFile opens path only if it is a regular file (not a symlink)
-// owned by this user and closed to group and others.
+// owned by this user and closed to group and others. The checks run on
+// the opened descriptor, so the path cannot be swapped between a check and
+// the open: O_NOFOLLOW refuses a symlink, O_NONBLOCK keeps a FIFO from
+// blocking the open, and fstat looks at what was actually opened.
 func openWakeFile(path string) (*os.File, error) {
-	fi, err := os.Lstat(path)
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, fmt.Errorf("wake file %s is a symbolic link", path)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("wake file: %w", err)
+		return nil, fmt.Errorf("wake file: %w", &os.PathError{Op: "open", Path: path, Err: err})
 	}
-	if !fi.Mode().IsRegular() {
-		return nil, fmt.Errorf("wake file %s is not a regular file", path)
+	if err := checkWakeFD(fd, path); err != nil {
+		syscall.Close(fd)
+		return nil, err
 	}
-	if fi.Mode().Perm()&0o077 != 0 {
-		return nil, fmt.Errorf("wake file %s can be read by other users (mode %o); it must be 0600", path, fi.Mode().Perm())
+	return os.NewFile(uintptr(fd), path), nil
+}
+
+// checkWakeFD checks the opened wake file and makes it blocking again.
+func checkWakeFD(fd int, path string) error {
+	var st syscall.Stat_t
+	if err := syscall.Fstat(fd, &st); err != nil {
+		return fmt.Errorf("wake file: %w", err)
 	}
-	if st, ok := fi.Sys().(*syscall.Stat_t); ok && int(st.Uid) != os.Getuid() {
-		return nil, fmt.Errorf("wake file %s belongs to another user", path)
+	if st.Mode&syscall.S_IFMT != syscall.S_IFREG {
+		return fmt.Errorf("wake file %s is not a regular file", path)
 	}
-	return os.Open(path)
+	if perm := os.FileMode(st.Mode).Perm(); perm&0o077 != 0 {
+		return fmt.Errorf("wake file %s can be read by other users (mode %o); it must be 0600", path, perm)
+	}
+	if int(st.Uid) != os.Getuid() {
+		return fmt.Errorf("wake file %s belongs to another user", path)
+	}
+	return syscall.SetNonblock(fd, false)
 }
 
 // listen blocks on session.listen until something is pending. It returns
