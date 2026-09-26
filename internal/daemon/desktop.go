@@ -20,7 +20,13 @@ type nopDesktop struct{}
 
 func (nopDesktop) Notify(title, text string) {}
 
+// Available reports that nothing is shown (see DesktopAvailable).
+func (nopDesktop) Available() bool { return false }
+
 type osascriptNotifier struct{ run func(script string) error }
+
+// Available reports that notifications are shown.
+func (osascriptNotifier) Available() bool { return true }
 
 // Notify shows the notification without blocking the caller.
 func (n osascriptNotifier) Notify(title, text string) {

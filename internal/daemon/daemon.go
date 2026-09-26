@@ -57,6 +57,7 @@ type services struct {
 	tasks    *TaskService
 	files    *FileService
 	status   *StatusService
+	review   *ReviewService
 }
 
 // Daemon owns the store, the relay connection and every service.
@@ -75,6 +76,7 @@ type Daemon struct {
 	shared   *SessionService
 	inbox    *InboxService
 	attend   *AttentionService
+	codes    *ConfirmCodes
 
 	svc        atomic.Pointer[services]
 	registered atomic.Bool
@@ -517,6 +519,8 @@ func (d *Daemon) Files() *FileService           { return d.svc.Load().files }
 func (d *Daemon) Peers() *PeerService           { return d.svc.Load().peers }
 func (d *Daemon) Discovery() *Discovery         { return d.svc.Load().discover }
 func (d *Daemon) Links() *LinkService           { return d.svc.Load().links }
+func (d *Daemon) Review() *ReviewService        { return d.svc.Load().review }
+func (d *Daemon) Codes() *ConfirmCodes          { return d.codes }
 func (d *Daemon) Presence() *PresenceService    { return d.svc.Load().presence }
 func (d *Daemon) Pairing() *PairingService      { return d.svc.Load().pairing }
 func (d *Daemon) Status() *StatusService        { return d.svc.Load().status }

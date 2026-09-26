@@ -241,6 +241,7 @@ func assemble(opts Options, db store.Store) (*Daemon, error) {
 	d.inbox.AddReadObserver(taskReader{d})
 	d.attend = NewAttentionService(AttentionDeps{Sessions: d.shared, Inbox: db, Links: db, Tasks: db, Peers: db, Changes: d.inbox})
 	d.shared.AddObserver(d.attend)
+	d.codes = NewConfirmCodes(opts.Clock, opts.Desktop)
 	d.svc.Store(d.build(identity))
 	// No connection survives a restart: every open session is away until
 	// its client reattaches (links stay open for the away grace).
@@ -303,6 +304,9 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	g.tasks = NewTaskService(TaskDeps{
 		Tasks: db, Peers: db, Links: g.links, Lookup: db, Inbox: d.inbox, Sender: g.outbound,
 		Policy: PermissionPolicy{}, Files: g.files, Desktop: d.opts.Desktop, Clock: clock, Audit: lg,
+	})
+	g.review = NewReviewService(ReviewDeps{
+		Links: db, Tasks: db, Peers: db, LinkSvc: g.links, TaskSvc: g.tasks, Codes: d.codes, Clock: clock,
 	})
 	g.peers.AddCutOffObserver(g.tasks)
 	g.peers.AddCutOffObserver(g.files)

@@ -692,6 +692,30 @@ func (s *TaskService) Decide(ctx context.Context, id string, approve bool, auth 
 	return s.deliverTask(ctx, t, t.ID)
 }
 
+// DecideVia asks the human through d whether to approve a held task and
+// applies the answer with AuthChat (v2 spec 7.2).
+func (s *TaskService) DecideVia(ctx context.Context, d Decider, id string) (store.Task, error) {
+	t, err := s.d.Tasks.GetTask(ctx, id)
+	if err != nil {
+		return t, err
+	}
+	if t.Direction != store.TaskInbound || t.State != core.TaskAwaitingApproval {
+		return t, fmt.Errorf("task %s is not waiting for a decision: %w", id, core.ErrBadTransition)
+	}
+	l, err := s.d.Lookup.GetLink(ctx, t.Peer, t.LinkID)
+	if err != nil {
+		return t, fmt.Errorf("task %s: %w", id, core.ErrLinkClosed)
+	}
+	ans, err := d.Decide(ctx, DecisionRequest{Link: l, Alias: s.alias(ctx, t.Peer), Task: &t})
+	if err != nil {
+		return t, err
+	}
+	if err := s.Decide(ctx, id, ans.Accept, AuthChat); err != nil {
+		return t, err
+	}
+	return s.d.Tasks.GetTask(ctx, id)
+}
+
 // checkLinkForApproval refuses an approval when the task's link is no
 // longer active or no longer allows tasks.
 func (s *TaskService) checkLinkForApproval(ctx context.Context, t store.Task) error {
