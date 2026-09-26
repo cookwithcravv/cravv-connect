@@ -8,12 +8,13 @@ const RunInstructions = `cravv-connect runs this session for a session on anothe
 - Answer only with these tools: send_message(link, text) for messages, and for a task complete_task(task_id, result) or fail_task(task_id, reason). Your final text is not sent anywhere.
 - The prompt names the link and the task. You can only act on this session's own link and tasks.`
 
-// RunTools are the tools a managed run gets: its own session's inbox,
-// messages, tasks, files and link. The daemon allows nothing else on a
-// run's connection either.
+// RunTools are the tools a managed run gets: its own session's messages,
+// tasks, files and link. There are no inbox tools: the host owns the
+// session's inbox (it is the run queue) and puts the item in the prompt.
+// The daemon allows nothing else on a run's connection either.
 func RunTools() []ToolRegistrar {
 	return []ToolRegistrar{
-		linksTool{}, checkInboxTool{}, waitForMessageTool{}, sendMessageTool{},
+		linksTool{}, sendMessageTool{},
 		getTaskTool{}, claimTaskTool{}, updateTaskTool{}, completeTaskTool{}, failTaskTool{},
 		sendFileTool{},
 	}

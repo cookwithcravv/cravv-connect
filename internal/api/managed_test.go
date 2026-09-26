@@ -100,7 +100,7 @@ func register(t *testing.T, c *ipc.Client) {
 }
 
 // A run token binds the connection to the run's session, and from then on
-// the connection reaches only that session's inbox, messages, tasks, files
+// the connection reaches only that session's messages, tasks, files
 // and link.
 func TestRunBindScopesTheConnection(t *testing.T) {
 	w, _, dial := managedServer(t)
@@ -117,11 +117,11 @@ func TestRunBindScopesTheConnection(t *testing.T) {
 		t.Fatalf("bind: %+v, %v", v, err)
 	}
 	var r ipc.InboxResult
-	if err := c.Call(bg, ipc.MethodInboxCheck, ipc.InboxCheckParams{Limit: 5}, &r); err != nil {
-		t.Fatal(err)
+	if err := c.Call(bg, ipc.MethodInboxCheck, ipc.InboxCheckParams{Limit: 5}, &r); !errors.Is(err, core.ErrNotPermitted) {
+		t.Fatalf("a run reading its inbox (the host's queue): %v", err)
 	}
-	if w.lastSession != "S-run" {
-		t.Fatalf("inbox read for %q, want the run's session", w.lastSession)
+	if w.lastSession != "" {
+		t.Fatalf("an inbox was read for %q", w.lastSession)
 	}
 	for _, m := range []struct {
 		method string

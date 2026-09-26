@@ -19,14 +19,13 @@ const (
 )
 
 // RunMethods are the only methods a managed run's connection may call once
-// its run token bound it (v2 spec 3.2): its own session's inbox, messages,
-// tasks, files and links. It can never share, connect, decide, unlock,
-// change offers or reach any machine-wide control.
+// its run token bound it (v2 spec 3.2): its own session's messages, tasks,
+// files and links. It can never share, connect, decide, unlock, change
+// offers or reach any machine-wide control, and it cannot read the inbox:
+// that is the host's run queue, and the run gets its item in the prompt.
 var RunMethods = map[string]bool{
 	MethodSessionRegister: true,
 	MethodSessionRunBind:  true,
-	MethodInboxCheck:      true,
-	MethodInboxWait:       true,
 	MethodChatSend:        true,
 	MethodTaskGet:         true,
 	MethodTaskClaim:       true,
@@ -38,7 +37,7 @@ var RunMethods = map[string]bool{
 }
 
 // ErrRunRefused is returned for any other method on a run's connection.
-var ErrRunRefused = fmt.Errorf("%w: a managed run may only use its own session's inbox, messages, tasks, files and link", core.ErrNotPermitted)
+var ErrRunRefused = fmt.Errorf("%w: a managed run may only use its own session's messages, tasks, files and link", core.ErrNotPermitted)
 
 // ErrRunUnbound is returned to a process inside a managed run that calls
 // anything but session.register and session.run_bind before binding.

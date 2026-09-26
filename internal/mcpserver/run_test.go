@@ -27,8 +27,8 @@ func TestRunTokenBindsTheRunsSession(t *testing.T) {
 		cs.SetShared("S-run")
 		return ipc.SharedSessionView{Name: "trainer-ab12"}, nil
 	})
-	d.handle(ipc.MethodInboxCheck, ipc.GateShared, func(cs *ipc.ConnState, _ json.RawMessage) (any, error) {
-		return ipc.InboxResult{Items: []ipc.InboxView{{Wrapped: "<remote_message>for " + cs.Shared() + "</remote_message>"}}}, nil
+	d.handle(ipc.MethodLinks, ipc.GateShared, func(cs *ipc.ConnState, _ json.RawMessage) (any, error) {
+		return ipc.LinksResult{Links: []ipc.LinkView{{Link: 4, Session: cs.Shared()}}}, nil
 	})
 	d.start()
 	cs, _ := connectWith(t, d, "claude-code", Options{RunToken: "tok-1"}, nil, "")
@@ -40,7 +40,9 @@ func TestRunTokenBindsTheRunsSession(t *testing.T) {
 	for _, tool := range res.Tools {
 		names = append(names, tool.Name)
 	}
-	want := []string{"links", "check_inbox", "wait_for_message", "send_message", "get_task", "claim_task", "update_task", "complete_task", "fail_task", "send_file"}
+	// No inbox tools: the host owns the queue and gives the run its item
+	// in the prompt; reading the inbox would take items from the queue.
+	want := []string{"links", "send_message", "get_task", "claim_task", "update_task", "complete_task", "fail_task", "send_file"}
 	slices.Sort(names)
 	slices.Sort(want)
 	if !slices.Equal(names, want) {
@@ -49,9 +51,9 @@ func TestRunTokenBindsTheRunsSession(t *testing.T) {
 	if init := cs.InitializeResult(); !strings.Contains(init.Instructions, "No human is at this machine") {
 		t.Fatalf("instructions %q", init.Instructions)
 	}
-	text, isErr := callTool(t, cs, "check_inbox", nil)
-	if isErr || !strings.Contains(text, "for S-run") {
-		t.Fatalf("check_inbox: %q (error %v)", text, isErr)
+	text, isErr := callTool(t, cs, "links", nil)
+	if isErr || !strings.Contains(text, "S-run") {
+		t.Fatalf("links: %q (error %v)", text, isErr)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -67,13 +69,13 @@ func TestWrongRunTokenActsAsNobody(t *testing.T) {
 		return nil, ipc.ErrBadRequest
 	})
 	called := false
-	d.handle(ipc.MethodInboxCheck, ipc.GateNone, func(*ipc.ConnState, json.RawMessage) (any, error) {
+	d.handle(ipc.MethodLinks, ipc.GateNone, func(*ipc.ConnState, json.RawMessage) (any, error) {
 		called = true
-		return ipc.InboxResult{}, nil
+		return ipc.LinksResult{}, nil
 	})
 	d.start()
 	cs, _ := connectWith(t, d, "claude-code", Options{RunToken: "stale"}, nil, "")
-	if _, isErr := callTool(t, cs, "check_inbox", nil); !isErr || called {
-		t.Fatalf("check_inbox with a stale token: error %v, daemon called %v", isErr, called)
+	if _, isErr := callTool(t, cs, "links", nil); !isErr || called {
+		t.Fatalf("links with a stale token: error %v, daemon called %v", isErr, called)
 	}
 }

@@ -23,7 +23,7 @@ func TestRunBoundConnectionsUseOnlyRunMethods(t *testing.T) {
 		cs.SetRunBound("")
 		return Empty{}, nil
 	}, GateNone)
-	for _, m := range []string{MethodInboxCheck, MethodChatSend, MethodTaskComplete, MethodLinks,
+	for _, m := range []string{MethodInboxCheck, MethodInboxWait, MethodChatSend, MethodTaskComplete, MethodLinks,
 		MethodSessionShare, MethodLinkConnect, MethodLinkDecide, MethodAuthUnlock, MethodKill, MethodStatus, MethodOffersSet} {
 		s.Register(m, ok, GateNone)
 	}
@@ -36,12 +36,14 @@ func TestRunBoundConnectionsUseOnlyRunMethods(t *testing.T) {
 	if err := c.Call(ctx, MethodSessionRunBind, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range []string{MethodInboxCheck, MethodChatSend, MethodTaskComplete, MethodLinks, MethodSessionRunBind} {
+	for _, m := range []string{MethodChatSend, MethodTaskComplete, MethodLinks, MethodSessionRunBind} {
 		if err := c.Call(ctx, m, nil, nil); err != nil {
 			t.Errorf("%s on a run's connection: %v", m, err)
 		}
 	}
-	for _, m := range []string{MethodSessionShare, MethodLinkConnect, MethodLinkDecide, MethodAuthUnlock, MethodKill, MethodStatus, MethodOffersSet} {
+	// The host owns a managed session's inbox (its queue): a run reading it
+	// would take items from the queue.
+	for _, m := range []string{MethodInboxCheck, MethodInboxWait, MethodSessionShare, MethodLinkConnect, MethodLinkDecide, MethodAuthUnlock, MethodKill, MethodStatus, MethodOffersSet} {
 		if err := c.Call(ctx, m, nil, nil); !errors.Is(err, core.ErrNotPermitted) {
 			t.Errorf("%s on a run's connection: %v, want not_permitted", m, err)
 		}
