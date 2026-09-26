@@ -37,7 +37,11 @@ func newInitCmd(env *Env) *cobra.Command {
 		Short: "Configure this machine (relay URL, device name, first-machine admin token)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runInit(cmd.Context(), env, relay, token, name, force)
+			if err := runInit(cmd.Context(), env, relay, token, name, force); err != nil {
+				return err
+			}
+			fmt.Fprintln(env.Stdout, "Next: run `cravv-connect daemon install` (starts at login) or `cravv-connect daemon run`.")
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&relay, "relay", "", "relay URL, for example https://relay.example.com (required)")
@@ -157,6 +161,5 @@ func runInit(ctx context.Context, env *Env, relay, token, name string, force boo
 			"(this version does not send control.relay_moved): re-pair with each of them on the new relay. "+
 			"Restart the daemon to use it.\n", oldRelay)
 	}
-	fmt.Fprintln(w, "Next: run `cravv-connect daemon install` (starts at login) or `cravv-connect daemon run`.")
 	return nil
 }

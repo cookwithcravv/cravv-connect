@@ -49,6 +49,7 @@ type Env struct {
 	Service      ServiceManager
 	ServiceSetup ServiceInstaller  // installs the login service; nil when unsupported
 	Agents       *install.Registry // agent installers; nil disables `install`
+	Setup        SetupSystem       // network and processes for `setup`; nil uses the real ones
 }
 
 // ServiceInstaller installs and removes the login service.
