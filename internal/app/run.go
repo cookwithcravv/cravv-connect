@@ -90,6 +90,7 @@ func Serve(ctx context.Context, d *daemon.Daemon, ln net.Listener, clock core.Cl
 	ui := newWebUI(ctx, srv, clock, logger)
 	defer ui.close()
 	api.RegisterUI(srv, UIPorts(d, ui.launcher))
+	api.RegisterManaged(srv, ManagedPorts(d))
 	errc := make(chan error, 2)
 	go func() { errc <- d.Run(ctx) }()
 	go func() { errc <- srv.Serve(ctx, ln) }()

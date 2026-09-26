@@ -214,6 +214,7 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) {
 	inflight.Wait()
 	stop()
 	conn.Close()
+	cs.runClosers()
 	if (cs.Session() != "" || cs.Shared() != "") && s.opts.OnDisconnect != nil {
 		s.opts.OnDisconnect(cs)
 	}
@@ -275,6 +276,10 @@ func (s *Server) dispatch(ctx context.Context, cs *ConnState, req Request) (resp
 	if !ok {
 		resp.Error = &Error{Code: CodeMethodNotFound, Message: fmt.Sprintf("unknown method %q", req.Method),
 			Data: &ErrorData{Kind: KindBadRequest}}
+		return resp
+	}
+	if cs.RunBound() && !RunMethods[req.Method] {
+		resp.Error = toWire(ErrRunRefused)
 		return resp
 	}
 	if err := s.checkGate(cs, m.gate); err != nil {

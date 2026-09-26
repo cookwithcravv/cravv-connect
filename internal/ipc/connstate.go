@@ -21,6 +21,8 @@ type ConnState struct {
 	projectDir    string
 	shared        string
 	unlockedUntil time.Time
+	run           bool     // the shared session is a managed run's (run token)
+	closers       []func() // run when the connection ends
 }
 
 // connIDs numbers connections; an ID is never reused within a process.
@@ -98,4 +100,38 @@ func (c *ConnState) Unlocked() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.clock.Now().Before(c.unlockedUntil)
+}
+
+// SetRunBound marks the connection as a managed run's: its shared session
+// came from a run token, and only RunMethods may be called on it.
+func (c *ConnState) SetRunBound() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.run = true
+}
+
+// RunBound reports whether the connection belongs to a managed run.
+func (c *ConnState) RunBound() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.run
+}
+
+// OnClose registers fn to run once when the connection ends (for example
+// to release a hold the connection took).
+func (c *ConnState) OnClose(fn func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closers = append(c.closers, fn)
+}
+
+// runClosers runs the OnClose functions, newest first.
+func (c *ConnState) runClosers() {
+	c.mu.Lock()
+	fns := c.closers
+	c.closers = nil
+	c.mu.Unlock()
+	for i := len(fns) - 1; i >= 0; i-- {
+		fns[i]()
+	}
 }

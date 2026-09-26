@@ -99,6 +99,9 @@ func (a discovery) Sessions(ctx context.Context, machine string) (ipc.SessionsLi
 		}
 		out.Sessions = append(out.Sessions, v)
 	}
+	for _, o := range listed.Offers {
+		out.Offers = append(out.Offers, ipc.RemoteOfferView{Label: o.Label, Agent: o.Agent, MaxPermission: string(o.MaxPermission)})
+	}
 	return out, nil
 }
 

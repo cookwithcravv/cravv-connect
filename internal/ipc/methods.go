@@ -390,6 +390,7 @@ type RemoteSessionView struct {
 type SessionsListResult struct {
 	Machine  string              `json:"machine"`
 	Sessions []RemoteSessionView `json:"sessions"`
+	Offers   []RemoteOfferView   `json:"offers,omitempty"`
 }
 
 // LinkConnectParams asks target ("machine/session") for a link from the
