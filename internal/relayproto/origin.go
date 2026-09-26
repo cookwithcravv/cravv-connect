@@ -16,8 +16,15 @@ var ErrBadOrigin = errors.New("relayproto: invalid origin")
 // with a lowercase scheme and host, the default port (443 for https, 80 for http)
 // omitted, no trailing dot on the host, IPv6 literals in brackets, and no path, query,
 // fragment, or user info. A lone trailing "/" is accepted and dropped.
+//
+// Only printable ASCII is accepted: a non-ASCII host must be given in punycode
+// (xn--...), so a lookalike or an invisible character (zero-width, bidi
+// control) can never pass for another relay when a person reads it.
 func NormalizeOrigin(s string) (string, error) {
 	bad := func(why string) (string, error) { return "", fmt.Errorf("%w %q: %s", ErrBadOrigin, s, why) }
+	if !PrintableASCII(s) {
+		return bad("only printable ASCII is allowed (give a non-ASCII host in punycode, xn--...)")
+	}
 	u, err := url.Parse(s)
 	if err != nil {
 		return bad(err.Error())
@@ -54,4 +61,15 @@ func NormalizeOrigin(s string) (string, error) {
 		host += ":" + port
 	}
 	return scheme + "://" + host, nil
+}
+
+// PrintableASCII reports whether every byte of s is printable ASCII (0x21 to
+// 0x7e): no spaces, control characters or bytes of multi-byte characters.
+func PrintableASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] <= 0x20 || s[i] >= 0x7f {
+			return false
+		}
+	}
+	return true
 }

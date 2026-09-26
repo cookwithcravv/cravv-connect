@@ -109,3 +109,29 @@ func TestBindCode(t *testing.T) {
 		t.Fatalf("bad join code: %v", err)
 	}
 }
+
+// rawJoin builds a join code around any relay string, bypassing New, the way
+// a hostile code would be made.
+func rawJoin(relay string) string {
+	return Prefix + ":" + strings.ToLower(b32.EncodeToString([]byte(relay))) + ":7K3F-9QXMTR2A"
+}
+
+func TestParseRefusesNonASCIIRelay(t *testing.T) {
+	for _, relay := range []string{
+		"https://\u0430pple.com",          // Cyrillic lookalike
+		"https://relay.ex\u0430mple.com",  // Cyrillic a in the middle
+		"https://relay\u200b.example.com", // zero-width space
+		"https://\u202erelay.example.com", // bidi override
+		"https://relay.example.com\u200f", // right-to-left mark
+		"https://relay.example.com ",
+		"https://relay.example.com\x1b[2J",
+	} {
+		if c, err := Parse(rawJoin(relay)); !errors.Is(err, ErrInvalid) {
+			t.Errorf("Parse(join code for %q) = %+v, %v; want ErrInvalid", relay, c, err)
+		}
+	}
+	c, err := Parse(rawJoin("https://xn--pple-43d.com"))
+	if err != nil || c.Relay != "https://xn--pple-43d.com" {
+		t.Fatalf("punycode relay: %+v %v", c, err)
+	}
+}

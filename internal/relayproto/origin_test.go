@@ -50,3 +50,30 @@ func TestNormalizeOriginIdempotent(t *testing.T) {
 		}
 	}
 }
+
+// Hosts must be plain ASCII: a non-ASCII host has to be given in punycode, so
+// a lookalike (Cyrillic U+0430 for Latin "a") or an invisible character cannot
+// pass for another relay when a person reads it back.
+func TestNormalizeOriginRefusesNonASCIIAndControl(t *testing.T) {
+	for _, in := range []string{
+		"https://\u0430pple.com",               // Cyrillic a
+		"https://relay.ex\u0430mple.com",       // Cyrillic a inside
+		"https://relay\u200b.example.com",      // zero-width space
+		"https://\u202erelay.example.com",      // right-to-left override
+		"https://relay.example.com\u200e",      // left-to-right mark
+		"https://relay.example.com\u00a0",      // no-break space
+		"https://relay.example.com:8443\u2060", // word joiner
+		"https://relay.example.com\x7f",
+		"https://relay.example.com\t",
+		"https://relay.example.com\x00",
+		" https://relay.example.com",
+	} {
+		if got, err := NormalizeOrigin(in); err == nil {
+			t.Errorf("NormalizeOrigin(%q) = %q, want error", in, got)
+		}
+	}
+	got, err := NormalizeOrigin("https://xn--pple-43d.com")
+	if err != nil || got != "https://xn--pple-43d.com" {
+		t.Fatalf("punycode host: %q %v", got, err)
+	}
+}

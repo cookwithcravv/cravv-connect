@@ -83,6 +83,12 @@ func Parse(s string) (Code, error) {
 	if err != nil {
 		return Code{}, ErrInvalid
 	}
+	// The relay is shown to the person before they join it: refuse anything
+	// but printable ASCII, so a lookalike or invisible character cannot pass
+	// for another relay (a non-ASCII host must be in punycode).
+	if !relayproto.PrintableASCII(string(raw)) {
+		return Code{}, fmt.Errorf("%w: the relay in it is not plain ASCII (non-ASCII hosts must be in punycode)", ErrInvalid)
+	}
 	origin, err := relayproto.NormalizeOrigin(string(raw))
 	if err != nil {
 		return Code{}, fmt.Errorf("%w: the relay in it is not an http(s) origin", ErrInvalid)
