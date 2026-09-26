@@ -1,8 +1,17 @@
 # peer-v1: end-to-end messages between cravv-connect machines
 
-Status: normative. Version 1.
+Status: normative. Frame and envelope version 1, protocol version 2.
 
-peer-v1 is what two paired machines say to each other. Every message travels
+peer-v1 is what two paired machines say to each other. The name is the
+wire format: the frame, the envelope (`"v": 1`) and the sealing label
+`cravv-connect/peer-v1` are unchanged since the first release, so this
+file is updated in place rather than renamed. Protocol version 2 (session
+links) changed what travels inside: chat, tasks and files now carry a
+`link_id` and are accepted only on an accepted link between two sessions
+(section 5.6); discovery, link and presence kinds were added (sections 5.5
+to 5.7); per-machine trust levels were removed. A machine that still sends
+link-less (version 1) traffic gets `control.unsupported{min_version: 2}`
+(section 5.3). Every message travels
 through a relay (see `relay-v1.md`) as an opaque frame: the relay sees the
 sender's identity key, the recipient mailbox, a message ID, the frame size and
 the time. For files it also sees the recipient, the size and the chunk
@@ -11,15 +20,16 @@ count, and for pairing the nameplate. It never sees message contents. This docum
 1. identities and prekeys,
 2. the sealed frame format,
 3. how a receiver opens, checks and confirms frames,
-4. every message kind and its body,
+4. every message kind and its body, including sessions, links and presence,
 5. prekey rotation and the stale prekey round trip,
 6. file transfer,
 7. the pairing protocol that introduces two machines.
 
-Go reference: `internal/core` (envelope and bodies), `internal/keys`,
-`internal/sealing`, `internal/filecrypt`, `internal/pake`, `internal/bindcode`,
-`internal/pathguard`, and `internal/daemon` (outbound, inbound, handlers,
-policygate, pairing, files, tasks, prekeys, peers, killswitch).
+Go reference: `internal/core` (envelope, bodies, kind traits, limits),
+`internal/keys`, `internal/sealing`, `internal/filecrypt`, `internal/pake`,
+`internal/bindcode`, `internal/pathguard`, and `internal/daemon` (outbound,
+inbound, handlers, linkgate, links, links_offer, discovery, presence,
+linkreplies, versions, pairing, files, tasks, prekeys, peers, killswitch).
 
 The key words MUST, MUST NOT, SHOULD, and MAY are used as in RFC 2119.
 
@@ -79,9 +89,8 @@ against the peer's IK before storing or using it.
   "id": "01J8ZQ9K7B2V4N6M8P0R2T4W6Y",
   "ts": 1790000123456,
   "from_machine": "q7w...52 chars",
-  "from_session": "claude@glow-v2",
   "to_machine": "k3d...52 chars",
-  "to_session": "codex@training",
+  "link_id": "01J8ZQ3W5TAV9M2C4XKQ7N6B1D",
   "kind": "chat",
   "body": {"text": "the build is green"}
 }
@@ -93,10 +102,13 @@ against the peer's IK before storing or using it.
 | `id` | Message ID, unique per sender; the deduplication key |
 | `ts` | Sender clock, UNIX milliseconds |
 | `from_machine`, `to_machine` | Machine IDs |
-| `from_session` | Sending agent session, when there is one (omitted for daemon-generated messages) |
-| `to_session` | Target session on the receiver; omitted for machine-wide delivery |
+| `link_id` | The link the message travels on. Required on `chat`, `task.create`, `task.update`, `task.cancel` and `file.offer`; omitted on every other kind |
 | `kind` | See section 5 |
 | `body` | JSON object whose shape depends on `kind` |
+
+The envelope names no session. The receiver takes the sending session and
+the local session from its own record of the link (section 5.6), so a peer
+cannot address or impersonate a session by writing its name.
 
 ### 3.2 Header
 
@@ -176,14 +188,29 @@ each delivery:
       header's. This stops a valid signature from being stripped and replaced.
 5. **Freshness.** Drop the message if `ts` is more than 21 days in the past or
    more than 10 minutes in the future. Future timestamps are counted, and
-   `status` warns about clock skew.
+   `status` warns about clock skew. An ephemeral kind (`sessions.list`,
+   `sessions.listed`, `presence.ping`, `presence.pong`) is then handled at
+   once and never deduplicated, recorded or confirmed; its handler drops it
+   when it is older than 120 seconds, so frames the relay queued while this
+   machine was offline expire harmlessly.
 6. **Replay.** If `id` is already in the deduplication store (kept 30 days),
    do not handle it again; for non-control kinds, confirm it again with
    `control.delivered` (the sender may have missed the first receipt).
 7. **Handle** it through the handler registered for `kind`. Kinds with no
-   handler are dropped. `task.create` and `file.offer` pass through a policy
-   gate first (section 5.2 and section 6): it applies the trust level, and an
-   item the level rejects never reaches the normal handler.
+   handler are dropped. `chat`, `task.*` and `file.offer` pass through the
+   link gate first, the single enforcement point for link traffic. It
+   admits the message only when:
+   1. it carries a `link_id`; otherwise it is dropped and answered with
+      `control.unsupported` (at most once per peer per hour);
+   2. the link keyed by (sender machine, `link_id`) is `active` here and its
+      local session is open or away; otherwise it is dropped and answered
+      with `link.closed{unknown_link}` (at most once per link per minute);
+   3. the link's `permission_in` allows the kind (section 5.2); a
+      `task.create` it does not allow is recorded as rejected and the
+      sender is told.
+
+   The handler then works on that link's local session only, and takes the
+   peer's session from the link record.
 8. **Record** `id` in the deduplication store. This happens only after the
    handler succeeded or failed for good, so a retryable failure leaves the
    message unrecorded and a redelivery runs the handler again. Handlers are
@@ -209,8 +236,11 @@ ends and at least every 200 ms.
 
 ### 4.1 Sending and the outbox
 
-Every outgoing message except `control.paused` and `control.unpaired` goes
-through the persistent outbox. The item stores the envelope, not the frame, and
+Every outgoing message goes through the persistent outbox except
+`control.paused`, `control.unpaired`, the replies `control.unsupported` and
+`link.closed{unknown_link}`, and the ephemeral kinds (`sessions.*`,
+`presence.*`): those are sent once, directly, when the relay connection is
+up, and never retried. The item stores the envelope, not the frame, and
 is sealed again on every attempt to the peer's current prekey. A message whose
 sealed frame could not fit the 262144-byte limit is refused before it is
 queued (`too_large`).
@@ -243,7 +273,8 @@ there.
 
 `control.paused` and `control.unpaired` are sent once, directly, when the
 relay connection is up (best effort), because the peer record changes right
-after.
+after. Sending on a link that is not `active` fails locally at once; nothing
+is queued for a closed link.
 
 ## 5. Kinds
 
@@ -258,11 +289,9 @@ Size limits: chat text, task instructions, task results and notes are at most
 {"text": "tests pass on the GPU box, pushing now"}
 ```
 
-Delivered at every trust level. With `to_session`, only that session sees it.
-If that session does not exist when the message arrives, or it ends and is
-not reclaimed within its grace period (5 minutes; 30 days for the `--json`
-CLI), the item becomes machine-wide with the note
-`(originally for <session>)`.
+Delivered on any active link, to the link's local session only. While that
+session is away the item waits for it; if the link closes first, what it
+has not read from that link is dropped.
 
 ### 5.2 Tasks
 
@@ -277,27 +306,29 @@ CLI), the item becomes machine-wide with the note
 ```
 
 `files` lists attachments sent as `file.offer` messages with the same
-`task_id`. The receiver applies its trust level for the sender:
+`task_id` on the same link. The receiver applies its link's `permission_in`:
 
-| Receiver's trust in sender | Result |
+| `permission_in` on the receiver | Result |
 |---|---|
-| chat-only | `rejected`, update note `not permitted` |
-| ask-first | `awaiting_approval` until a human approves (then `queued`) or denies (`rejected`, note `denied by the receiving human`); expires after 24 hours (`expired`) |
-| autonomous | `queued`; unclaimed after 24 hours it becomes `expired` |
+| `messages` | `rejected`, update note `not permitted` |
+| `tasks-ask` | `awaiting_approval` until a human on the receiver approves (then `queued`) or denies (`rejected`, note `denied by the receiving human`); expires after 24 hours (`expired`). The session gets an approval notice without the instructions |
+| `tasks-auto` | `queued`; unclaimed after 24 hours it becomes `expired` |
 
 A `task.create` whose `task_id` is already known is ignored (a redelivery of
 the message that created a queued task only completes a delivery that an
 earlier attempt left unfinished).
 
 The receiver reports held and refused tasks with a `task.update`
-(`awaiting_approval`, then `queued` after approval, or `rejected`); a task
-queued at once is reported when it is claimed. Approval is a
-human action on the receiver (`cravv-connect approvals`; the daemon raises a
-desktop notification when a task starts waiting). Approving checks the peer
-again: it is refused when the peer is no longer paired, has been paused by
-this machine, or its trust level no longer allows tasks. Pausing or unpairing
-a peer rejects its tasks awaiting approval (note `peer paused` or
-`peer unpaired`).
+(`awaiting_approval`, then `queued` after approval, or `rejected`). The
+first time the receiving session's inbox returns a queued task, the
+receiver sends `task.update` with state `seen` (the task stays `queued`
+there), so the sender can tell a session that is slow from one that never
+looked. Approval is a human decision on the receiver: in the chat
+(`review_pending`, an elicitation form or a confirmation code), or with the
+password (`cravv-connect approvals`, the web UI). Approving checks the link
+again: it is refused when the link closed or no longer allows tasks.
+Lowering a link to `messages` rejects its tasks still waiting (for approval
+or a claim); pausing or unpairing the peer closes its links.
 
 `task.update` (receiver to sender):
 
@@ -307,43 +338,44 @@ a peer rejects its tasks awaiting approval (note `peer paused` or
 
 | Field | Meaning |
 |---|---|
-| `state` | `awaiting_approval`, `queued`, `claimed`, `running`, `done`, `failed`, `cancelled`, `rejected`, or `expired` |
-| `note` | Progress note or reason (`not permitted`, `killed`, `abandoned`, ...) |
+| `state` | `awaiting_approval`, `queued`, `seen`, `claimed`, `running`, `done`, `failed`, `cancelled`, `rejected`, or `expired` |
+| `note` | Progress note or reason (`not permitted`, `killed`, `link_closed`, `rate_limited`, ...) |
 | `result` | Final result text (with `done`) |
 | `files` | Result files, sent as `file.offer` with the same `task_id` |
 
-The envelope's `from_session` is the claiming session and `to_session` is the
-session that created the task. The sender only accepts updates for its own
-outbound tasks from the peer the task was sent to, and never moves a task
-backwards: the order is `sent` < `awaiting_approval` < `queued` < `claimed` <
-`running` < every terminal state. An update ranked lower than the current
+The sender only accepts updates for its own outbound tasks from the peer
+the task was sent to, on the task's link, and never moves a task
+backwards: the order is `sent` < `awaiting_approval` < `queued` < `seen` <
+`claimed` < `running` < every terminal state. An update ranked lower than the current
 state still adds its note, result and files. Updates after a terminal state
 are ignored, and an update with state `sent` or an unknown state is rejected.
 
 Receiver-side transitions:
 
 ```
-awaiting_approval -> queued | rejected | expired | cancelled
-queued            -> claimed | expired | cancelled | rejected
+awaiting_approval -> queued | rejected | expired | cancelled | failed
+queued            -> claimed | expired | cancelled | rejected | failed
 claimed           -> running | done | failed | cancelled
 running           -> done | failed | cancelled
 ```
 
-A claim is atomic: exactly one session wins. If the claiming session ends and
-is not reclaimed within 5 minutes, the task becomes `failed` with note
-`abandoned`. Sessions of the `--json` CLI (agent `cli`) are reclaimable for 30
-days, so a task they claimed fails as `abandoned` once it has been claimed or
-running for 7 days. The kill switch fails claimed and running tasks with note
-`killed`. Lowering a peer to chat-only rejects its pending tasks (awaiting
-approval or queued) with note `not permitted`.
+Only the link's local session can claim the task, atomically. The kill
+switch fails claimed and running tasks with note `killed`. When a link
+closes, every unfinished task on it fails with note `link_closed` on both
+sides: the receiver tells the sender when it can, and the sender also fails
+its own copy when its side of the link closes, so neither waits for an
+update that cannot come. A managed session fails a task it refuses to run
+with `rate_limited` or `folder_refused`, and one its run did not finish
+with the reason the run ended (`no_result`, `run_timeout`, `run_failed: ...`,
+`stopped`, `interrupted`).
 
 `task.cancel` (sender to receiver): `{"task_id": "..."}`. Only the session
 that created the task can cancel it, and the sender marks its copy
 `cancelled` before sending. The receiver accepts it only from the peer that
 sent the task: an `awaiting_approval`, `queued`, `claimed` or `running` task
 becomes `cancelled` with note `cancelled by sender`, and the claiming session
-(or every session, if unclaimed) gets a `task.update` inbox item with that
-note. No `task.update` is sent back; unknown or finished tasks are ignored.
+(or the link's session, if unclaimed) gets a `task.update` inbox item with
+that note. No `task.update` is sent back; unknown or finished tasks are ignored.
 
 ### 5.3 Control
 
@@ -355,7 +387,8 @@ note. No `task.update` is sent back; unknown or finished tasks are ignored.
 | `control.paused` | `{}` | This machine paused the peer (sent directly, then the peer is denied on the relay) |
 | `control.resumed` | `{}` | This machine resumed the peer, or finalized pairing with it |
 | `control.unpaired` | `{}` | This machine unpaired the peer (sent directly, best effort) |
-| `control.relay_moved` | `{"relay_url": "https://..."}` | Reserved for relay changes. v1 daemons accept and store it (only `https` URLs, or `http` for localhost and private network addresses) but do not send it |
+| `control.relay_moved` | `{"relay_url": "https://..."}` | Reserved for relay changes. Daemons accept and store it (only `https` URLs, or `http` for localhost and private network addresses) but do not send it |
+| `control.unsupported` | `{"min_version": 2}` | A peer sent `chat`, `task.*` or `file.offer` without a `link_id` (version 1). Sent directly, at most once per peer per hour; the message itself is dropped |
 
 Handlers:
 
@@ -370,9 +403,14 @@ Handlers:
   as soon as the relay has queued them (section 4.1).
 - `control.resumed`: clear the mark and release the held outbox, unless this
   machine has paused the peer itself.
-- `control.unpaired`: reject the peer's tasks awaiting approval, decline its
-  held files, delete the peer, its keys and its outbox, deny it on the relay
-  (on the next connection if offline), and write an `unpair` audit entry.
+- `control.unpaired`: close every link with the peer, reject its tasks
+  awaiting approval, decline its held files, delete the peer, its keys and
+  its outbox, deny it on the relay (on the next connection if offline), and
+  write an `unpair` audit entry. `control.paused` also closes every link
+  with the peer.
+- `control.unsupported`: `status` shows that the peer needs this machine to
+  upgrade (when `min_version` is higher than this machine's protocol
+  version).
 
 ### 5.4 File offer
 
@@ -391,8 +429,138 @@ Handlers:
 }
 ```
 
-`task_id` is present when the file belongs to a task. Section 6 describes the
-transfer.
+`task_id` is present when the file belongs to a task. A file travels on a
+link like chat (`link_id` in the envelope) and every active link may carry
+files. Section 6 describes the transfer.
+
+### 5.5 Sessions and discovery
+
+A session is a named endpoint on one machine (`<alias>/<name>`): a chat
+that shared itself, or a managed session the daemon started. Pairing lets
+a machine discover the sessions the other one shows it and ask for links;
+it grants nothing else.
+
+`sessions.list`: `{"req_id": "<ID>"}`
+
+`sessions.listed`:
+
+```json
+{
+  "req_id": "01J8ZT0...",
+  "sessions": [{"session_id": "01J8ZT1...", "name": "trainer", "purpose": "fine-tunes the wake word model",
+                "kind": "live", "agent": "claude", "state": "open"}],
+  "offers": [{"offer_id": "01J8ZT2...", "label": "trainer", "agent": "claude", "max_permission": "tasks-auto"}]
+}
+```
+
+- Both are ephemeral: sent directly, never confirmed or retried, dropped
+  when older than 120 seconds. The asker matches the answer by `req_id` and
+  waits at most 10 seconds.
+- The receiver answers at most 30 lists per peer per minute and lists only
+  its open and away sessions whose visibility includes the asker
+  (`private`, `all-peers`, or named peers), plus the managed-session offers
+  its owner made to the asker (labels only: never the folder or the
+  limits). The project folder is never sent.
+- `name` is 1 to 32 characters of `[a-z0-9-]`, not starting with `-`;
+  `purpose` one line of at most 120 characters; `kind` `live` or `managed`;
+  `state` `open` or `away`. The asker drops entries that break these rules
+  and shows the purpose only inside a `<remote_message>` wrapper.
+
+### 5.6 Links
+
+A link connects one session on each machine. The requester mints its
+`link_id` (an ID as in section 1); each side stores the link keyed by
+(remote machine, `link_id`) with its own local number, and derives the
+peer's session only from that record. Each side sets `permission_in`, what
+the other side may do to it: `messages` (chat and files), `tasks-ask`
+(also tasks that each need a human decision on this side) or `tasks-auto`
+(also tasks its agent may carry out without asking).
+
+| Kind | Body |
+|---|---|
+| `link.request` | `{"link_id", "from_session": {"id", "name", "purpose"}, "to_session_id" or "offer_id", "proposed_permission", "note"}` |
+| `link.accepted` | `{"link_id", "to_session": {"id", "name", "purpose"}, "granted_permission"}` |
+| `link.rejected` | `{"link_id", "reason"}`: `declined`, `not_found`, `busy`, `policy` or `timeout` |
+| `link.closed` | `{"link_id", "reason"}`: `closed_by_peer`, `session_closed`, `paused`, `unpaired`, `killed`, `presence_timeout` or `unknown_link` |
+| `link.state` | `{"link_id", "state": "active" or "away", "permission_in"}` |
+
+All five travel through the outbox and are confirmed like chat, except the
+`link.closed{unknown_link}` reply (sent directly).
+
+**Request.** `proposed_permission` is what the requester would like to do
+on the other side; `note` is at most 280 characters. The requester's own
+side of the new link lets the peer send messages only. The receiver:
+
+1. ignores a `link_id` it already has (a redelivery);
+2. rejects `busy` past 10 new requests from the peer in a minute or while 5
+   requests from it are pending, `policy` for a malformed request, and
+   `timeout` for one sent more than 10 minutes ago;
+3. rejects `not_found` for a session that is missing, closed or not visible
+   to the requester, and for an unknown offer. These answers are identical,
+   so a peer cannot probe for private sessions, and nothing is stored;
+4. otherwise stores the request as `pending`, tells the target session (an
+   inbox notice and the listener) and shows a desktop notification.
+
+A pending request is decided once, on the receiving side, by a human:
+accepted (at the level asked or lower) or rejected (`declined`).
+Accepting at `messages` or `tasks-ask` takes a chat decision or the
+password; accepting at `tasks-auto` takes the password. A request pending
+for 10 minutes is rejected with `timeout`.
+
+**Request to an offer.** With `offer_id` instead of `to_session_id`, the
+receiver checks the offer's rules, caps and concurrency limit, creates a
+managed session named after the offer's label plus a 4-character suffix,
+and answers `link.accepted` at once with `granted_permission` the lower of
+the proposed level and the offer's permission, except that `tasks-ask`
+becomes `messages` (a managed session has nobody to ask). The owner's
+password-gated offer was the approval. It rejects `not_found` for an offer that does not
+exist or was made to another machine, `busy` at a limit, and `policy` when
+the offer's folder no longer passes its checks.
+
+**Accepted.** The requester activates its pending link and records the
+acceptor's session (`to_session`) and `granted_permission` (what it may do
+there). An answer for a link that is not pending there gets
+`link.closed{unknown_link}`.
+
+**State.** Each side sends `link.state` when its session goes away or
+comes back and when it changes `permission_in`. It is informational: each
+side enforces only its own `permission_in`. Lowering needs nothing;
+raising, or accepting at `tasks-auto`, needs the password.
+
+**Close.** A link closes when either session closes, either side
+disconnects it, on pause or unpair of the machine, on the kill switch, or
+on presence timeout, and a closed link never reopens. The side that closes
+sends `link.closed` (except on pause and unpair, where `control.paused` and
+`control.unpaired` already say so) and tells its session. The receiver of
+`link.closed` closes its side and tells its session; it never answers a
+`link.closed`, so two sides that both lost a link cannot bounce replies.
+Closing fails the link's unfinished tasks (section 5.2), stops its file
+downloads and declines its held files, drops what an away session had not
+read from the link, and closes a managed session whose link it was.
+
+### 5.7 Presence
+
+| Kind | Body |
+|---|---|
+| `presence.ping` | `{"ts": 1790000123456, "link_ids": ["..."]}` |
+| `presence.pong` | `{"ts": 1790000123456, "link_ids_open": ["..."]}` |
+
+- While a peer has at least one active link, each side pings it every 30
+  seconds, naming those links (at most 1000).
+- The receiver answers with the named links that are open on its side
+  (`pending` counts as open, because its `link.accepted` may not have
+  arrived yet), echoing `ts`. A ping is also fresh evidence for the links
+  it names.
+- A link is dead after 150 seconds without fresh evidence, or as soon as a
+  fresh pong to a recent ping leaves it out. It closes with
+  `presence_timeout` and `link.closed` is queued, so the peer converges
+  when it is reachable again.
+- Both kinds are ephemeral (section 4, step 5): a ping or pong older than
+  120 seconds, or more than 10 minutes in the future, is ignored.
+
+A session that closes sends `link.closed{session_closed}` on each of its
+links at once, through the outbox, so the peer learns within seconds while
+both machines are online and within 150 seconds when a machine drops.
 
 ## 6. Files
 
@@ -421,10 +589,10 @@ transfer.
 
 **Receiver**
 
-| Receiver's trust in sender | Result |
-|---|---|
-| chat-only | Held until a human runs `cravv-connect files accept <file_id>` (password). Accepting checks the peer again (still paired, not paused by this machine, trust still allows files). Pausing or unpairing the peer declines its held files |
-| ask-first, autonomous | Downloaded at once |
+A `file.offer` on an active link is downloaded at once, for the link's
+session. (Files held for a human, accepted with `cravv-connect files
+accept <file_id>`, exist only from before the upgrade to protocol version
+2; pausing or unpairing the peer, or closing the link, declines them.)
 
 The offer is checked first: `file_id`, `task_id` (when present) and the
 message ID are IDs as in section 1, `blob_id` is 1 to 64 characters of
@@ -555,11 +723,13 @@ the peer's `name` lowercased, every run of characters outside `[a-z0-9]`
 turned into one `-`, trimmed, at most 24 characters, or `peer-<6 characters of
 the machine ID>` when nothing remains. The peer-chosen name is never shown
 raw. The human picks the alias (1 to 24 characters of `a-z 0-9 -`, starting
-with a letter or digit) and the trust level. `pair.finalize` then:
+with a letter or digit). `pair.finalize` then:
 
 1. on a machine without a mailbox (the joiner), registers one with the invite
    from A's payload and waits for the connection;
-2. stores the peer: IK, machine ID, alias, trust, prekey, relay URL;
+2. stores the peer: IK, machine ID, alias, prekey, relay URL. The peer gets
+   no links: it can discover sessions and ask for links, and each link is
+   decided on its own (section 5.6);
 3. adds the peer's IK to the relay allow-list;
 4. queues `control.resumed` to the peer: the side that finalized first may
    already have sent and been told `not_allowed`, and this clears any pause it
