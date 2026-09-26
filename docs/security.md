@@ -279,7 +279,8 @@ Needs the password:
 | New identity | `cravv-connect reset-identity` |
 
 Does not need it: rejecting a link request (`link reject`), restricting or
-disconnecting a link, `pause`, `resume-peer`, `unpair`, closing a managed
+disconnecting a link (`link restrict`, `link disconnect`, or `link permit`
+to a lower level), `pause`, `resume-peer`, `unpair`, closing a managed
 session (`session close`), `kill`, stopping the daemon, and everything
 agents do on their own links (sending, reading, working on tasks they
 received, cancelling tasks they sent). `resume-peer` is the one widening

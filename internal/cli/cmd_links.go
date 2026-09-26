@@ -2,10 +2,12 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"text/tabwriter"
 
+	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/ipc"
 	"github.com/spf13/cobra"
 )
@@ -74,9 +76,10 @@ func newLinksCmd(env *Env) *cobra.Command {
 func newLinkCmd(env *Env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "link",
-		Short: "Decide link requests and raise what a link allows",
+		Short: "Decide link requests, set what a link allows, or cut a link off",
 	}
-	cmd.AddCommand(newLinkAcceptCmd(env), newLinkRejectCmd(env), newLinkPermitCmd(env))
+	cmd.AddCommand(newLinkAcceptCmd(env), newLinkRejectCmd(env), newLinkPermitCmd(env),
+		newLinkRestrictCmd(env), newLinkDisconnectCmd(env))
 	return cmd
 }
 
@@ -173,13 +176,77 @@ func newLinkPermitCmd(env *Env) *cobra.Command {
 			}
 			ctx := cmd.Context()
 			return withConn(ctx, env, func(c Caller) error {
+				// Lowering (or keeping the level) needs no password, so try the
+				// ungated link.restrict first; the daemon refuses it with
+				// auth_required only when the change would raise the link.
+				params := ipc.LinkPermissionParams{Link: num, Permission: args[1]}
 				var v ipc.LinkView
-				if err := withUnlock(ctx, env, c, func() error {
-					return c.Call(ctx, ipc.MethodLinkPermit, ipc.LinkPermissionParams{Link: num, Permission: args[1]}, &v)
-				}); err != nil {
+				err := c.Call(ctx, ipc.MethodLinkRestrict, params, &v)
+				if errors.Is(err, core.ErrAuthRequired) {
+					err = withUnlock(ctx, env, c, func() error {
+						return c.Call(ctx, ipc.MethodLinkPermit, params, &v)
+					})
+				}
+				if err != nil {
 					return err
 				}
 				fmt.Fprintf(env.Stdout, "Link %d now allows %s.\n", v.Link, terminalSafe(v.PermissionIn))
+				return nil
+			})
+		},
+	}
+}
+
+// newLinkRestrictCmd lowers what a link allows. Like the chat's restrict and
+// the web UI's, it needs no password; it never raises.
+func newLinkRestrictCmd(env *Env) *cobra.Command {
+	return &cobra.Command{
+		Use:   "restrict <link> <messages|tasks-ask>",
+		Short: "Lower what the other side of a link may do here (no password)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			num, err := linkArg(args[0])
+			if err != nil {
+				return err
+			}
+			perm := args[1]
+			if perm != string(core.PermMessages) && perm != string(core.PermTasksAsk) {
+				return fmt.Errorf("%q: restrict lowers a link to messages or tasks-ask (to raise it, use cravv-connect link permit)", perm)
+			}
+			ctx := cmd.Context()
+			return withConn(ctx, env, func(c Caller) error {
+				var v ipc.LinkView
+				err := c.Call(ctx, ipc.MethodLinkRestrict, ipc.LinkPermissionParams{Link: num, Permission: perm}, &v)
+				if errors.Is(err, core.ErrAuthRequired) {
+					return fmt.Errorf("link %d allows less than %s, so this would raise it; run cravv-connect link permit %d %s (asks for your password)", num, perm, num, perm)
+				}
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(env.Stdout, "Link %d now allows %s.\n", v.Link, terminalSafe(v.PermissionIn))
+				return nil
+			})
+		},
+	}
+}
+
+// newLinkDisconnectCmd closes a link on both sides. Like every cut-off it
+// needs no password.
+func newLinkDisconnectCmd(env *Env) *cobra.Command {
+	return &cobra.Command{
+		Use:   "disconnect <link>",
+		Short: "Close a link on both sides (no password; closed links never reopen)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			num, err := linkArg(args[0])
+			if err != nil {
+				return err
+			}
+			return withConn(cmd.Context(), env, func(c Caller) error {
+				if err := c.Call(cmd.Context(), ipc.MethodLinkDisconnect, ipc.LinkParams{Link: num}, nil); err != nil {
+					return err
+				}
+				fmt.Fprintf(env.Stdout, "Disconnected link %d.\n", num)
 				return nil
 			})
 		},

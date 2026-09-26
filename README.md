@@ -305,8 +305,8 @@ any local process can run the CLI's.
 
 | Control | How | Effect |
 |---|---|---|
-| Disconnect a link | the chat's `disconnect`, the web UI's Sessions page | Closes the link on both sides. Its unfinished tasks fail (`link_closed`). Closed links never reopen |
-| Restrict a link | the chat's `restrict`, the web UI's Sessions page | Lowers what the other session may do here, at once; tasks still waiting are rejected when it drops to `messages` |
+| Disconnect a link | `cravv-connect link disconnect <link>`, the chat's `disconnect`, the web UI's Sessions page | Closes the link on both sides. Its unfinished tasks fail (`link_closed`). Closed links never reopen |
+| Restrict a link | `cravv-connect link restrict <link> <level>`, the chat's `restrict`, the web UI's Sessions page | Lowers what the other session may do here, at once; tasks still waiting are rejected when it drops to `messages` |
 | Reject | `cravv-connect link reject <link>`, the chat's `review_pending`, the web UI's Approvals page | Refuses a link request; in the chat, also a held task |
 | Close a session | the chat's `session_close`; `cravv-connect session close <name>` for a managed one | Closes it and all its links; the other side learns within seconds |
 | Pause | `cravv-connect pause <alias>` | Stops traffic with that machine both ways and closes every link with it. Undo with `resume-peer <alias>` (links must be requested again) |
@@ -335,7 +335,9 @@ any local process can run the CLI's.
 | `links` | Every link on this machine: sessions, peers, permissions, state |
 | `link accept <link> [--permission <level>]` | Accept a link request, at the level asked or lower (password) |
 | `link reject <link>` | Reject a link request |
-| `link permit <link> <messages\|tasks-ask\|tasks-auto>` | Set what the other side of a link may do here (password) |
+| `link permit <link> <messages\|tasks-ask\|tasks-auto>` | Set what the other side of a link may do here (password to raise it; lowering needs none) |
+| `link restrict <link> <messages\|tasks-ask>` | Lower what the other side of a link may do here, at once (no password; never raises) |
+| `link disconnect <link>` | Close a link on both sides; its unfinished tasks fail and it never reopens (no password) |
 | `approvals` | Review tasks waiting for approval interactively (password once; again after 10 minutes) |
 | `approve <task-id>` / `deny <task-id>` | Decide one held task (password) |
 | `offers` / `offers list [machine]` | List managed-session offers (to one machine, or to all) |
