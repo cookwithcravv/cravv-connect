@@ -42,7 +42,22 @@ reference relay `cravv-relay` for local testing. Protocols:
 [relay-v1](protocol/relay-v1.md), [peer-v1](protocol/peer-v1.md),
 [ipc-v1](protocol/ipc-v1.md).
 
-## Install from source
+## Install
+
+On macOS or Linux (arm64 or amd64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cravv/cravv-connect/main/scripts/install.sh | sh
+```
+
+This downloads the latest release, checks it against the release's
+`SHA256SUMS`, and installs `cravv-connect` and `cravv-relay` to
+`~/.local/bin` (it tells you if that folder is not on your `PATH`). No Go
+toolchain is needed. Use `sh -s -- --system` to install to `/usr/local/bin`
+instead, and `CRAVV_VERSION=v1.2.0` to pick a release. The repository URL is a
+placeholder until the project is published.
+
+### Install from source
 
 You need Go 1.26 and a C toolchain, because password checks use PAM through
 cgo:
@@ -65,7 +80,62 @@ check, so the binary the daemon runs is the one that needs cgo.
 
 ## Quick start
 
-### 1. Get a relay
+### 1. Set up the first machine
+
+```sh
+cravv-connect setup
+```
+
+The wizard walks through:
+
+1. **Relay.** Enter your relay URL (for real use, deploy the Cloudflare relay
+   once: [relay-cf/README.md](relay-cf/README.md)), or press Enter to start a
+   LAN test relay on this machine. The test relay is `cravv-relay` from next
+   to `cravv-connect`, on port 8787 at `http://<host>.local:8787` when that
+   name resolves (otherwise the machine's network address). It keeps
+   everything in memory and stops when the machine restarts.
+2. **Admin token**, only if this is the relay's first machine (setup makes
+   one for a test relay it starts).
+3. **This machine and the daemon.** It writes `~/.cravv-connect/config.toml`,
+   installs the daemon as a login service (launchd on macOS, systemd on
+   Linux) and waits until it is connected to the relay.
+4. **Agents.** It detects Claude Code and Codex and offers to add
+   cravv-connect to each.
+5. **Pair a device.** It shows a join code and its QR code, and waits for
+   the other machine.
+
+Run `cravv-connect setup` again at any time: it shows what is set up and
+offers only the missing steps. `cravv-connect setup --reset` starts over (it
+asks first). Without questions:
+`cravv-connect setup --yes --relay <url> [--relay-token <token>] [--name <name>] [--no-agents]`.
+
+### 2. Set up every other machine
+
+Install as above, then use the join code the first machine shows:
+
+```sh
+cravv-connect setup --join cravv-join:nb2hi4dthixs64tfnrqxsltfpbqw24dmmuxgg33n:7K3F-9QXMTR2A
+```
+
+It shows the relay in the code and asks `Join relay https://relay.example.com? (y/N)`.
+It refuses a plain `http` relay unless the address is this machine or a
+private network, and it refuses a machine already set up for another relay
+(`cravv-connect setup --reset --join <code>` moves it; you pair again with
+every peer). Then it sets the machine up, joins (your login password), asks
+for a local name for the other machine, and offers the agents.
+
+A join code works once and expires in 10 minutes. To pair two machines that
+are already set up, run `cravv-connect pair` on one and
+`cravv-connect join <code>` on the other (the join code or the plain bind
+code).
+
+### 3. Use it from Claude Code
+
+Restart Claude Code and type `/cravv` in a chat. The chat is shared as a
+session, and sessions on paired machines can ask to link with it; you decide
+each link.
+
+### Relays
 
 For real use, deploy the Cloudflare relay once: follow
 [relay-cf/README.md](relay-cf/README.md). You end up with a URL such as
@@ -84,7 +154,7 @@ they sign (both the WebSocket login and every blob request cover the
 normalized origin). The admin token can also come from
 `CRAVV_RELAY_ADMIN_TOKEN`.
 
-### 2. Set up the first machine
+### Manual setup: the first machine
 
 ```sh
 cravv-connect init --relay https://cravv-relay.example.workers.dev --relay-token <admin token>
@@ -97,7 +167,7 @@ deleted. Use `--relay-token -` to read it from stdin, and `--name` to choose
 the device name peers see as a suggestion (default: the host name up to the
 first `.`; lowercased to letters, digits and dashes, at most 24 characters).
 
-### 3. Set up the other machine
+### Manual setup: the other machine
 
 ```sh
 cravv-connect init --relay https://cravv-relay.example.workers.dev
@@ -113,14 +183,15 @@ resolved, so install a built binary (for example `make build`, then
 temporary directory or Go's build cache. It then waits up to 10 seconds for
 the daemon to answer and, if it does not, says where the logs are.
 
-### 4. Pair
+### Manual setup: pair
 
 On the first machine:
 
 ```sh
 cravv-connect pair
 # Login password for this machine:
-# Bind code: CRAVV-7K3F-9QXM-TR2A
+# Join code: cravv-join:nb2hi4dthixs64tfnrqxsltfpbqw24dmmuxgg33n:7K3F-9QXMTR2A
+# (a QR code of it, and the plain bind code CRAVV-7K3F-9QXM-TR2A)
 ```
 
 Share the code any way you like (it works once and expires in 10 minutes). On
@@ -130,11 +201,11 @@ the other machine:
 cravv-connect join CRAVV-7K3F-9QXM-TR2A
 ```
 
-Both sides ask for the login password, then for a local name for the peer and
-a trust level (default `ask-first`). `cravv-connect peers` lists paired
-machines with their machine IDs, so you can compare them later.
+Both sides ask for the login password, then for a local name for the peer.
+`cravv-connect peers` lists paired machines with their machine IDs, so you can
+compare them later.
 
-### 5. Connect your agents
+### Manual setup: connect your agents
 
 ```sh
 cravv-connect install claude      # MCP server plus UserPromptSubmit and Stop hooks
@@ -220,13 +291,16 @@ switch is on, only `resume` (and `status`, `peers`, `log`, `kill` again, and
 
 | Command | What it does |
 |---|---|
+| `setup [--relay <url>] [--relay-token <t>] [--name <n>] [--yes] [--no-agents] [--pair] [--reset]` | Guided setup: relay (or a LAN test relay), init, the daemon, agents, pairing. Safe to run again |
+| `setup --join <join code> [--name <n>] [--yes] [--no-agents] [--reset]` | Set this machine up on the relay in a join code and pair with the machine that showed it |
+| `version` | Print the version |
 | `init --relay <url> [--relay-token <t>] [--name <n>] [--force]` | Write `config.toml`; store the admin token for the first machine. The relay URL must be an origin, `scheme://host[:port]`, with no path. `--force` with a different relay clears this machine's relay registration so it registers again there; peers are not told, so re-pair with them |
 | `daemon run [--log-file <path>]` | Run the daemon in the foreground. Logs JSON to stderr, or with `--log-file` to that file, rotated at 10 MiB with 3 old files kept |
 | `daemon start` / `daemon stop` / `daemon status` | Control the daemon. `stop` asks the daemon over its socket to shut down and waits up to 10 seconds for it to exit; it never signals a process that does not answer on the socket |
 | `daemon install` / `daemon uninstall` | Run the daemon at login (launchd or systemd user unit) |
 | `status [--json]` | Relay connection, peers, queues, pending approvals, sessions, errors |
-| `pair` | Create a bind code and pair (password) |
-| `join <code>` | Join with a bind code (password) |
+| `pair [--no-qr]` | Show a join code (with a QR code) and pair (password) |
+| `join <code>` | Join with a join code for this machine's relay, or a bind code (password) |
 | `peers` | List peers with trust, state and machine ID |
 | `alias <alias> <new-alias>` | Rename a peer locally |
 | `trust <alias> <chat-only\|ask-first\|autonomous>` | Set a peer's trust (raising needs the password) |
