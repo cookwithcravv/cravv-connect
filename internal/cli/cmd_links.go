@@ -197,16 +197,19 @@ func newSessionsCmd(env *Env) *cobra.Command {
 				if err := c.Call(cmd.Context(), ipc.MethodSessionsList, ipc.MachineParams{Machine: args[0]}, &r); err != nil {
 					return err
 				}
-				if len(r.Sessions) == 0 {
+				if len(r.Sessions) == 0 && len(r.Offers) == 0 {
 					fmt.Fprintf(env.Stdout, "%s shows you no sessions.\n", terminalSafe(r.Machine))
 					return nil
 				}
 				tw := tabwriter.NewWriter(env.Stdout, 0, 4, 2, ' ', 0)
-				fmt.Fprintln(tw, "SESSION\tSTATE\tKIND\tAGENT")
+				if len(r.Sessions) > 0 {
+					fmt.Fprintln(tw, "SESSION\tSTATE\tKIND\tAGENT")
+				}
 				for _, s := range r.Sessions {
 					fmt.Fprintf(tw, "%s/%s\t%s\t%s\t%s\n", terminalSafe(r.Machine), terminalSafe(s.Name),
 						terminalSafe(s.State), terminalSafe(s.Kind), terminalSafe(orDash(s.Agent)))
 				}
+				printOffers(tw, r, len(r.Sessions) > 0)
 				return tw.Flush()
 			})
 		},
