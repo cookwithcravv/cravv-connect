@@ -1,15 +1,24 @@
 package e2e
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/cravv/cravv-connect/internal/ipc"
 )
@@ -168,4 +177,211 @@ func TestWebUIKillAndResume(t *testing.T) {
 	if a.Status().Killed {
 		t.Fatal("still killed")
 	}
+}
+
+// The UI in a real browser. Headless Chrome decides for itself which
+// Origin, Referer and cookies a form post carries, so this catches what the
+// hand-built requests above cannot (a Referrer-Policy that makes Chrome
+// send "Origin: null" refuses every action). It runs only with
+// CRAVV_BROWSER_TEST=1; CRAVV_CHROME names the browser binary when it is
+// not in a usual place.
+func TestWebUIInARealBrowser(t *testing.T) {
+	if os.Getenv("CRAVV_BROWSER_TEST") != "1" {
+		t.Skip("set CRAVV_BROWSER_TEST=1 to run the headless Chrome smoke test")
+	}
+	chrome := findChrome()
+	if chrome == "" {
+		t.Skip("no Chrome or Chromium found; set CRAVV_CHROME")
+	}
+	_, a, _ := NewPair(t)
+	var r ipc.UIStartResult
+	Call(t, a.Conn(), ipc.MethodUIStart, nil, &r)
+
+	br := startChrome(t, chrome)
+	br.navigate(r.URL)
+	br.waitFor("the first page after the launch", `location.pathname === "/devices" && document.readyState === "complete"`)
+	base := strings.TrimSuffix(strings.Split(r.URL, "/launch")[0], "/")
+	br.navigate(base + "/status")
+	br.waitFor("the Status page", `location.pathname === "/status" && document.readyState === "complete" && !!document.querySelector('form[action="/status/kill"]')`)
+
+	// A no-password action: form.submit() skips the confirm dialog.
+	br.eval(`document.querySelector('form[action="/status/kill"]').submit(), ""`)
+	br.waitFor("the kill notice", `document.body.innerText.includes("The kill switch is on. Every link is closed.")`)
+	if !a.Status().Killed {
+		t.Fatal("the browser's kill did not reach the daemon")
+	}
+
+	// A password action, which also rotates the session cookie.
+	br.eval(`(function () {
+		var f = document.querySelector('form[action="/status/resume"]');
+		f.querySelector('input[type=password]').value = ` + strconv.Quote(Password) + `;
+		f.submit();
+		return "";
+	})()`)
+	br.waitFor("the resume notice", `document.body.innerText.includes("Resumed.")`)
+	if a.Status().Killed {
+		t.Fatal("the browser's resume did not reach the daemon")
+	}
+	// The rotated cookie keeps working for the next page.
+	br.navigate(base + "/devices")
+	br.waitFor("the Devices page after the password action", `location.pathname === "/devices" && document.readyState === "complete" && document.body.innerText.includes("Paired devices")`)
+}
+
+func findChrome() string {
+	if p := os.Getenv("CRAVV_CHROME"); p != "" {
+		return p
+	}
+	for _, p := range []string{
+		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+		"/Applications/Chromium.app/Contents/MacOS/Chromium",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	for _, name := range []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser"} {
+		if p, err := exec.LookPath(name); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// cdpBrowser drives one headless Chrome tab over the DevTools protocol: a
+// tiny client that sends a command and reads until its reply, skipping
+// events.
+type cdpBrowser struct {
+	t  *testing.T
+	ws *websocket.Conn
+	id int64
+}
+
+func startChrome(t *testing.T, chrome string) *cdpBrowser {
+	t.Helper()
+	dir := t.TempDir()
+	cmd := exec.Command(chrome, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+		"--disable-extensions", "--user-data-dir="+dir, "--remote-debugging-port=0", "about:blank")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	t.Cleanup(func() {
+		cmd.Process.Kill()
+		cmd.Wait()
+	})
+	var port string
+	deadline := time.Now().Add(20 * time.Second)
+	for port == "" {
+		if raw, err := os.ReadFile(filepath.Join(dir, "DevToolsActivePort")); err == nil {
+			if lines := strings.Split(string(raw), "\n"); len(lines) >= 2 && lines[0] != "" {
+				port = strings.TrimSpace(lines[0])
+			}
+		}
+		if port == "" {
+			if time.Now().After(deadline) {
+				t.Fatal("Chrome did not open its DevTools port")
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	var wsURL string
+	for wsURL == "" {
+		res, err := http.Get("http://127.0.0.1:" + port + "/json/list")
+		if err == nil {
+			var targets []struct{ Type, WebSocketDebuggerURL string }
+			json.NewDecoder(res.Body).Decode(&targets)
+			res.Body.Close()
+			for _, tg := range targets {
+				if tg.Type == "page" && tg.WebSocketDebuggerURL != "" {
+					wsURL = tg.WebSocketDebuggerURL
+					break
+				}
+			}
+		}
+		if wsURL == "" {
+			if time.Now().After(deadline) {
+				t.Fatal("Chrome has no page to drive")
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ws, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("DevTools connection: %v", err)
+	}
+	ws.SetReadLimit(4 << 20)
+	t.Cleanup(func() { ws.CloseNow() })
+	return &cdpBrowser{t: t, ws: ws}
+}
+
+// call sends one DevTools command and returns its result.
+func (b *cdpBrowser) call(method string, params any) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	b.id++
+	req, _ := json.Marshal(map[string]any{"id": b.id, "method": method, "params": params})
+	if err := b.ws.Write(ctx, websocket.MessageText, req); err != nil {
+		return nil, err
+	}
+	for {
+		_, raw, err := b.ws.Read(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var msg struct {
+			ID     int64           `json:"id"`
+			Result json.RawMessage `json:"result"`
+			Error  *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(raw, &msg) != nil || msg.ID != b.id {
+			continue
+		}
+		if msg.Error != nil {
+			return nil, errors.New(msg.Error.Message)
+		}
+		return msg.Result, nil
+	}
+}
+
+func (b *cdpBrowser) navigate(u string) {
+	b.t.Helper()
+	if _, err := b.call("Page.navigate", map[string]any{"url": u}); err != nil {
+		b.t.Fatalf("navigate to %s: %v", u, err)
+	}
+}
+
+// eval runs a JavaScript expression in the page and returns its value as
+// text ("" when it throws or the page is between documents).
+func (b *cdpBrowser) eval(expr string) string {
+	raw, err := b.call("Runtime.evaluate", map[string]any{"expression": expr, "returnByValue": true})
+	if err != nil {
+		return ""
+	}
+	var r struct {
+		Result struct {
+			Value any `json:"value"`
+		} `json:"result"`
+	}
+	json.Unmarshal(raw, &r)
+	if r.Result.Value == nil {
+		return ""
+	}
+	return fmt.Sprint(r.Result.Value)
+}
+
+// waitFor polls cond (a JavaScript boolean expression) for 15 seconds and
+// fails with the page's path and text if it never holds.
+func (b *cdpBrowser) waitFor(what, cond string) {
+	b.t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if b.eval("!!("+cond+")") == "true" {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	b.t.Fatalf("waiting for %s; the browser shows %s:\n%s", what, b.eval("location.href"), b.eval("document.body ? document.body.innerText : ''"))
 }

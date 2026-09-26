@@ -122,9 +122,23 @@ func TestEveryResponseIsNoStore(t *testing.T) {
 		if got := r.header.Get("Cache-Control"); got != "no-store" {
 			t.Errorf("%s: Cache-Control %q", name, got)
 		}
-		if r.header.Get("Content-Security-Policy") == "" || r.header.Get("X-Frame-Options") != "DENY" || r.header.Get("Referrer-Policy") != "no-referrer" {
+		if r.header.Get("Content-Security-Policy") == "" || r.header.Get("X-Frame-Options") != "DENY" || r.header.Get("Referrer-Policy") != "same-origin" {
 			t.Errorf("%s: headers %v", name, r.header)
 		}
+	}
+}
+
+// Under Referrer-Policy: no-referrer browsers send "Origin: null" on
+// same-origin form posts, which the Origin check refuses, so every action
+// would fail. same-origin still keeps the UI's URLs from other sites.
+func TestReferrerPolicyKeepsTheOrigin(t *testing.T) {
+	b := newUI(t, statusDaemon(t)).open()
+	switch p := b.get("/status").header.Get("Referrer-Policy"); p {
+	case "no-referrer", "":
+		t.Fatalf("Referrer-Policy %q makes browsers send Origin: null on form posts", p)
+	case "same-origin":
+	default:
+		t.Fatalf("Referrer-Policy %q", p)
 	}
 }
 

@@ -80,7 +80,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Security-Policy", contentSecurityPolicy)
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("X-Content-Type-Options", "nosniff")
-	h.Set("Referrer-Policy", "no-referrer")
+	// same-origin, not no-referrer: under no-referrer browsers send
+	// "Origin: null" on the UI's own form posts, and sameOrigin refuses
+	// those. Other sites still get no Referer.
+	h.Set("Referrer-Policy", "same-origin")
 	if r.Host != s.hosts[0] && r.Host != s.hosts[1] {
 		// A page on another name that resolves here (DNS rebinding) never
 		// gets an answer.
