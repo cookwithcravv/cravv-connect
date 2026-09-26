@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/store"
@@ -22,6 +23,7 @@ type DaemonStatus struct {
 	InboxUnread      int // summed over open and away shared sessions
 	PendingApprovals int
 	Errors           []string
+	LastSeen         map[core.MachineID]time.Time // when each peer was last heard from since the daemon started
 }
 
 // OutboxCounter counts undelivered outbox items. Implemented by store.OutboxStore.
@@ -57,6 +59,7 @@ func (s *StatusService) Status(ctx context.Context) (DaemonStatus, error) {
 	st := DaemonStatus{
 		MachineID: s.d.MachineID, DeviceName: s.d.DeviceName, RelayURL: s.d.RelayURL,
 		RelayConnected: connected, Killed: s.d.Killed(), Online: map[core.MachineID]bool{},
+		LastSeen: map[core.MachineID]time.Time{},
 	}
 	peers, err := s.d.Peers.ListPeers(ctx)
 	if err != nil {
@@ -65,6 +68,9 @@ func (s *StatusService) Status(ctx context.Context) (DaemonStatus, error) {
 	st.Peers = peers
 	for _, p := range peers {
 		st.Online[p.MachineID] = connected && !p.Paused && !p.PausedByPeer && s.d.Activity.Online(p.MachineID)
+		if at, ok := s.d.Activity.LastSeen(p.MachineID); ok {
+			st.LastSeen[p.MachineID] = at
+		}
 	}
 	sessions, err := s.d.Shared.List(ctx, core.SessionOpen, core.SessionAway)
 	if err != nil {

@@ -249,6 +249,9 @@ type PeerView struct {
 	Paused       bool      `json:"paused"`
 	PausedByPeer bool      `json:"paused_by_peer"`
 	PairedAt     time.Time `json:"paired_at"`
+	// LastSeen is when the peer was last heard from since the daemon
+	// started; zero (omitted) if it has not been.
+	LastSeen time.Time `json:"last_seen,omitzero"`
 }
 
 type ApprovalView struct {

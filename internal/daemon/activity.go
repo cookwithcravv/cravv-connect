@@ -51,3 +51,12 @@ func (a *PeerActivity) Online(id core.MachineID) bool {
 	t, ok := a.seen[id]
 	return ok && a.clock.Now().Sub(t) <= OnlineWindow
 }
+
+// LastSeen returns when the peer last sent us a handled envelope since the
+// daemon started, and false if it has not.
+func (a *PeerActivity) LastSeen(id core.MachineID) (time.Time, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	t, ok := a.seen[id]
+	return t, ok
+}

@@ -221,6 +221,7 @@ func (a status) Status(ctx context.Context) (ipc.StatusResult, error) {
 	for _, p := range s.Peers {
 		v := api.PeerViewOf(p, s.RelayConnected)
 		v.Online = s.Online[p.MachineID]
+		v.LastSeen = s.LastSeen[p.MachineID]
 		out.Peers = append(out.Peers, v)
 	}
 	return out, nil
