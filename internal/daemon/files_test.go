@@ -538,7 +538,7 @@ func (r *blobRelay) Blobs(transport.Signer) transport.BlobStore { return r.blobs
 
 // The kill switch stops a running download: nothing more is fetched, no inbox
 // notice appears, and Start does not resume it while killed. Resume finishes it.
-func TestKillStopsDownloadsAndResumeFinishes(t *testing.T) {
+func TestKillStopsDownloadsOnClosedLinks(t *testing.T) {
 	ctx := context.Background()
 	blobs := newD2Blobs()
 	d := d2NewDaemon(t, t.TempDir(), &blobRelay{blobs: blobs})
@@ -575,38 +575,35 @@ func TestKillStopsDownloadsAndResumeFinishes(t *testing.T) {
 	}
 	d.Files().Wait()
 
+	// The kill switch closes every link, so the download stops for good:
+	// it fails with link_closed and resume does not bring it back.
 	r, err := d.store.GetFile(ctx, body.FileID)
-	if err != nil || r.State != store.FileDownloading || r.Attempts != 0 {
+	if err != nil || r.State != store.FileFailed || r.Reason != ReasonLinkClosed || r.Attempts != 0 {
 		t.Fatalf("after kill: %+v %v", r, err)
 	}
 	if n := blobs.getCalls[2] + blobs.getCalls[3]; n != 0 {
 		t.Fatalf("chunks fetched after kill: %v", blobs.getCalls)
 	}
-	if items, _ := d.Inbox().Check(ctx, session.ID, 10); len(items) != 0 {
-		t.Fatalf("inbox notice while killed: %+v", items)
+	if err := d.Kill().Resume(ctx, true); err != nil {
+		t.Fatal(err)
 	}
-	if err := d.Files().Start(ctx); err != nil {
+	if err := d.Files().ResumeDownloads(ctx); err != nil {
 		t.Fatal(err)
 	}
 	d.Files().Wait()
 	if n := blobs.getCalls[2] + blobs.getCalls[3]; n != 0 {
-		t.Fatalf("Start resumed a download while killed: %v", blobs.getCalls)
+		t.Fatalf("a download on a closed link resumed: %v", blobs.getCalls)
 	}
-
-	if err := d.Kill().Resume(ctx, true); err != nil {
-		t.Fatal(err)
+	for _, p := range []string{r.LocalPath, r.LocalPath + ".part"} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s left behind (%v)", p, err)
+		}
 	}
-	d2Eventually(t, "download finished after resume", func() bool {
-		r, _ := d.store.GetFile(ctx, body.FileID)
-		return r.State == store.FileDone
-	})
-	d.Files().Wait()
-	r, _ = d.store.GetFile(ctx, body.FileID)
-	if got, _ := os.ReadFile(r.LocalPath); !bytes.Equal(got, content) {
-		t.Fatal("resumed file differs")
-	}
-	if items, _ := d.Inbox().Check(ctx, session.ID, 10); len(items) != 1 || items[0].FileID != body.FileID {
-		t.Fatalf("inbox after resume = %+v", items)
+	items, _ := d.Inbox().Check(ctx, session.ID, 10)
+	for _, it := range items {
+		if it.FileID != "" {
+			t.Fatalf("file notice for a download on a closed link: %+v", it)
+		}
 	}
 }
 
@@ -672,5 +669,55 @@ func TestKillStopsUpload(t *testing.T) {
 	e.blobs.onPut = nil
 	if _, err := e.files.SendFile(ctx, e.te.link, e.project, "big.bin", ""); !errors.Is(err, core.ErrKilled) {
 		t.Fatalf("SendFile while killed err = %v", err)
+	}
+}
+
+// Closing a link stops its running downloads: the file fails with
+// link_closed, nothing is left on disk, and no file notice or chat follows.
+func TestLinkCloseCancelsDownload(t *testing.T) {
+	ctx := context.Background()
+	e := d2FileSvc(t, 0)
+	body := e.blobs.put(t, "big.bin", randomBytes(t, 3*core.FileChunkBytes))
+	reached, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	e.blobs.onGet = func(n uint32) {
+		if n == 1 {
+			once.Do(func() { close(reached) })
+			<-release
+		}
+	}
+	env := d2Env(t, e.te.peer, core.KindFileOffer, e.te.link.ID, body)
+	g := d2Gated(e.te.st, e.te.shared, e.te.replies, HandlerFunc(e.files.HandleOffer), HandlerFunc(e.files.RejectOffer))
+	if err := g.Handle(ctx, e.te.peer, env); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("download did not start")
+	}
+	chats := len(e.te.sender.ofKind(core.KindChat))
+	if err := e.te.links.Disconnect(ctx, "", e.te.link.Num); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	e.files.Wait()
+	r := e.record(t, body.FileID)
+	if r.State != store.FileFailed || r.Reason != ReasonLinkClosed {
+		t.Fatalf("download after the link closed: %s (%s)", r.State, r.Reason)
+	}
+	for _, p := range []string{r.LocalPath, r.LocalPath + ".part"} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s left behind (%v)", p, err)
+		}
+	}
+	items, _ := e.te.inbox.Check(ctx, e.te.session.ID, 10)
+	for _, it := range items {
+		if it.Kind == "file" || it.FileID != "" {
+			t.Errorf("file notice after the link closed: %+v", it)
+		}
+	}
+	if got := len(e.te.sender.ofKind(core.KindChat)); got != chats {
+		t.Fatalf("%d chats sent on the closed link", got-chats)
 	}
 }

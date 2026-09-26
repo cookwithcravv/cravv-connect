@@ -128,8 +128,9 @@ func (s *FileService) ResumeDownloads(ctx context.Context) error {
 
 // StopTransfers cancels every running download and upload (kill switch).
 // Stopped downloads stay in the downloading state and continue from their
-// last chunk on ResumeDownloads; stopped uploads fail for good (their blob is
-// deleted and no file.offer is sent).
+// last chunk on ResumeDownloads (unless their link closes meanwhile, as the
+// kill switch's link closes do: see LinkClosed); stopped uploads fail for
+// good (their blob is deleted and no file.offer is sent).
 func (s *FileService) StopTransfers() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -469,15 +470,65 @@ func (s *FileService) PeerCutOff(ctx context.Context, peer store.Peer, reason st
 	return s.declineHeld(ctx, peer, reason, func(r store.FileRecord) bool { return r.Peer == peer.MachineID })
 }
 
-// LinkClosed implements LinkCloseObserver: the link's held files are declined.
+// LinkClosed implements LinkCloseObserver: the link's running downloads
+// fail with link_closed and stop (no notice follows), and its held files are
+// declined.
 func (s *FileService) LinkClosed(ctx context.Context, l store.Link) error {
+	onLink := func(r store.FileRecord) bool {
+		return r.Direction == store.TaskInbound && r.Peer == l.Peer && r.LinkID == l.ID
+	}
+	if err := s.stopDownloads(ctx, onLink); err != nil {
+		return err
+	}
 	peer, err := s.d.Peers.GetPeer(ctx, l.Peer)
 	if err != nil {
 		return nil // unpaired: nobody to tell
 	}
-	return s.declineHeld(ctx, peer, ReasonLinkClosed, func(r store.FileRecord) bool {
-		return r.Peer == l.Peer && r.LinkID == l.ID
-	})
+	return s.declineHeld(ctx, peer, ReasonLinkClosed, onLink)
+}
+
+// stopDownloads fails the running downloads match selects with
+// link_closed and cancels them. The download goroutine then finds the file
+// no longer downloading, delivers nothing and removes what it wrote.
+func (s *FileService) stopDownloads(ctx context.Context, match func(store.FileRecord) bool) error {
+	recs, err := s.d.Files.ListFiles(ctx, store.FileDownloading)
+	if err != nil {
+		return err
+	}
+	for _, r := range recs {
+		if !match(r) {
+			continue
+		}
+		_, err := s.d.Files.UpdateFile(ctx, r.FileID, func(f *store.FileRecord) error {
+			if f.State != store.FileDownloading {
+				return core.ErrBadTransition
+			}
+			f.State, f.Reason = store.FileFailed, ReasonLinkClosed
+			return nil
+		})
+		if errors.Is(err, core.ErrBadTransition) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		s.mu.Lock()
+		cancel, running := s.inflight[r.FileID]
+		s.mu.Unlock()
+		if running {
+			cancel()
+		} else {
+			discardPartial(r)
+		}
+	}
+	return nil
+}
+
+// discardPartial removes what a download stopped by a link close wrote.
+// LocalPath is only ever created by this file's own download.
+func discardPartial(r store.FileRecord) {
+	os.Remove(r.LocalPath + ".part")
+	os.Remove(r.LocalPath)
 }
 
 // declineHeld declines the inbound held files match selects.
@@ -548,6 +599,10 @@ func (s *FileService) startDownload(fileID string) {
 			delete(s.inflight, fileID)
 			s.mu.Unlock()
 			cancel()
+			if r, err := s.d.Files.GetFile(context.WithoutCancel(ctx), fileID); err == nil &&
+				r.State == store.FileFailed && r.Reason == ReasonLinkClosed {
+				discardPartial(r)
+			}
 		}()
 		s.download(ctx, fileID)
 	}()
@@ -617,6 +672,9 @@ func (s *FileService) fetch(ctx context.Context, rec store.FileRecord) error {
 	for i := rec.NextChunk; i < rec.Chunks; i++ {
 		if s.d.Killed() {
 			return errKilled
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		ct, err := blobs.GetChunk(ctx, rec.BlobID, i)
 		if err != nil {
@@ -701,9 +759,15 @@ func (s *FileService) finish(ctx context.Context, rec store.FileRecord) {
 		s.d.Log.Warn("blob delete failed", "file_id", rec.FileID, "err", err)
 	}
 	done, err := s.d.Files.UpdateFile(ctx, rec.FileID, func(f *store.FileRecord) error {
+		if f.State != store.FileDownloading {
+			return core.ErrBadTransition // stopped meanwhile (its link closed)
+		}
 		f.State, f.Reason = store.FileDone, ""
 		return nil
 	})
+	if errors.Is(err, core.ErrBadTransition) {
+		return
+	}
 	if err != nil {
 		s.d.Log.Error("file record update failed", "file_id", rec.FileID, "err", err)
 		return
@@ -722,6 +786,9 @@ func (s *FileService) finish(ctx context.Context, rec store.FileRecord) {
 func (s *FileService) fail(ctx context.Context, rec store.FileRecord, cause error) {
 	os.Remove(rec.LocalPath + ".part")
 	rec, err := s.d.Files.UpdateFile(ctx, rec.FileID, func(f *store.FileRecord) error {
+		if f.State != store.FileDownloading {
+			return core.ErrBadTransition // stopped meanwhile (its link closed)
+		}
 		f.State, f.Reason = store.FileFailed, "download failed: "+cause.Error()
 		return nil
 	})
