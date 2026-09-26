@@ -86,6 +86,10 @@ func Serve(ctx context.Context, d *daemon.Daemon, ln net.Listener, clock core.Cl
 	ports := Ports(d)
 	ports.Lifecycle = stopper{cancel}
 	srv := api.NewServer(ports, clock, logger)
+	// The web UI starts on ui.start and is stopped before Serve returns.
+	ui := newWebUI(ctx, srv, clock, logger)
+	defer ui.close()
+	api.RegisterUI(srv, UIPorts(d, ui.launcher))
 	errc := make(chan error, 2)
 	go func() { errc <- d.Run(ctx) }()
 	go func() { errc <- srv.Serve(ctx, ln) }()
