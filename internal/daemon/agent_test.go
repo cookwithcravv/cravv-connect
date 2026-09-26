@@ -11,32 +11,43 @@ import (
 
 func TestClaudeCommandPerRunMode(t *testing.T) {
 	const uuid = "0b5c2f6e-8a1d-4c3e-9f70-2d6a1b3c4d5e"
+	// The exact argv of each run mode (v2 spec 6.1, flags probed on
+	// claude 2.1.283). --restricted ignores the user, project and local
+	// settings files and confines the file tools to the folder; --tools
+	// names every built-in tool the mode has; the permission mode is always
+	// explicit and nobody answers prompts.
 	base := func(resume bool) []string {
 		flag := "--session-id"
 		if resume {
 			flag = "--resume"
 		}
-		return []string{"-p", flag, uuid, "--output-format", "json", "--strict-mcp-config", "--mcp-config", "/state/runs/R1.json"}
+		return []string{"-p", flag, uuid, "--output-format", "json",
+			"--restricted", "--strict-mcp-config", "--mcp-config", "/state/runs/R1.json",
+			"--disable-slash-commands", "--permission-prompts", "none"}
+	}
+	readOnly := []string{
+		"--permission-mode", "dontAsk",
+		"--tools", "Read,Glob,Grep",
+		"--allowedTools", "mcp__cravv-connect__*",
+		"--disallowedTools", "Bash(cravv-connect:*)",
 	}
 	for _, c := range []struct {
 		mode   core.RunMode
 		resume bool
 		want   []string
 	}{
-		{core.RunReadOnly, false, append(base(false),
-			"--allowedTools", "Read,Glob,Grep,mcp__cravv-connect__*",
-			"--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Bash(cravv-connect:*)")},
+		{core.RunReadOnly, false, append(base(false), readOnly...)},
 		{core.RunEditInFolder, true, append(base(true),
 			"--permission-mode", "acceptEdits",
+			"--tools", "Read,Glob,Grep,Edit,Write",
 			"--allowedTools", "mcp__cravv-connect__*",
-			"--disallowedTools", "Bash,WebFetch,WebSearch,Bash(cravv-connect:*)")},
+			"--disallowedTools", "Bash(cravv-connect:*)")},
 		{core.RunShell, true, append(base(true),
 			"--permission-mode", "acceptEdits",
+			"--tools", "Read,Glob,Grep,Edit,Write,Bash",
 			"--allowedTools", "Bash,mcp__cravv-connect__*",
 			"--disallowedTools", "Bash(cravv-connect:*)")},
-		{"bogus", false, append(base(false),
-			"--allowedTools", "Read,Glob,Grep,mcp__cravv-connect__*",
-			"--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Bash(cravv-connect:*)")},
+		{"bogus", false, append(base(false), readOnly...)},
 	} {
 		spec := RunSpec{Folder: "/srv/proj", AgentSession: uuid, Resume: c.resume, RunMode: c.mode, MCPConfig: "/state/runs/R1.json"}
 		cmd := ClaudeAdapter{}.Command(spec, "the prompt")
@@ -46,8 +57,11 @@ func TestClaudeCommandPerRunMode(t *testing.T) {
 		if !reflect.DeepEqual(cmd.Args, c.want) {
 			t.Errorf("%s resume=%v:\n got %q\nwant %q", c.mode, c.resume, cmd.Args, c.want)
 		}
+		if want := []string{"CLAUDE_CODE_DISABLE_CLAUDE_MDS=1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"}; !reflect.DeepEqual(cmd.Env, want) {
+			t.Errorf("%s: env %q, want %q", c.mode, cmd.Env, want)
+		}
 		joined := strings.Join(cmd.Args, " ")
-		for _, never := range []string{"bypassPermissions", "dangerously", "the prompt"} {
+		for _, never := range []string{"bypassPermissions", "dangerously", "the prompt", "--safe-mode", "--bare", "WebFetch", "WebSearch"} {
 			if strings.Contains(joined, never) {
 				t.Errorf("%s: %q in the arguments", c.mode, never)
 			}

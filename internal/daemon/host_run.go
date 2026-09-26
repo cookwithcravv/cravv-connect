@@ -255,7 +255,7 @@ func (h *SessionHost) run(ctx context.Context, m store.ManagedSession, o store.O
 		h.mu.Lock()
 		h.cancel[sess.ID] = cancel
 		h.mu.Unlock()
-		out = h.d.Runner.Run(rctx, cmd, h.env(), o.RunTimeout)
+		out = h.d.Runner.Run(rctx, cmd, append(h.env(), cmd.Env...), o.RunTimeout)
 		cancel()
 		res = adapter.Result(out.Stdout)
 	}

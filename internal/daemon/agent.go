@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/cravv/cravv-connect/internal/core"
@@ -32,6 +33,7 @@ type AgentCommand struct {
 	Args  []string
 	Dir   string
 	Stdin string
+	Env   []string // KEY=VALUE pairs the adapter adds to the child's environment
 }
 
 // AgentResult is what the adapter could read from a run's output.
@@ -70,22 +72,54 @@ const denyCLI = "Bash(cravv-connect:*)"
 // mcpTools allows the cravv-connect tools (the only MCP server a run has).
 const mcpTools = "mcp__" + MCPServerName + "__*"
 
-// runModeArgs are the tool rules of each run mode (v2 spec 6.1). Deny
-// rules win over allow rules, including any the user's settings add, so
-// read-only also denies the tools that write or run commands. No mode
-// uses a bypass permission mode.
+// runContainment are the flags every run gets, whatever its mode. They
+// were chosen by probing claude 2.1.283 (v2 spec 12, "Managed run
+// containment"):
+//
+//   - --restricted ignores the user, project and local settings files (so
+//     no settings hooks, permission rules, defaultMode or plugins of the
+//     user or of the folder apply), turns off project CLAUDE.md, confines
+//     Read/Glob/Grep/Edit/Write to the working folder (symlinks that leave
+//     it are refused too), removes the code-running tools unless --tools
+//     names them, and refuses bypassPermissions.
+//   - --strict-mcp-config with the daemon's config: cravv-connect is the
+//     only MCP server. --safe-mode is NOT used: it also drops the servers
+//     of --mcp-config, so the run would lose its cravv-connect tools.
+//   - --disable-slash-commands: no skills.
+//   - --permission-prompts none: anything that would ask a person is
+//     denied (nobody is at this machine).
+var runContainment = []string{"--restricted", "--strict-mcp-config"}
+
+// runEnv is added to every run's environment: no CLAUDE.md files and no
+// auto-memory (belt and braces: --restricted already turns project memory
+// off, and these also cover the user's own CLAUDE.md and memory).
+var runEnv = []string{"CLAUDE_CODE_DISABLE_CLAUDE_MDS=1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"}
+
+// runModeArgs are the tool rules of each run mode (v2 spec 6.1). --tools
+// lists every built-in tool the mode has; nothing else exists in the run.
+// The permission mode is always explicit, so no settings file can widen
+// it, and no mode uses a bypass permission mode.
 var runModeArgs = map[core.RunMode][]string{
+	// Reading the folder, and the cravv-connect tools. dontAsk denies
+	// anything not allowed up front.
 	core.RunReadOnly: {
-		"--allowedTools", "Read,Glob,Grep," + mcpTools,
-		"--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch," + denyCLI,
+		"--permission-mode", "dontAsk",
+		"--tools", "Read,Glob,Grep",
+		"--allowedTools", mcpTools,
+		"--disallowedTools", denyCLI,
 	},
+	// Reading and editing inside the folder (--restricted refuses edits
+	// outside it, and to settings, git and tool configuration files).
 	core.RunEditInFolder: {
 		"--permission-mode", "acceptEdits",
+		"--tools", "Read,Glob,Grep,Edit,Write",
 		"--allowedTools", mcpTools,
-		"--disallowedTools", "Bash,WebFetch,WebSearch," + denyCLI,
+		"--disallowedTools", denyCLI,
 	},
+	// Everything your user can do: Bash is not confined to the folder.
 	core.RunShell: {
 		"--permission-mode", "acceptEdits",
+		"--tools", "Read,Glob,Grep,Edit,Write,Bash",
 		"--allowedTools", "Bash," + mcpTools,
 		"--disallowedTools", denyCLI,
 	},
@@ -100,9 +134,9 @@ func (a ClaudeAdapter) Program() string {
 }
 
 // Command implements AgentAdapter: `claude -p --session-id <uuid>` on the
-// first run and `--resume <uuid>` afterwards, JSON output, only the
-// daemon's MCP config, and the run mode's tool rules. An unknown run mode
-// gets the read-only rules.
+// first run and `--resume <uuid>` afterwards, JSON output, the containment
+// flags with only the daemon's MCP config, and the run mode's tool rules.
+// An unknown run mode gets the read-only rules.
 func (a ClaudeAdapter) Command(spec RunSpec, prompt string) AgentCommand {
 	args := []string{"-p"}
 	if spec.Resume {
@@ -110,13 +144,15 @@ func (a ClaudeAdapter) Command(spec RunSpec, prompt string) AgentCommand {
 	} else {
 		args = append(args, "--session-id", spec.AgentSession)
 	}
-	args = append(args, "--output-format", "json", "--strict-mcp-config", "--mcp-config", spec.MCPConfig)
+	args = append(args, "--output-format", "json")
+	args = append(args, runContainment...)
+	args = append(args, "--mcp-config", spec.MCPConfig, "--disable-slash-commands", "--permission-prompts", "none")
 	mode, ok := runModeArgs[spec.RunMode]
 	if !ok {
 		mode = runModeArgs[core.RunReadOnly]
 	}
 	args = append(args, mode...)
-	return AgentCommand{Path: a.Program(), Args: args, Dir: spec.Folder, Stdin: prompt}
+	return AgentCommand{Path: a.Program(), Args: args, Dir: spec.Folder, Stdin: prompt, Env: slices.Clone(runEnv)}
 }
 
 // mcpConfig is Claude Code's --mcp-config file format.

@@ -34,6 +34,7 @@ type Record struct {
 	Token    string            `json:"token,omitempty"`
 	Env      map[string]string `json:"env,omitempty"`     // the MCP server's environment from the config
 	HasToken bool              `json:"has_token_env"`     // CRAVV_RUN_TOKEN in the agent's own environment
+	Environ  []string          `json:"environ,omitempty"` // the agent's own environment
 	Results  map[string]string `json:"results,omitempty"` // what the run's daemon calls returned
 }
 
@@ -53,7 +54,7 @@ var actions = map[string]func(rec *Record){}
 func run(mode string) int {
 	prompt, _ := io.ReadAll(os.Stdin)
 	dir, _ := os.Getwd()
-	rec := Record{Mode: mode, Args: os.Args[1:], Dir: dir, Prompt: string(prompt), PID: os.Getpid(), HasToken: os.Getenv("CRAVV_RUN_TOKEN") != ""}
+	rec := Record{Mode: mode, Args: os.Args[1:], Dir: dir, Prompt: string(prompt), PID: os.Getpid(), HasToken: os.Getenv("CRAVV_RUN_TOKEN") != "", Environ: os.Environ()}
 	session := argAfter(os.Args, "--session-id")
 	if session == "" {
 		session = argAfter(os.Args, "--resume")

@@ -187,12 +187,15 @@ func TestHostRunsItemsOneAtATimeAndResumes(t *testing.T) {
 	e.chat(t, "are you there?")
 	recs := e.runs(t, 2)
 	first, second := recs[0], recs[1]
-	wantFirst := []string{"-p", "--session-id", m.AgentSession, "--output-format", "json", "--strict-mcp-config", "--mcp-config"}
+	wantFirst := []string{"-p", "--session-id", m.AgentSession, "--output-format", "json", "--restricted", "--strict-mcp-config", "--mcp-config"}
 	if !slices.Equal(first.Args[:len(wantFirst)], wantFirst) {
 		t.Fatalf("first run args %q", first.Args)
 	}
-	if !slices.Contains(first.Args, "acceptEdits") || !slices.Contains(first.Args, "Bash,WebFetch,WebSearch,Bash(cravv-connect:*)") {
+	if !slices.Contains(first.Args, "acceptEdits") || !slices.Contains(first.Args, "Read,Glob,Grep,Edit,Write") {
 		t.Fatalf("edit-in-folder rules missing: %q", first.Args)
+	}
+	if !slices.Contains(first.Environ, "CLAUDE_CODE_DISABLE_CLAUDE_MDS=1") || !slices.Contains(first.Environ, "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1") {
+		t.Fatal("the adapter's environment did not reach the run")
 	}
 	if !slices.Equal(second.Args[1:3], []string{"--resume", m.AgentSession}) {
 		t.Fatalf("second run args %q", second.Args)
