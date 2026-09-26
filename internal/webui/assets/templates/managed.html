@@ -48,7 +48,7 @@
 <label>The device may <select name="permission">{{range .Permissions}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
 <label>Run mode <select name="run_mode">{{range .Modes}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
 <p class="muted">read-only reads and searches the folder. edit-in-folder also edits files, with no shell and no web. shell also runs commands.</p>
-<p class="warn">Run mode shell: the peer can run commands as your user on this machine. To choose it, type shell here:</p>
+<p class="warn">Run mode shell: the peer can run commands as your user on this machine. A shell run can do anything your user can, including talking to the local cravv-connect daemon without a token, reading ~/.cravv-connect, and editing your ~/.claude settings. To choose it, type shell here:</p>
 <label>Confirm shell <input name="shell_confirm" autocomplete="off"></label>
 <label>Sessions open at once <input name="max_concurrent" inputmode="numeric" placeholder="2"></label>
 <label>Runs an hour per link <input name="runs_per_hour" inputmode="numeric" placeholder="30"></label>

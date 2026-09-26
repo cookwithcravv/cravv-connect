@@ -56,7 +56,8 @@ func TestOffersSetConfirmsShellAndAsksForThePassword(t *testing.T) {
 	if r.code != 0 {
 		t.Fatalf("code %d %q %q", r.code, r.stdout, r.stderr)
 	}
-	if !strings.Contains(r.stdout, shellWarning) || !strings.Contains(r.stdout, "Offer trainer to mac: /work/glow-v2/train (shell, tasks-auto).") ||
+	if !strings.Contains(r.stdout, shellWarning) || !strings.Contains(r.stdout, "including talking to the local cravv-connect daemon without a token, reading ~/.cravv-connect, and editing your ~/.claude settings") ||
+		!strings.Contains(r.stdout, "Offer trainer to mac: /work/glow-v2/train (shell, tasks-auto).") ||
 		!strings.Contains(r.stdout, "new:trainer") {
 		t.Fatalf("stdout %q", r.stdout)
 	}

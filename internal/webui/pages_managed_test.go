@@ -43,7 +43,8 @@ func TestManagedPageShowsSessionsAndOffers(t *testing.T) {
 		"<code>/srv/&lt;b&gt;train&lt;/b&gt;</code>", "<td>shell</td><td>tasks-auto</td>",
 		"2 open, 30 runs an hour, 200 a day, run 30m0s, idle 2h0m0s",
 		`<option value="mac">mac</option>`, `<option value="edit-in-folder">edit-in-folder</option>`,
-		"Run mode shell: the peer can run commands as your user on this machine.")
+		"Run mode shell: the peer can run commands as your user on this machine.",
+		"A shell run can do anything your user can, including talking to the local cravv-connect daemon without a token, reading ~/.cravv-connect, and editing your ~/.claude settings.")
 	if strings.Contains(page, `<option value="tasks-ask">`) {
 		t.Fatal("tasks-ask is offered for a managed session, which has no human to ask")
 	}

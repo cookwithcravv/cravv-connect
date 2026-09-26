@@ -15,7 +15,9 @@ import (
 func init() { Register(newOffersCmd) }
 
 // shellWarning is shown before the typed confirmation of run mode shell.
-const shellWarning = "Run mode shell: the peer can run commands as your user on this machine."
+const shellWarning = "Run mode shell: the peer can run commands as your user on this machine. " +
+	"A shell run can do anything your user can, including talking to the local cravv-connect daemon without a token, " +
+	"reading ~/.cravv-connect, and editing your ~/.claude settings."
 
 func newOffersCmd(env *Env) *cobra.Command {
 	cmd := &cobra.Command{
