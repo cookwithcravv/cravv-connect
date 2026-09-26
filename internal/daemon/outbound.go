@@ -74,6 +74,10 @@ func NewOutbound(id *keys.Identity, peers store.PeerStore, outbox store.OutboxSt
 	}
 }
 
+// ErrNoLinkID is returned by SendEnvelope for a link-scoped kind (chat,
+// task.*, file.offer) without a link ID: v2 peers drop such envelopes.
+var ErrNoLinkID = errors.New("link-scoped message without a link")
+
 // SendEnvelope builds an envelope and stores it in the outbox. While the kill switch is
 // on it still enqueues (so task.update notices such as expired are not lost) but the
 // send loop sends nothing until resume; refusing agent sends while killed is the IPC
@@ -86,6 +90,9 @@ func NewOutbound(id *keys.Identity, peers store.PeerStore, outbox store.OutboxSt
 func (o *Outbound) SendEnvelope(ctx context.Context, to core.MachineID, kind core.Kind, linkID string, body any) (string, error) {
 	if kind.Ephemeral() {
 		return "", fmt.Errorf("%s is sent directly, never through the outbox", kind)
+	}
+	if kind.LinkScoped() && linkID == "" {
+		return "", fmt.Errorf("%s needs a link: %w", kind, ErrNoLinkID)
 	}
 	peer, err := o.peers.GetPeer(ctx, to)
 	if err != nil {

@@ -155,7 +155,7 @@ func settle(t *testing.T, clock *core.FakeClock, nodes ...*simNode) {
 
 func sendChat(t *testing.T, from *simNode, to *simNode, text string) string {
 	t.Helper()
-	id, err := from.out.SendEnvelope(context.Background(), to.id.MachineID(), core.KindChat, "", core.ChatBody{Text: text})
+	id, err := from.out.SendEnvelope(context.Background(), to.id.MachineID(), core.KindChat, "01JLINK", core.ChatBody{Text: text})
 	if err != nil {
 		t.Fatal(err)
 	}

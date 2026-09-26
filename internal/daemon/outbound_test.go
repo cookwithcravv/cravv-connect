@@ -232,7 +232,7 @@ func TestOutboundPausedPeer(t *testing.T) {
 	p := f.gpu.rec
 	p.Paused = true
 	mustPut(t, f.peers, p)
-	if _, err := f.o.SendEnvelope(ctx, p.MachineID, core.KindChat, "", core.ChatBody{Text: "x"}); !errors.Is(err, core.ErrPaused) {
+	if _, err := f.o.SendEnvelope(ctx, p.MachineID, core.KindChat, "01JLINK", core.ChatBody{Text: "x"}); !errors.Is(err, core.ErrPaused) {
 		t.Fatalf("send to paused peer err = %v, want ErrPaused", err)
 	}
 	if _, err := f.o.SendEnvelope(ctx, p.MachineID, core.KindControlResumed, "", core.EmptyBody{}); err != nil {
@@ -285,7 +285,7 @@ func TestOutboundOfflineAndKilled(t *testing.T) {
 	// While killed, envelopes (such as task.update expired) are queued, not
 	// dropped; nothing leaves until resume. SendDirect bypasses the outbox and
 	// is refused.
-	late, err := f.o.SendEnvelope(context.Background(), f.gpu.rec.MachineID, core.KindTaskUpdate, "", core.TaskUpdateBody{TaskID: "T", State: core.TaskExpired})
+	late, err := f.o.SendEnvelope(context.Background(), f.gpu.rec.MachineID, core.KindTaskUpdate, "01JLINK", core.TaskUpdateBody{TaskID: "T", State: core.TaskExpired})
 	if err != nil {
 		t.Fatalf("SendEnvelope while killed err = %v", err)
 	}
@@ -308,7 +308,7 @@ func TestOutboundOfflineAndKilled(t *testing.T) {
 
 func TestOutboundUnknownPeer(t *testing.T) {
 	f := newOutboundFixture(t)
-	if _, err := f.o.SendEnvelope(context.Background(), core.MachineID("nobody"), core.KindChat, "", core.ChatBody{}); !errors.Is(err, core.ErrNotFound) {
+	if _, err := f.o.SendEnvelope(context.Background(), core.MachineID("nobody"), core.KindChat, "01JLINK", core.ChatBody{}); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
@@ -337,7 +337,7 @@ func TestOutboundMarkDeliveredOnlyForSender(t *testing.T) {
 	other := newTestPeer(t, "other")
 	mustPut(t, f.peers, other.rec)
 	mine := f.send(t, "to gpu")
-	theirs, err := f.o.SendEnvelope(ctx, other.rec.MachineID, core.KindChat, "", core.ChatBody{Text: "to other"})
+	theirs, err := f.o.SendEnvelope(ctx, other.rec.MachineID, core.KindChat, "01JLINK", core.ChatBody{Text: "to other"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +411,7 @@ func TestOutboundRunWakesOnSend(t *testing.T) {
 func TestOutboundRejectsOversizedEnvelope(t *testing.T) {
 	f := newOutboundFixture(t)
 	big := strings.Repeat("a", core.MaxFrameBytes+1)
-	_, err := f.o.SendEnvelope(context.Background(), f.gpu.rec.MachineID, core.KindChat, "", core.ChatBody{Text: big})
+	_, err := f.o.SendEnvelope(context.Background(), f.gpu.rec.MachineID, core.KindChat, "01JLINK", core.ChatBody{Text: big})
 	if !errors.Is(err, core.ErrTooLarge) {
 		t.Fatalf("SendEnvelope = %v, want ErrTooLarge", err)
 	}
@@ -556,5 +556,23 @@ func TestOutboundNotAllowedJustAfterPairingIsTransient(t *testing.T) {
 	f.pass(t)
 	if !mustGetPeer(t, f.peers, f.gpu.rec.MachineID).PausedByPeer {
 		t.Fatal("not_allowed after the grace period did not mark the peer")
+	}
+}
+
+// v2 never sends chat, task.* or file.offer without a link: a v1 leftover
+// that tried would be dropped by the peer's LinkGate anyway.
+func TestOutboundRefusesLinklessLinkScopedKinds(t *testing.T) {
+	f := newOutboundFixture(t)
+	ctx := context.Background()
+	for _, kind := range []core.Kind{core.KindChat, core.KindTaskCreate, core.KindTaskUpdate, core.KindTaskCancel, core.KindFileOffer} {
+		if _, err := f.o.SendEnvelope(ctx, f.gpu.rec.MachineID, kind, "", core.EmptyBody{}); err == nil {
+			t.Errorf("%s without a link was enqueued", kind)
+		}
+	}
+	if n := f.outbox.len(); n != 0 {
+		t.Fatalf("outbox has %d items after refused sends", n)
+	}
+	if _, err := f.o.SendEnvelope(ctx, f.gpu.rec.MachineID, core.KindLinkClosed, "", core.LinkClosedBody{LinkID: "01JLINK"}); err != nil {
+		t.Fatalf("link control kinds carry no link_id: %v", err)
 	}
 }

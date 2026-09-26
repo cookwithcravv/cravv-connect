@@ -311,7 +311,7 @@ func TestKillBlocksOutboundAndPersists(t *testing.T) {
 	sent += 2
 	// Envelopes are still queued while killed (the IPC layer refuses agent sends);
 	// nothing leaves until resume.
-	if _, err := d.Outbound().SendEnvelope(ctx, peer.rec.MachineID, core.KindChat, "", core.ChatBody{Text: "x"}); err != nil {
+	if _, err := d.Outbound().SendEnvelope(ctx, peer.rec.MachineID, core.KindChat, "01JLINK", core.ChatBody{Text: "x"}); err != nil {
 		t.Fatalf("enqueue while killed err = %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -512,7 +512,7 @@ func TestSendToPausedPeers(t *testing.T) {
 	d2Eventually(t, "connection", func() bool { _, ok := d.Mailbox(); return ok })
 	base := relay.box(0).sendCount()
 
-	if _, err := d.Outbound().SendEnvelope(ctx, muted.rec.MachineID, core.KindChat, "", core.ChatBody{Text: "x"}); !errors.Is(err, core.ErrPaused) {
+	if _, err := d.Outbound().SendEnvelope(ctx, muted.rec.MachineID, core.KindChat, "01JLINK", core.ChatBody{Text: "x"}); !errors.Is(err, core.ErrPaused) {
 		t.Fatalf("send to a peer we paused err = %v", err)
 	}
 	session := d2Share(t, d.Shared(), "lead")
@@ -521,7 +521,7 @@ func TestSendToPausedPeers(t *testing.T) {
 	if _, err := d.Tasks().Create(ctx, session.ID, "/w", mutedLink.Num, "x", nil); !errors.Is(err, core.ErrPaused) {
 		t.Fatalf("task to a peer we paused err = %v", err)
 	}
-	if _, err := d.Outbound().SendEnvelope(ctx, away.rec.MachineID, core.KindChat, "", core.ChatBody{Text: "hi"}); err != nil {
+	if _, err := d.Outbound().SendEnvelope(ctx, away.rec.MachineID, core.KindChat, "01JLINK", core.ChatBody{Text: "hi"}); err != nil {
 		t.Fatalf("send to a peer that paused us: %v", err)
 	}
 	if _, err := d.Tasks().Create(ctx, session.ID, "/w", awayLink.Num, "later", nil); err != nil {
@@ -764,7 +764,7 @@ func TestKillFlushWindowIsClosed(t *testing.T) {
 	}
 
 	relay.gate.Store(true)
-	if _, err := d.Outbound().SendEnvelope(ctx, peer.rec.MachineID, core.KindChat, "", core.ChatBody{Text: "slow"}); err != nil {
+	if _, err := d.Outbound().SendEnvelope(ctx, peer.rec.MachineID, core.KindChat, "01JLINK", core.ChatBody{Text: "slow"}); err != nil {
 		t.Fatal(err)
 	}
 	<-relay.entered // the send loop is stuck in Send, so the kill flush waits

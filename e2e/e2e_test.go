@@ -635,6 +635,52 @@ func TestStalePrekeyResend(t *testing.T) {
 	_ = lead
 }
 
+// sendRaw seals env from a to its recipient and posts it straight to the
+// relay, bypassing a's outbox (which refuses what a v2 machine never sends).
+func sendRaw(t *testing.T, a *Node, env core.Envelope) {
+	t.Helper()
+	ctx := context.Background()
+	to, _, err := a.Daemon.Peers().Resolve(ctx, string(env.ToMachine))
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := sealing.Seal(a.Daemon.Identity(), keys.SignedPrekeyFromWire(to.Prekey), env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := frame.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mb, ok := a.Daemon.Mailbox()
+	if !ok {
+		t.Fatal(a.Name + " offline")
+	}
+	if st, err := mb.Send(ctx, to.MachineID, env.ID, raw); err != nil || st != transport.SendQueued {
+		t.Fatalf("send: %v %v", st, err)
+	}
+}
+
+// sendAsV1 sends a link-scoped kind from a to b without a link_id, the way a
+// v1 peer does.
+func sendAsV1(t *testing.T, a, b *Node, kind core.Kind, body any) {
+	t.Helper()
+	env, err := core.NewEnvelope(a.Clock, a.Daemon.Identity().MachineID(), b.Daemon.Identity().MachineID(), kind, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sendRaw(t, a, env)
+}
+
+func olderNotice(n *Node, alias string) bool {
+	for _, e := range n.Status().Errors {
+		if strings.Contains(e, alias+" runs an older cravv-connect") {
+			return true
+		}
+	}
+	return false
+}
+
 // v1 peers send chat, task.* and file.offer without a link_id. A v2 machine
 // drops them and answers control.unsupported (at most once an hour); both
 // humans see why in status.
@@ -642,16 +688,10 @@ func TestLinklessV1TrafficGetsControlUnsupported(t *testing.T) {
 	t.Parallel()
 	_, a, b := NewPair(t)
 	trainer := b.Share("claude", "trainer", "all-peers")
-	ctx := context.Background()
-	bobID := b.Daemon.Identity().MachineID()
 	for i := range 3 {
-		if _, err := a.Daemon.Outbound().SendEnvelope(ctx, bobID, core.KindChat, "", core.ChatBody{Text: fmt.Sprintf("v1 chat %d", i)}); err != nil {
-			t.Fatal(err)
-		}
+		sendAsV1(t, a, b, core.KindChat, core.ChatBody{Text: fmt.Sprintf("v1 chat %d", i)})
 	}
-	if _, err := a.Daemon.Outbound().SendEnvelope(ctx, bobID, core.KindTaskCreate, "", core.TaskCreateBody{TaskID: core.NewID(), Instructions: "v1 task"}); err != nil {
-		t.Fatal(err)
-	}
+	sendAsV1(t, a, b, core.KindTaskCreate, core.TaskCreateBody{TaskID: core.NewID(), Instructions: "v1 task"})
 	Eventually(t, wait, "alice is told bob needs protocol 2", func() bool {
 		for _, e := range a.Status().Errors {
 			if strings.Contains(e, "bob needs cravv-connect protocol 2") {
@@ -660,20 +700,13 @@ func TestLinklessV1TrafficGetsControlUnsupported(t *testing.T) {
 		}
 		return false
 	})
-	st := b.Status()
-	found := false
-	for _, e := range st.Errors {
-		if strings.Contains(e, "alice runs an older cravv-connect") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("bob's status errors %v", st.Errors)
+	if !olderNotice(b, "alice") {
+		t.Fatalf("bob's status errors %v", b.Status().Errors)
 	}
 	if items := Inbox(t, trainer.C); len(items) != 0 {
 		t.Fatalf("link-less traffic reached a session: %+v", items)
 	}
-	if st.PendingApprovals != 0 {
+	if st := b.Status(); st.PendingApprovals != 0 {
 		t.Fatal("a link-less task is waiting for approval")
 	}
 }

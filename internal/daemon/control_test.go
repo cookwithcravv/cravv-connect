@@ -57,7 +57,7 @@ func (f *controlFixture) handle(t *testing.T, kind core.Kind, body any) error {
 
 func (f *controlFixture) sendTo(t *testing.T, to core.MachineID) string {
 	t.Helper()
-	id, err := f.out.SendEnvelope(context.Background(), to, core.KindChat, "", core.ChatBody{Text: "x"})
+	id, err := f.out.SendEnvelope(context.Background(), to, core.KindChat, "01JLINK", core.ChatBody{Text: "x"})
 	if err != nil {
 		t.Fatal(err)
 	}
