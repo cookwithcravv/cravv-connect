@@ -240,7 +240,12 @@ Every run also:
 
   For those, the form says "needs your password: run `cravv-connect approve <id>` or open the UI". This is the tiered gate from section 10.
 - **After approval.** A task accepted through elicitation is not asked about again. The MCP instructions state that accepted tasks were approved by the human.
-- **Fallback** when the client can't show elicitation: the item stays pending, and `review_pending` returns the CLI and UI paths.
+- **Only a real answer counts.** An elicitation result counts as a decision only when `action` is `accept` and `content.decision` is `accept` or `reject`. A bare `decline` or `cancel` means "the form was not shown or was dismissed", and the item stays pending. Phase 0 found that the VS Code extension auto-declines without showing the form, so this matters.
+- **Confirmation-code fallback** (for the VS Code extension and other clients that can't show forms):
+  - The daemon raises a desktop notification that shows the request and a 4-digit single-use code. The code is valid for 10 minutes and allows at most 3 wrong tries.
+  - The human types it in the chat ("accept 4821"), and the agent passes it to `review_pending(item, code)`.
+  - The model never sees the code. The gate is equivalent to elicitation: human-only relative to the model, and bounded to the same decision tier.
+- **Where neither works** (for example a headless Linux box over SSH): the item stays pending, and `review_pending` returns the CLI and web UI paths.
 
 ### 7.3 MCP tools (replacing the v1 set)
 
@@ -353,7 +358,7 @@ Inbox, tasks and files are scoped by `(session_id, link_id)`.
 
 ## 11. Phases
 
-0. **Feasibility check** on the real Mac (CLI and VS Code) and the GPU box:
+0. **Feasibility check. Done on 2026-09-26; results in section 12.** Originally planned for the real Mac (CLI and VS Code) and the GPU box:
    - Does a background command exit wake an idle session, in each client?
    - Channels.
    - Server-initiated notifications and elicitation outside a tool call.
@@ -369,3 +374,18 @@ Inbox, tasks and files are scoped by `(session_id, link_id)`.
 4. **Setup.** The wizard, join codes, the release workflow and `install.sh`.
 5. **Web UI.**
 6. **E2E and docs.** The new model end to end, and updated README, security and protocol docs.
+
+## 12. Phase 0 results (2026-09-26, Claude Code 2.1.283, macOS)
+
+| Check | Terminal CLI | VS Code extension | Headless `-p` |
+|---|---|---|---|
+| A background command exiting wakes an idle chat | Yes | Yes | n/a |
+| Elicitation form shown to the human | Yes (accept/decline; the human chooses) | No: auto-declined without showing, in manual and auto modes | Auto-cancelled |
+| `--session-id <uuid>` and `--resume <id>` continuity | | | Yes (a chosen ID persists across runs) |
+| `--strict-mcp-config`, `--disallowedTools`, `--allowedTools` present | Yes | | |
+
+**Decisions from these results:**
+- The listener is the primary wake-up in both clients. Channels are not needed in v2.
+- Elicitation is used where supported. Everywhere else the confirmation-code fallback (section 7.2) applies, and a bare decline is never treated as a decision.
+- Managed sessions use a daemon-chosen `--session-id`.
+- `--max-turns` was not listed in `--help`, so run caps rely on `run_timeout` plus the per-hour and per-day caps. `--max-turns` is used only if a later Claude version documents it.
