@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"time"
 
@@ -149,6 +150,38 @@ func (d *DB) AddRun(ctx context.Context, r store.ManagedRun) error {
 	_, err := d.sql.ExecContext(ctx, `INSERT INTO managed_runs (id, session_id, peer, link_id, started_at) VALUES (?, ?, ?, ?, ?)`,
 		r.ID, r.SessionID, string(r.Peer), r.LinkID, toMS(r.StartedAt))
 	return err
+}
+
+// AddRunCapped counts and inserts in one BEGIN IMMEDIATE transaction, so
+// concurrent starts cannot both see room under a cap.
+func (d *DB) AddRunCapped(ctx context.Context, r store.ManagedRun, caps store.RunCaps) (store.RunCap, error) {
+	capped := store.RunCapNone
+	err := inTx(ctx, d.sql, func(tx *sql.Tx) error {
+		var link, peer int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM managed_runs WHERE link_id = ? AND started_at >= ?`,
+			r.LinkID, toMS(caps.LinkSince)).Scan(&link); err != nil {
+			return err
+		}
+		if link >= caps.PerLink {
+			capped = store.RunCapLink
+			return nil
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM managed_runs WHERE peer = ? AND started_at >= ?`,
+			string(r.Peer), toMS(caps.PeerSince)).Scan(&peer); err != nil {
+			return err
+		}
+		if peer >= caps.PerPeer {
+			capped = store.RunCapPeer
+			return nil
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO managed_runs (id, session_id, peer, link_id, started_at) VALUES (?, ?, ?, ?, ?)`,
+			r.ID, r.SessionID, string(r.Peer), r.LinkID, toMS(r.StartedAt))
+		return err
+	})
+	if err != nil {
+		return store.RunCapNone, err
+	}
+	return capped, nil
 }
 
 func (d *DB) CountRuns(ctx context.Context, f store.RunFilter) (int, error) {

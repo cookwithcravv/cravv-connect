@@ -58,6 +58,25 @@ type RunFilter struct {
 	Since  time.Time // StartedAt >= Since
 }
 
+// RunCaps are the limits AddRunCapped enforces: at most PerLink runs on
+// the run's link since LinkSince, and at most PerPeer runs for its machine
+// since PeerSince.
+type RunCaps struct {
+	PerLink   int
+	LinkSince time.Time
+	PerPeer   int
+	PeerSince time.Time
+}
+
+// RunCap names the cap that refused a run.
+type RunCap int
+
+const (
+	RunCapNone RunCap = iota // the run was recorded
+	RunCapLink               // the per-link cap
+	RunCapPeer               // the per-machine cap
+)
+
 // ErrOfferLabelTaken is returned when the peer already has an offer with the label.
 var ErrOfferLabelTaken = errors.New("this machine already has an offer with that label")
 
@@ -77,6 +96,9 @@ type OfferStore interface {
 	ListManaged(ctx context.Context) ([]ManagedSession, error)                // oldest first
 
 	AddRun(ctx context.Context, r ManagedRun) error
+	// AddRunCapped records r only if neither cap is reached, checking and
+	// recording in one transaction; it returns the cap that refused it.
+	AddRunCapped(ctx context.Context, r ManagedRun, caps RunCaps) (RunCap, error)
 	CountRuns(ctx context.Context, f RunFilter) (int, error)
 	PurgeRunsBefore(ctx context.Context, t time.Time) (int, error)
 }

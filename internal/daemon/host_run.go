@@ -182,27 +182,30 @@ func (h *SessionHost) handle(ctx context.Context, id string, e InboxEntry) {
 		_ = h.Close(ctx, id, "offer removed")
 		return
 	}
-	now := h.d.Clock.Now()
-	hour, err := h.d.Store.CountRuns(ctx, store.RunFilter{LinkID: l.ID, Since: now.Add(-time.Hour)})
-	if err != nil {
-		return
-	}
-	day, err := h.d.Store.CountRuns(ctx, store.RunFilter{Peer: m.Peer, Since: now.Add(-24 * time.Hour)})
-	if err != nil {
-		return
-	}
-	switch {
-	case hour >= o.RunsPerHour:
-		h.refuse(ctx, sess, l, taskID, ReasonRateLimited, fmt.Sprintf("at most %d runs an hour on this link", o.RunsPerHour))
-		return
-	case day >= o.RunsPerDay:
-		h.refuse(ctx, sess, l, taskID, ReasonRateLimited, fmt.Sprintf("at most %d runs a day for this machine", o.RunsPerDay))
-		return
-	}
 	if err := h.d.Offers.Folders().Recheck(o); err != nil {
 		h.d.Log.Warn("managed run refused: its folder no longer passes the checks", "session", sess.Name, "err", err)
 		h.refuse(ctx, sess, l, taskID, ReasonFolderRefused, "the folder of this offer changed; its owner must set the offer again")
 		_ = h.Close(ctx, id, "folder refused")
+		return
+	}
+	// The caps are checked and the run recorded in one transaction, so
+	// runs starting at once for the same machine cannot all see room.
+	// The hourly cap counts runs on this link; a new link (a new managed
+	// session) starts from zero, and the daily cap per machine bounds that.
+	now := h.d.Clock.Now()
+	runID := core.NewIDAt(h.d.Clock)
+	capped, err := h.d.Store.AddRunCapped(ctx, store.ManagedRun{ID: runID, SessionID: sess.ID, Peer: m.Peer, LinkID: l.ID, StartedAt: now},
+		store.RunCaps{PerLink: o.RunsPerHour, LinkSince: now.Add(-time.Hour), PerPeer: o.RunsPerDay, PeerSince: now.Add(-24 * time.Hour)})
+	if err != nil {
+		h.d.Log.Warn("record run", "err", err)
+		return
+	}
+	switch capped {
+	case store.RunCapLink:
+		h.refuse(ctx, sess, l, taskID, ReasonRateLimited, fmt.Sprintf("at most %d runs an hour on this link", o.RunsPerHour))
+		return
+	case store.RunCapPeer:
+		h.refuse(ctx, sess, l, taskID, ReasonRateLimited, fmt.Sprintf("at most %d runs a day for this machine", o.RunsPerDay))
 		return
 	}
 	if taskID != "" {
@@ -210,7 +213,7 @@ func (h *SessionHost) handle(ctx context.Context, id string, e InboxEntry) {
 			return // cancelled, expired or failed meanwhile
 		}
 	}
-	h.run(ctx, m, o, sess, l, e, taskID, stops)
+	h.run(ctx, runID, m, o, sess, l, e, taskID, stops)
 }
 
 // refuse fails a task the host will not run, or tells the sender of a
@@ -240,17 +243,12 @@ func (h *SessionHost) refuse(ctx context.Context, sess store.SharedSession, l st
 	}
 }
 
-// run runs the agent for item e and finishes the bookkeeping: each
+// run runs the agent for item e (run runID, already recorded) and finishes the bookkeeping: each
 // attempt's token and binding end with it, and a task the agent did not
 // finish fails with the reason the run ended. If the agent says the
 // conversation is not what the flags assumed (it already exists, or it
 // does not), the item runs once more the other way.
-func (h *SessionHost) run(ctx context.Context, m store.ManagedSession, o store.Offer, sess store.SharedSession, l store.Link, e InboxEntry, taskID string, stops uint64) {
-	now := h.d.Clock.Now()
-	runID := core.NewIDAt(h.d.Clock)
-	if err := h.d.Store.AddRun(ctx, store.ManagedRun{ID: runID, SessionID: sess.ID, Peer: m.Peer, LinkID: l.ID, StartedAt: now}); err != nil {
-		h.d.Log.Warn("record run", "err", err)
-	}
+func (h *SessionHost) run(ctx context.Context, runID string, m store.ManagedSession, o store.Offer, sess store.SharedSession, l store.Link, e InboxEntry, taskID string, stops uint64) {
 	adapter := h.d.Adapter()
 	h.mu.Lock()
 	notes := h.notes[sess.ID]

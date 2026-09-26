@@ -582,3 +582,55 @@ func TestHostTimeoutDoesNotMarkStarted(t *testing.T) {
 		t.Fatal("a run that timed out before any result must not mark the session started")
 	}
 }
+
+// Two managed sessions of one machine start runs at once under a daily
+// cap of one: exactly one runs (the cap check and the run record are one
+// transaction).
+func TestHostDailyCapHoldsUnderConcurrentStarts(t *testing.T) {
+	ctx := context.Background()
+	e := newHostEnv(t, "ok", func(in *OfferInput) { in.RunsPerDay, in.MaxConcurrent = 1, 2 })
+	linkID := core.NewID()
+	sess, perm, err := e.host.StartManaged(ctx, e.peer, e.offer.ID, linkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := e.st.InsertLink(ctx, store.Link{
+		Peer: e.peer.MachineID, ID: linkID, Direction: store.LinkInbound, Session: sess.ID, RemoteSession: core.NewID(),
+		RemoteName: "lead", PermissionIn: perm, PermissionOut: core.PermMessages, State: store.LinkActive,
+		CreatedAt: d2Epoch, UpdatedAt: d2Epoch,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := e.task(t, "first")
+	b := core.NewID()
+	if err := e.handle(t, d2Env(t, e.peer, core.KindTaskCreate, second.ID, core.TaskCreateBody{TaskID: b, Instructions: "second"})); err != nil {
+		t.Fatal(err)
+	}
+	e.start(t)
+	limited := 0
+	for _, id := range []string{a, b} {
+		var tk store.Task
+		if id == a {
+			tk = e.finished(t, id)
+		} else {
+			deadline := time.Now().Add(20 * time.Second)
+			for {
+				tk, _ = e.tasks.Get(ctx, sess.ID, id)
+				if tk.State == core.TaskDone || tk.State == core.TaskFailed || time.Now().After(deadline) {
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		}
+		if lastNote(tk) == ReasonRateLimited {
+			limited++
+		}
+	}
+	if limited != 1 {
+		t.Fatalf("%d of two concurrent runs were refused under a daily cap of one", limited)
+	}
+	if n, _ := e.st.CountRuns(ctx, store.RunFilter{Peer: e.peer.MachineID}); n != 1 {
+		t.Fatalf("%d runs recorded", n)
+	}
+}

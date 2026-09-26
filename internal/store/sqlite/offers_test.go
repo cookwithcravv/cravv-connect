@@ -3,7 +3,10 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,5 +142,59 @@ func TestRunCounts(t *testing.T) {
 	}
 	if n, _ := db.CountRuns(ctx, store.RunFilter{}); n != 2 {
 		t.Fatalf("after purge %d runs", n)
+	}
+}
+
+// AddRunCapped checks both caps and records the run in one transaction:
+// concurrent starts can never exceed a cap.
+func TestAddRunCapped(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	caps := store.RunCaps{PerLink: 2, LinkSince: t0, PerPeer: 3, PeerSince: t0}
+	run := func(id, link string) store.ManagedRun {
+		return store.ManagedRun{ID: id, SessionID: "S", Peer: "m1", LinkID: link, StartedAt: t0.Add(time.Minute)}
+	}
+	for i, c := range []struct {
+		r    store.ManagedRun
+		want store.RunCap
+	}{
+		{run("R1", "L1"), store.RunCapNone},
+		{run("R2", "L1"), store.RunCapNone},
+		{run("R3", "L1"), store.RunCapLink},
+		{run("R4", "L2"), store.RunCapNone},
+		{run("R5", "L3"), store.RunCapPeer},
+	} {
+		if got, err := db.AddRunCapped(ctx, c.r, caps); err != nil || got != c.want {
+			t.Fatalf("%d: AddRunCapped = %v, %v; want %v", i, got, err, c.want)
+		}
+	}
+	if n, _ := db.CountRuns(ctx, store.RunFilter{}); n != 3 {
+		t.Fatalf("%d runs recorded, want 3", n)
+	}
+	// Old runs do not count.
+	if got, err := db.AddRunCapped(ctx, run("R6", "L1"), store.RunCaps{PerLink: 1, LinkSince: t0.Add(2 * time.Minute), PerPeer: 9, PeerSince: t0}); err != nil || got != store.RunCapNone {
+		t.Fatalf("a new window: %v, %v", got, err)
+	}
+
+	// Concurrent starts on one link: exactly the cap get through.
+	fresh := newTestDB(t)
+	var wg sync.WaitGroup
+	var added atomic.Int32
+	for i := range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, err := fresh.AddRunCapped(ctx, run(fmt.Sprintf("C%d", i), "L1"), store.RunCaps{PerLink: 5, LinkSince: t0, PerPeer: 100, PeerSince: t0})
+			if err != nil {
+				t.Error(err)
+			}
+			if got == store.RunCapNone {
+				added.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if added.Load() != 5 {
+		t.Fatalf("%d concurrent runs got through a cap of 5", added.Load())
 	}
 }
