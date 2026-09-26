@@ -56,6 +56,10 @@ type AgentAdapter interface {
 	MCPConfig(self string, env map[string]string) ([]byte, error)
 	// Result reads a finished run's stdout.
 	Result(stdout []byte) AgentResult
+	// Conversation reads a failed run's output for the agent saying the
+	// conversation already exists (exists) or does not (!exists); known is
+	// false when it said neither.
+	Conversation(out RunOutcome) (exists, known bool)
 	// OpenArgs are the arguments that open the conversation interactively.
 	OpenArgs(agentSession string) []string
 	// Program is the agent executable.
@@ -195,6 +199,24 @@ func (ClaudeAdapter) Result(stdout []byte) AgentResult {
 		}
 	}
 	return AgentResult{}
+}
+
+// Conversation implements AgentAdapter. claude 2.1.283 exits 1 with
+// "Error: Session ID <uuid> is already in use." for --session-id of a
+// conversation it has, and "No conversation found with session ID: <uuid>"
+// for --resume of one it does not (both on stderr, probed).
+func (ClaudeAdapter) Conversation(out RunOutcome) (exists, known bool) {
+	if out.ExitCode == 0 {
+		return false, false
+	}
+	text := out.Stderr + string(out.Stdout)
+	switch {
+	case strings.Contains(text, "is already in use"):
+		return true, true
+	case strings.Contains(text, "No conversation found"):
+		return false, true
+	}
+	return false, false
 }
 
 // OpenArgs implements AgentAdapter: `claude --resume <uuid>`.

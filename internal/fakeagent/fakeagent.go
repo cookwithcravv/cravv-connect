@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/cravv/cravv-connect/internal/childenv"
@@ -23,6 +24,10 @@ const (
 	EnvMode = "CRAVV_FAKE_AGENT"
 	// EnvLog is a file every run appends its Record to, one JSON line.
 	EnvLog = "CRAVV_FAKE_AGENT_LOG"
+	// EnvSessions is a folder where mode strict keeps the conversations it
+	// has, one empty file per session ID, and fails like claude does for
+	// --session-id of one it has and --resume of one it does not.
+	EnvSessions = "CRAVV_FAKE_AGENT_SESSIONS"
 )
 
 // Record is one run as the fake agent saw it.
@@ -43,7 +48,7 @@ type Record struct {
 // The daemon passes a run only an allowlisted environment; the fake agent
 // reads its mode from these, so a test binary lets them through.
 func init() {
-	childenv.Allow(EnvMode, EnvLog, EnvSocket, EnvProbe)
+	childenv.Allow(EnvMode, EnvLog, EnvSocket, EnvProbe, EnvSessions)
 }
 
 // Main runs the fake agent and exits when EnvMode is set; otherwise it
@@ -76,6 +81,8 @@ func run(mode string) int {
 	}
 	code := 0
 	switch mode {
+	case "strict":
+		code = strict(session, argAfter(os.Args, "--resume") != "")
 	case "ok":
 	case "fail":
 		fmt.Fprintln(os.Stderr, "fake agent: failing on purpose")
@@ -111,6 +118,23 @@ func run(mode string) int {
 		fmt.Println(string(out))
 	}
 	return code
+}
+
+// strict fails the way claude 2.1.283 does when the conversation is not
+// what the flags say, and otherwise records it.
+func strict(session string, resume bool) int {
+	path := filepath.Join(os.Getenv(EnvSessions), session)
+	_, err := os.Stat(path)
+	switch {
+	case resume && err != nil:
+		fmt.Fprintf(os.Stderr, "No conversation found with session ID: %s\n", session)
+		return 1
+	case !resume && err == nil:
+		fmt.Fprintf(os.Stderr, "Error: Session ID %s is already in use.\n", session)
+		return 1
+	}
+	_ = os.WriteFile(path, nil, 0o600)
+	return 0
 }
 
 func argAfter(args []string, flag string) string {

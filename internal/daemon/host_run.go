@@ -240,9 +240,11 @@ func (h *SessionHost) refuse(ctx context.Context, sess store.SharedSession, l st
 	}
 }
 
-// run runs the agent once for item e and finishes the bookkeeping: the
-// run's token and binding end with it, and a task the agent did not finish
-// fails with the reason the run ended.
+// run runs the agent for item e and finishes the bookkeeping: each
+// attempt's token and binding end with it, and a task the agent did not
+// finish fails with the reason the run ended. If the agent says the
+// conversation is not what the flags assumed (it already exists, or it
+// does not), the item runs once more the other way.
 func (h *SessionHost) run(ctx context.Context, m store.ManagedSession, o store.Offer, sess store.SharedSession, l store.Link, e InboxEntry, taskID string, stops uint64) {
 	now := h.d.Clock.Now()
 	runID := core.NewIDAt(h.d.Clock)
@@ -250,18 +252,68 @@ func (h *SessionHost) run(ctx context.Context, m store.ManagedSession, o store.O
 		h.d.Log.Warn("record run", "err", err)
 	}
 	adapter := h.d.Adapter()
+	h.mu.Lock()
+	notes := h.notes[sess.ID]
+	delete(h.notes, sess.ID)
+	h.mu.Unlock()
+	prompt := runPrompt(sess, l, h.alias(ctx, l.Peer), e, taskID, notes)
+	resume := m.Started
+	out, res := h.attempt(ctx, adapter, runID, m, o, sess, resume, prompt, stops)
+	started := m.Started
+	if exists, known := adapter.Conversation(out); known {
+		started = exists
+		if exists != resume && !out.Stopped && !out.TimedOut {
+			h.d.Log.Info("managed run: the agent's conversation was not what the daemon thought; running again", "session", sess.Name, "resume", exists)
+			resume = exists
+			out, res = h.attempt(ctx, adapter, runID, m, o, sess, resume, prompt, stops)
+		}
+	}
+	// Only the agent's own result says the conversation exists now.
+	if res.Parsed && res.SessionID == m.AgentSession {
+		started = true
+	}
+	outcome, reason := runOutcome(out, res)
+	if cur, err := h.d.Store.GetManaged(ctx, sess.ID); err == nil {
+		cur.Started = started
+		cur.LastActive = h.d.Clock.Now()
+		if err := h.d.Store.PutManaged(ctx, cur); err != nil {
+			h.d.Log.Warn("update managed session", "err", err)
+		}
+	}
+	if taskID != "" {
+		if t, err := h.d.Tasks().Get(ctx, sess.ID, taskID); err == nil && (t.State == core.TaskClaimed || t.State == core.TaskRunning) {
+			if reason == "" {
+				reason = ReasonNoResult + ": the run ended without complete_task or fail_task"
+			}
+			if _, err := h.d.Tasks().Fail(ctx, sess.ID, taskID, reason); err != nil {
+				h.d.Log.Warn("fail unfinished task", "err", err)
+			}
+		}
+	}
+	detail := map[string]any{
+		"session": sess.Name, "link": l.Num, "run": runID, "outcome": outcome, "exit_code": out.ExitCode,
+		"duration_ms": out.Duration.Milliseconds(), "turns": res.Turns, "resume": resume, "run_mode": string(o.RunMode),
+	}
+	if taskID != "" {
+		detail["task"] = taskID
+	}
+	_ = h.d.Audit.Record(audit.Event{Type: EvManagedRun, Peer: m.Peer, ItemID: sess.ID, Detail: detail})
+	if out.Stderr != "" && outcome != "ok" {
+		h.d.Log.Info("managed run stderr", "session", sess.Name, "stderr", out.Stderr)
+	}
+}
+
+// attempt starts the agent once: a fresh run token and MCP config, the
+// process group recorded, and everything ended again when it exits.
+func (h *SessionHost) attempt(ctx context.Context, adapter AgentAdapter, runID string, m store.ManagedSession, o store.Offer, sess store.SharedSession, resume bool, prompt string, stops uint64) (RunOutcome, AgentResult) {
 	token := h.tokens.issue(sess.ID)
 	cfg, err := h.writeConfig(adapter, runID, token)
 	out := RunOutcome{Err: err, ExitCode: -1}
 	var res AgentResult
 	if err == nil {
 		h.tokens.setConfig(token, cfg)
-		h.mu.Lock()
-		notes := h.notes[sess.ID]
-		delete(h.notes, sess.ID)
-		h.mu.Unlock()
-		spec := RunSpec{Folder: o.RealFolder, AgentSession: m.AgentSession, Resume: m.Started, RunMode: o.RunMode, MCPConfig: cfg}
-		cmd := adapter.Command(spec, runPrompt(sess, l, h.alias(ctx, l.Peer), e, taskID, notes))
+		spec := RunSpec{Folder: o.RealFolder, AgentSession: m.AgentSession, Resume: resume, RunMode: o.RunMode, MCPConfig: cfg}
+		cmd := adapter.Command(spec, prompt)
 		cmd.OnStart = func(pgid int) { h.startGroup(sess.ID, runID, pgid) }
 		rctx, cancel := context.WithCancel(ctx)
 		if h.beforeStart != nil {
@@ -286,7 +338,7 @@ func (h *SessionHost) run(ctx context.Context, m store.ManagedSession, o store.O
 		h.endGroup(sess.ID, runID)
 		res = adapter.Result(out.Stdout)
 	}
-	// The run is over: its token and binding end before anything else,
+	// The attempt is over: its token and binding end before anything else,
 	// and before the session stops showing as running.
 	h.tokens.revoke(token)
 	h.d.Sessions.UnbindRun(sess.ID)
@@ -296,35 +348,7 @@ func (h *SessionHost) run(ctx context.Context, m store.ManagedSession, o store.O
 	if cfg != "" {
 		_ = os.Remove(cfg)
 	}
-	outcome, reason := runOutcome(out, res)
-	if cur, err := h.d.Store.GetManaged(ctx, sess.ID); err == nil {
-		cur.Started = cur.Started || res.Parsed && res.SessionID == m.AgentSession || out.TimedOut
-		cur.LastActive = h.d.Clock.Now()
-		if err := h.d.Store.PutManaged(ctx, cur); err != nil {
-			h.d.Log.Warn("update managed session", "err", err)
-		}
-	}
-	if taskID != "" {
-		if t, err := h.d.Tasks().Get(ctx, sess.ID, taskID); err == nil && (t.State == core.TaskClaimed || t.State == core.TaskRunning) {
-			if reason == "" {
-				reason = ReasonNoResult + ": the run ended without complete_task or fail_task"
-			}
-			if _, err := h.d.Tasks().Fail(ctx, sess.ID, taskID, reason); err != nil {
-				h.d.Log.Warn("fail unfinished task", "err", err)
-			}
-		}
-	}
-	detail := map[string]any{
-		"session": sess.Name, "link": l.Num, "run": runID, "outcome": outcome, "exit_code": out.ExitCode,
-		"duration_ms": out.Duration.Milliseconds(), "turns": res.Turns, "resume": m.Started, "run_mode": string(o.RunMode),
-	}
-	if taskID != "" {
-		detail["task"] = taskID
-	}
-	_ = h.d.Audit.Record(audit.Event{Type: EvManagedRun, Peer: m.Peer, ItemID: sess.ID, Detail: detail})
-	if out.Stderr != "" && outcome != "ok" {
-		h.d.Log.Info("managed run stderr", "session", sess.Name, "stderr", out.Stderr)
-	}
+	return out, res
 }
 
 // runOutcome names how a run ended, and the failure reason for a task it

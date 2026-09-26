@@ -109,3 +109,20 @@ func TestClaudeResult(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeConversation(t *testing.T) {
+	const uuid = "0b5c2f6e-8a1d-4c3e-9f70-2d6a1b3c4d5e"
+	for _, c := range []struct {
+		out           RunOutcome
+		exists, known bool
+	}{
+		{RunOutcome{ExitCode: 1, Stderr: "Error: Session ID " + uuid + " is already in use.\n"}, true, true},
+		{RunOutcome{ExitCode: 1, Stderr: "No conversation found with session ID: " + uuid + "\n"}, false, true},
+		{RunOutcome{ExitCode: 1, Stderr: "some other failure"}, false, false},
+		{RunOutcome{ExitCode: 0, Stdout: []byte(`{"type":"result","result":"is already in use"}`)}, false, false},
+	} {
+		if exists, known := (ClaudeAdapter{}).Conversation(c.out); exists != c.exists || known != c.known {
+			t.Errorf("Conversation(%q) = %v, %v", c.out.Stderr, exists, known)
+		}
+	}
+}

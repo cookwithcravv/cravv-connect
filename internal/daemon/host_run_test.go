@@ -523,3 +523,62 @@ func TestHostPassesAnAllowlistedEnvironment(t *testing.T) {
 		t.Error("the adapter's own variables must still reach the run")
 	}
 }
+
+// Whether the agent has the conversation is learned from the agent, not
+// guessed: a run whose flags do not match what the agent has is run again
+// once the other way, and Started follows the agent.
+func TestHostLearnsWhetherTheConversationExists(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		name    string
+		started bool // what the daemon believes
+		exists  bool // what the agent has
+	}{
+		{"created by a run that timed out", false, true},
+		{"lost by the agent", true, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			sessions := t.TempDir()
+			t.Setenv(fakeagent.EnvSessions, sessions)
+			e := newHostEnv(t, "strict", nil)
+			m, _ := e.st.GetManaged(ctx, e.sess.ID)
+			m.Started = c.started
+			if err := e.st.PutManaged(ctx, m); err != nil {
+				t.Fatal(err)
+			}
+			if c.exists {
+				if err := os.WriteFile(filepath.Join(sessions, m.AgentSession), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			e.start(t)
+			e.chat(t, "hello")
+			recs := e.runs(t, 2)
+			first, second := "--session-id", "--resume"
+			if c.started {
+				first, second = second, first
+			}
+			if recs[0].Args[1] != first || recs[1].Args[1] != second || recs[1].Args[2] != m.AgentSession {
+				t.Fatalf("runs %q then %q", recs[0].Args[:3], recs[1].Args[:3])
+			}
+			Eventually(t, "the run audited", func() bool {
+				ev := e.audit.ofType(EvManagedRun)
+				return len(ev) == 1 && ev[0].Detail["outcome"] == "ok"
+			})
+			if m, _ := e.st.GetManaged(ctx, e.sess.ID); !m.Started {
+				t.Fatal("the conversation exists now")
+			}
+		})
+	}
+}
+
+// A run that timed out does not count as having created the conversation.
+func TestHostTimeoutDoesNotMarkStarted(t *testing.T) {
+	ctx := context.Background()
+	e := newHostEnv(t, "hang", func(in *OfferInput) { in.RunTimeout = time.Second })
+	e.start(t)
+	e.finished(t, e.task(t, "slow"))
+	if m, _ := e.st.GetManaged(ctx, e.sess.ID); m.Started {
+		t.Fatal("a run that timed out before any result must not mark the session started")
+	}
+}
