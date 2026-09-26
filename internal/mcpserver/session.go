@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cravv/cravv-connect/internal/ipc"
 )
@@ -24,10 +25,24 @@ type Conn interface {
 	Done() <-chan struct{}
 }
 
+// Background reattach schedule, the same as the listener's
+// (cli/cmd_listen.go): waits double from reattachBackoffMin up to
+// reattachBackoffMax.
+var (
+	reattachBackoffMin = time.Second
+	reattachBackoffMax = 30 * time.Second
+)
+
+// reattachAttempt bounds one background reconnect and reattach.
+const reattachAttempt = 10 * time.Second
+
 // Session owns the daemon connection and this MCP process's session
 // registration. It connects lazily, so the MCP server starts (and lists its
 // tools) even when the daemon is down, and it reconnects and re-registers
 // after the daemon restarts; the daemon's reclaim grace keeps the same name.
+// While the chat shares a session, a keeper goroutine reconnects and
+// reattaches as soon as the connection drops, so the session is open again
+// without waiting for the chat's next tool call.
 type Session struct {
 	dial       func(ctx context.Context) (Conn, error)
 	projectDir string
@@ -46,6 +61,12 @@ type Session struct {
 	// pending is set while the current connection still has to take the
 	// session back with the reattach token.
 	pending bool
+	keeping bool // the keeper goroutine runs
+	closed  bool // Close was called: no keeper starts again
+
+	ctx     context.Context // ends at Close; bounds the keeper
+	cancel  context.CancelFunc
+	keepers sync.WaitGroup
 }
 
 // AgentSession returns the agent's own chat ID ("" if unknown).
@@ -53,7 +74,8 @@ func (s *Session) AgentSession() string { return s.agentSession }
 
 // NewSession returns an unconnected session for projectDir.
 func NewSession(dial func(ctx context.Context) (Conn, error), projectDir string) *Session {
-	return &Session{dial: dial, projectDir: projectDir, agent: "agent"}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Session{dial: dial, projectDir: projectDir, agent: "agent", ctx: ctx, cancel: cancel}
 }
 
 // SetAgent records the MCP client's name; it applies to the next
@@ -80,6 +102,60 @@ func (s *Session) SetReattach(token string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reattach, s.pending = token, false
+	if token != "" && !s.keeping && !s.closed {
+		s.keeping = true
+		s.keepers.Add(1)
+		go s.keep()
+	}
+}
+
+// keep reconnects and reattaches whenever the connection drops while the
+// chat shares a session, retrying with backoff. It returns when the token
+// is forgotten (the session closed) or at Close.
+func (s *Session) keep() {
+	defer s.keepers.Done()
+	wait := reattachBackoffMin
+	for {
+		s.mu.Lock()
+		if s.reattach == "" || s.closed {
+			s.keeping = false
+			s.mu.Unlock()
+			return
+		}
+		c, pending := s.conn, s.pending
+		s.mu.Unlock()
+		if c != nil && !pending {
+			select {
+			case <-s.ctx.Done():
+				s.stopKeeping()
+				return
+			case <-c.Done():
+				wait = reattachBackoffMin
+			}
+		}
+		ctx, cancel := context.WithTimeout(s.ctx, reattachAttempt)
+		_, err := s.Connect(ctx)
+		cancel()
+		s.mu.Lock()
+		ok := err == nil && !s.pending
+		s.mu.Unlock()
+		if ok {
+			continue
+		}
+		select {
+		case <-s.ctx.Done():
+			s.stopKeeping()
+			return
+		case <-time.After(wait):
+		}
+		wait = min(2*wait, reattachBackoffMax)
+	}
+}
+
+func (s *Session) stopKeeping() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.keeping = false
 }
 
 // Connect makes sure a live, registered connection exists. A chat that
@@ -196,6 +272,11 @@ func (s *Session) drop(c Conn) {
 // the wake file.
 func (s *Session) Close() {
 	s.RemoveWakeFile()
+	s.cancel()
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.keepers.Wait()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn != nil {

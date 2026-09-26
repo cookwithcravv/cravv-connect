@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -234,5 +236,37 @@ func TestMCPReattachesAfterDaemonRestart(t *testing.T) {
 	Eventually(t, wait, "chat after the restart", func() bool {
 		inbox += ma.call("check_inbox", map[string]any{})
 		return strings.Contains(inbox, "after the restart")
+	})
+}
+
+// The MCP server does not wait for the chat's next tool call to take its
+// session back: when the daemon restarts while the chat is idle, the
+// session is open again within seconds (long before the away grace), and
+// its link is intact on both sides.
+func TestMCPReattachesInTheBackground(t *testing.T) {
+	t.Parallel()
+	_, a, b := NewPair(t)
+	ma := newMCPAgent(t, a)
+	ma.call("session_share", map[string]any{"name": "lead"})
+	sb := b.Share("claude", "trainer", "all-peers")
+	var out ipc.LinkView
+	ma.decode("connect", map[string]any{"target": "bob/trainer", "permission": "messages"}, &out)
+	in := b.WaitLink(wait, "request at bob", func(v ipc.LinkView) bool { return v.State == "pending" && v.Direction == "in" })
+	b.Decide(in.Link, true, "")
+	a.WaitLink(wait, "link active", func(v ipc.LinkView) bool { return v.Link == out.Link && v.State == "active" })
+
+	a.Restart()
+	start := time.Now()
+	Eventually(t, 15*time.Second, "lead open again without a tool call", func() bool {
+		return slices.Contains(a.Status().Sessions, "lead (open)")
+	})
+	t.Logf("open again after %s", time.Since(start).Round(time.Millisecond))
+	a.WaitLink(wait, "alice's link active", func(v ipc.LinkView) bool { return v.Link == out.Link && v.State == "active" })
+	b.WaitLink(wait, "bob sees lead back", func(v ipc.LinkView) bool { return v.Link == in.Link && v.State == "active" && !v.RemoteAway })
+	sendChat(t, sb.C, in.Link, "back in the background")
+	var inbox string
+	Eventually(t, wait, "chat after the restart", func() bool {
+		inbox += ma.call("check_inbox", map[string]any{})
+		return strings.Contains(inbox, "back in the background")
 	})
 }
