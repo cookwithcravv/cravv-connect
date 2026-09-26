@@ -91,6 +91,29 @@ func TestLinkRequestAcceptedWithPassword(t *testing.T) {
 	wantKind(t, TryCall(other.C, ipc.MethodLinkDisconnect, ipc.LinkParams{Link: in.Link}, nil), ipc.KindNotFound)
 }
 
+// An agent chat that has not shared a session, or has closed the one it
+// shared, cannot see, restrict or disconnect another session's link. Only a
+// human connection (no registered agent session) sees every link.
+func TestUnsharedChatCannotReachOtherLinks(t *testing.T) {
+	t.Parallel()
+	_, a, b := NewPair(t)
+	l := LinkUp(t, a, b, "tasks-ask")
+	unshared, _ := b.Session("codex")
+	closed := b.Share("codex", "scratch", "private")
+	Call(t, closed.C, ipc.MethodSessionClose, nil, nil)
+	for what, c := range map[string]*ipc.Client{"unshared": unshared, "closed": closed.C} {
+		wantKind(t, TryCall(c, ipc.MethodLinks, nil, nil), ipc.KindNotShared)
+		wantKind(t, TryCall(c, ipc.MethodLinkRestrict, ipc.LinkPermissionParams{Link: l.BNum, Permission: "messages"}, nil), ipc.KindNotShared)
+		wantKind(t, TryCall(c, ipc.MethodLinkDisconnect, ipc.LinkParams{Link: l.BNum}, nil), ipc.KindNotShared)
+		if got := b.Link(l.BNum); got.State != "active" || got.PermissionIn != "tasks-ask" {
+			t.Fatalf("%s chat changed the link: %+v", what, got)
+		}
+	}
+	if n := len(b.AllLinks()); n != 1 {
+		t.Fatalf("the human sees %d links, want 1", n)
+	}
+}
+
 func TestDisconnectClosesBothSides(t *testing.T) {
 	t.Parallel()
 	_, a, b := NewPair(t)

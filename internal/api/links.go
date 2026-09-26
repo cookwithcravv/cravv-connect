@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 
+	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/ipc"
 )
 
@@ -18,11 +19,16 @@ func (h *handlers) registerLinks(s *ipc.Server) {
 }
 
 // scope is the shared session a connection acts for: its own session when it
-// shared one, "" (every link) otherwise. A connection whose session was taken
-// over by a reattach is scoped to nothing it can reach.
+// shared one, "" (every link) for a human connection with no registered agent
+// session. An agent connection that has not shared a session, or has closed
+// it, acts for none and gets core.ErrNotShared. A connection whose session was
+// taken over by a reattach is scoped to nothing it can reach.
 func (h *handlers) scope(ctx context.Context, cs *ipc.ConnState) (string, error) {
 	id := cs.Shared()
 	if id == "" {
+		if cs.Session() != "" {
+			return "", core.ErrNotShared
+		}
 		return "", nil
 	}
 	if err := h.p.Shared.Current(ctx, id, cs.ID()); err != nil {

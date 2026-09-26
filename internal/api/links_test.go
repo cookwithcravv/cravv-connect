@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,5 +117,40 @@ func TestLinkMethodsScopeAndGates(t *testing.T) {
 	}
 	if got := lw.last(); got != "listen w 5s" {
 		t.Fatalf("listen call %q", got)
+	}
+}
+
+// An agent connection that has not shared a session (or closed the one it
+// shared) acts for no session, so it must not fall back to every link the
+// way a human CLI connection does.
+func TestUnsharedAgentGetsNoLinks(t *testing.T) {
+	h := newHarness(t)
+	lw := h.w.lw
+	check := func(c *ipc.Client, when string) {
+		t.Helper()
+		if err := c.Call(bg, ipc.MethodLinks, nil, nil); !errors.Is(err, core.ErrNotShared) {
+			t.Fatalf("links %s: %v", when, err)
+		}
+		if err := c.Call(bg, ipc.MethodLinkDisconnect, ipc.LinkParams{Link: 3}, nil); !errors.Is(err, core.ErrNotShared) {
+			t.Fatalf("disconnect %s: %v", when, err)
+		}
+		if err := c.Call(bg, ipc.MethodLinkRestrict, ipc.LinkPermissionParams{Link: 3, Permission: "messages"}, nil); !errors.Is(err, core.ErrNotShared) {
+			t.Fatalf("restrict %s: %v", when, err)
+		}
+	}
+	agent := h.session(t)
+	check(agent, "before sharing")
+
+	c := h.shared(t)
+	if err := c.Call(bg, ipc.MethodSessionClose, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	check(c, "after session_close")
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	for _, call := range lw.calls {
+		if strings.HasPrefix(call, "links") || strings.HasPrefix(call, "disconnect") || strings.HasPrefix(call, "restrict") {
+			t.Fatalf("an unshared agent reached the link service: %q", call)
+		}
 	}
 }
