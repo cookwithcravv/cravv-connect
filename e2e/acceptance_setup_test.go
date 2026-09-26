@@ -225,7 +225,7 @@ func (m *freshMachine) Install(_ context.Context, bin string) error {
 	}
 	desk := &Desktop{}
 	opts := daemon.Options{
-		Paths: m.paths, Config: cfg, Clock: core.SystemClock{}, Relay: rc,
+		Paths: m.paths, Config: cfg, Version: cli.BuildVersion(), Clock: core.SystemClock{}, Relay: rc,
 		Verifier: auth.Fake{Password: Password}, Desktop: desk, Username: "tester",
 		IdentityStore: func(s store.SettingsStore) daemon.IdentityStore {
 			return daemon.SettingsIdentityStore{Settings: s}

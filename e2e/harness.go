@@ -21,6 +21,7 @@ import (
 
 	"github.com/cravv/cravv-connect/internal/app"
 	"github.com/cravv/cravv-connect/internal/auth"
+	"github.com/cravv/cravv-connect/internal/cli"
 	"github.com/cravv/cravv-connect/internal/config"
 	"github.com/cravv/cravv-connect/internal/core"
 	"github.com/cravv/cravv-connect/internal/daemon"
@@ -290,6 +291,7 @@ func NewNode(t *testing.T, r *Relay, name string, o NodeOptions) *Node {
 	opts := daemon.Options{
 		Paths:    paths,
 		Config:   cfg,
+		Version:  cli.BuildVersion(), // as cravv-connect daemon run passes it
 		Clock:    clock,
 		Verifier: auth.Fake{Password: Password},
 		Desktop:  desk,

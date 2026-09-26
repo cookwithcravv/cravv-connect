@@ -297,7 +297,13 @@ func (s *setup) daemonOnline(install, needRelay bool) (ipc.StatusResult, error) 
 			return ipc.StatusResult{}, err
 		}
 	} else {
-		fmt.Fprintln(s.w, "Daemon is running.")
+		restarted, err := restartOutdated(s.ctx, s.env)
+		if err != nil {
+			return ipc.StatusResult{}, err
+		}
+		if !restarted {
+			fmt.Fprintln(s.w, "Daemon is running.")
+		}
 	}
 	st, err := s.status()
 	if err != nil || !needRelay {

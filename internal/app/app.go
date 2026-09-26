@@ -212,7 +212,7 @@ func (a status) Status(ctx context.Context) (ipc.StatusResult, error) {
 		return ipc.StatusResult{}, err
 	}
 	out := ipc.StatusResult{
-		MachineID: string(s.MachineID), DeviceName: s.DeviceName, RelayURL: s.RelayURL,
+		Version: s.Version, MachineID: string(s.MachineID), DeviceName: s.DeviceName, RelayURL: s.RelayURL,
 		RelayConnected: s.RelayConnected, Killed: s.Killed, Sessions: s.Sessions,
 		OutboxPending: s.OutboxPending, OutboxHeld: s.OutboxHeld, InboxUnread: s.InboxUnread,
 		PendingApprovals: s.PendingApprovals, Errors: s.Errors,

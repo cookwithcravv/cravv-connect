@@ -322,7 +322,7 @@ any local process can run the CLI's.
 | `version` | Print the version |
 | `init --relay <url> [--relay-token <t>] [--name <n>] [--force]` | Write `config.toml`; store the admin token for the first machine. The relay URL must be an origin, `scheme://host[:port]`, with no path. `--force` with a different relay clears this machine's relay registration so it registers again there; peers are not told, so re-pair with them |
 | `daemon run [--log-file <path>]` | Run the daemon in the foreground. Logs JSON to stderr, or with `--log-file` to that file, rotated at 10 MiB with 3 old files kept |
-| `daemon start` / `daemon stop` / `daemon status` | Control the daemon. `stop` asks the daemon over its socket to shut down and waits up to 10 seconds for it to exit; it never signals a process that does not answer on the socket |
+| `daemon start` / `daemon stop` / `daemon status` | Control the daemon. `start` also restarts a running daemon of another version (after an upgrade replaced the binary), and says so: "Restarted the daemon (was v1.2.0, now v2.0.0)"; `setup` does the same. `stop` asks the daemon over its socket to shut down and waits up to 10 seconds for it to exit; it never signals a process that does not answer on the socket |
 | `daemon install` / `daemon uninstall` | Run the daemon at login (launchd or systemd user unit) |
 | `status [--json]` | Relay connection, peers, shared sessions, queues, pending approvals, errors |
 | `pair [--no-qr]` | Show a join code (with a QR code) and pair (password) |

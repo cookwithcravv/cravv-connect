@@ -28,6 +28,7 @@ import (
 type Options struct {
 	Paths    config.Paths
 	Config   config.Config
+	Version  string          // the binary's version, reported by status
 	Clock    core.Clock      // default core.SystemClock
 	Verifier auth.Verifier   // default auth.NewPAM(Config.PAMService or auth.DefaultPAMService())
 	Relay    RelayFactory    // default relayclient.New(Config.RelayURL); nil when no URL
@@ -326,7 +327,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 		PairingConfig{DeviceName: d.opts.Config.DeviceName, RelayURL: d.opts.Config.RelayURL}, clock, lg)
 	registerHandlers(g, d.inbox, d.shared, db)
 	g.status = NewStatusService(StatusDeps{
-		MachineID: id.MachineID(), DeviceName: d.opts.Config.DeviceName, RelayURL: d.opts.Config.RelayURL,
+		Version: d.opts.Version, MachineID: id.MachineID(), DeviceName: d.opts.Config.DeviceName, RelayURL: d.opts.Config.RelayURL,
 		Mailboxes: d, Killed: d.kill.Killed, Peers: db, Outbox: db, Shared: d.shared, Inbox: d.inbox,
 		Tasks: g.tasks, Activity: g.activity,
 		Errors: []func() []string{d.authErrors, d.relayErrors, g.outbound.Errors, inboundWarnings(g.inbound), g.versions.Errors},

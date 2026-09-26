@@ -631,7 +631,7 @@ claimed it yet, so a slow session and a stuck one look different.
  "reason": "", "size": 3148576}
 
 // StatusResult
-{"machine_id": "...", "device_name": "prith-mbp", "relay_url": "https://...",
+{"version": "v2.0.0", "machine_id": "...", "device_name": "prith-mbp", "relay_url": "https://...",
  "relay_connected": true, "killed": false, "peers": [PeerView],
  "sessions": ["lead (open)"], "outbox_pending": 0, "outbox_held": 0,
  "inbox_unread": 3, "pending_approvals": 1}
@@ -656,6 +656,9 @@ claimed it yet, so a slow session and a stuck one look different.
   last heard from since the daemon started.
 - `sessions` in StatusResult lists the shared sessions that are open or
   away as `name (state)`, and `inbox_unread` is summed over them.
+  `version` is the daemon binary's version (a v1 daemon leaves it out):
+  `setup` and `daemon start` restart a running daemon whose version is not
+  their own.
 - File `state` is `held`, `downloading`, `done`, `failed`, `declined`
   (inbound) or `uploading`, `sent`, `failed` (outbound).
 

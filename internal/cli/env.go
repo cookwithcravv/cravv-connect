@@ -61,14 +61,16 @@ type ServiceInstaller interface {
 // DefaultEnv wires the real terminal, socket, store and process functions.
 func DefaultEnv() *Env {
 	env := &Env{
-		Stdin:      os.Stdin,
-		Stdout:     os.Stdout,
-		Stderr:     os.Stderr,
-		Prompt:     TTYPrompter{},
-		Paths:      config.ResolvePaths,
-		Getwd:      os.Getwd,
-		Hostname:   os.Hostname,
-		RunDaemon:  app.Run,
+		Stdin:    os.Stdin,
+		Stdout:   os.Stdout,
+		Stderr:   os.Stderr,
+		Prompt:   TTYPrompter{},
+		Paths:    config.ResolvePaths,
+		Getwd:    os.Getwd,
+		Hostname: os.Hostname,
+		RunDaemon: func(ctx context.Context, paths config.Paths, logger *slog.Logger) error {
+			return app.Run(ctx, paths, logger, BuildVersion())
+		},
 		Spawn:      spawnDetached,
 		Executable: os.Executable,
 		OpenSettings: func(dbPath string) (store.SettingsStore, func() error, error) {

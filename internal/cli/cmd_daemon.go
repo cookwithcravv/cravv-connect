@@ -89,45 +89,101 @@ func daemonUp(ctx context.Context, env *Env) bool {
 func newDaemonStartCmd(env *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "start",
-		Short: "Start the daemon (through launchd or systemd when installed)",
+		Short: "Start the daemon (through launchd or systemd when installed); restarts one of another version",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 			if daemonUp(ctx, env) {
+				restarted, err := restartOutdated(ctx, env)
+				if err != nil || restarted {
+					return err
+				}
 				fmt.Fprintln(env.Stdout, "Daemon is already running.")
 				return nil
 			}
-			if env.Service != nil && env.Service.Installed() {
-				if err := env.Service.Start(ctx); err != nil {
-					return err
-				}
-			} else {
-				exe, err := env.Executable()
-				if err != nil {
-					return err
-				}
-				paths, err := env.Paths()
-				if err != nil {
-					return err
-				}
-				// The daemon rotates its own log; the spawn's output file only
-				// catches crash output.
-				if _, err := env.Spawn(exe, []string{"daemon", "run", "--log-file", paths.Log}, paths.StderrLog()); err != nil {
-					return err
-				}
+			if err := startDaemon(ctx, env); err != nil {
+				return err
 			}
-			deadline := time.Now().Add(startWait)
-			for time.Now().Before(deadline) {
-				if daemonUp(ctx, env) {
-					fmt.Fprintln(env.Stdout, "Daemon started.")
-					return nil
-				}
-				time.Sleep(100 * time.Millisecond)
-			}
-			paths, _ := env.Paths()
-			return fmt.Errorf("daemon did not start within %s; see %s and %s", startWait, paths.Log, paths.StderrLog())
+			fmt.Fprintln(env.Stdout, "Daemon started.")
+			return nil
 		},
 	}
+}
+
+// startDaemon starts the daemon (through the login service when installed,
+// else as a detached process) and waits until it answers.
+func startDaemon(ctx context.Context, env *Env) error {
+	if env.Service != nil && env.Service.Installed() {
+		if err := env.Service.Start(ctx); err != nil {
+			return err
+		}
+	} else {
+		exe, err := env.Executable()
+		if err != nil {
+			return err
+		}
+		paths, err := env.Paths()
+		if err != nil {
+			return err
+		}
+		// The daemon rotates its own log; the spawn's output file only
+		// catches crash output.
+		if _, err := env.Spawn(exe, []string{"daemon", "run", "--log-file", paths.Log}, paths.StderrLog()); err != nil {
+			return err
+		}
+	}
+	deadline := time.Now().Add(startWait)
+	for time.Now().Before(deadline) {
+		if daemonUp(ctx, env) {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	paths, _ := env.Paths()
+	return fmt.Errorf("daemon did not start within %s; see %s and %s", startWait, paths.Log, paths.StderrLog())
+}
+
+// daemonStatus returns the running daemon's status; ok is false when no
+// daemon answers.
+func daemonStatus(ctx context.Context, env *Env) (st ipc.StatusResult, ok bool) {
+	c, err := connect(ctx, env)
+	if err != nil {
+		return st, false
+	}
+	defer c.Close()
+	return st, c.Call(ctx, ipc.MethodStatus, nil, &st) == nil
+}
+
+// orUnknown names a version for people: a daemon from before v2 reports none.
+func orUnknown(v string) string {
+	if v == "" {
+		return "unknown"
+	}
+	return v
+}
+
+// restartOutdated restarts a running daemon whose version is not this
+// binary's (an upgrade replaced the binary under it), so the CLI and the
+// daemon speak the same version. A daemon that reports no version (v1)
+// counts as another version. It reports whether it restarted one.
+func restartOutdated(ctx context.Context, env *Env) (bool, error) {
+	st, ok := daemonStatus(ctx, env)
+	now := BuildVersion()
+	if !ok || st.Version == now {
+		return false, nil
+	}
+	if err := stopDaemon(ctx, env); err != nil {
+		return false, fmt.Errorf("restart the daemon (it runs %s, this is %s): %w", orUnknown(st.Version), now, err)
+	}
+	if err := startDaemon(ctx, env); err != nil {
+		return false, fmt.Errorf("restart the daemon (it ran %s, this is %s): %w", orUnknown(st.Version), now, err)
+	}
+	fmt.Fprintf(env.Stdout, "Restarted the daemon (was %s, now %s).\n", orUnknown(st.Version), now)
+	if again, ok := daemonStatus(ctx, env); ok && again.Version != now {
+		fmt.Fprintf(env.Stderr, "Warning: the daemon still reports version %s: its login service runs another binary. "+
+			"Run `cravv-connect daemon install` to point it at this one.\n", terminalSafe(orUnknown(again.Version)))
+	}
+	return true, nil
 }
 
 // stopWait is how long `daemon stop` waits for the daemon to go away.
@@ -139,54 +195,73 @@ func newDaemonStopCmd(env *Env) *cobra.Command {
 		Short: "Stop the daemon",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-			if env.Service != nil && env.Service.Installed() {
-				if err := env.Service.Stop(ctx); err != nil {
-					return err
-				}
+			stopped, err := stopDaemonReport(cmd.Context(), env)
+			if err != nil {
+				return err
+			}
+			if stopped {
 				fmt.Fprintln(env.Stdout, "Daemon stopped.")
-				return nil
-			}
-			paths, err := env.Paths()
-			if err != nil {
-				return err
-			}
-			// Only a daemon that answers on the socket is stopped: a pid file
-			// alone may name an unrelated process that reused the pid.
-			c, err := connect(ctx, env)
-			if err != nil {
+			} else {
 				fmt.Fprintln(env.Stdout, "Daemon is not running.")
-				return nil
 			}
-			err = c.Call(ctx, ipc.MethodStatus, nil, nil)
-			if err == nil {
-				err = c.Call(ctx, ipc.MethodDaemonShutdown, nil, nil)
-			} else if errors.Is(err, ipc.ErrClosed) {
-				c.Close()
-				fmt.Fprintln(env.Stdout, "Daemon is not running.")
-				return nil
-			}
-			c.Close()
-			switch {
-			case err == nil || errors.Is(err, ipc.ErrClosed):
-				if err := waitGone(ctx, func() bool {
-					_, err := os.Stat(paths.Socket)
-					return errors.Is(err, os.ErrNotExist)
-				}); err != nil {
-					return err
-				}
-			case ipc.IsKind(err, ipc.KindBadRequest):
-				// An older daemon without daemon.shutdown: signal the pid it recorded.
-				if err := stopByPID(ctx, paths.PIDFile()); err != nil {
-					return err
-				}
-			default:
-				return err
-			}
-			fmt.Fprintln(env.Stdout, "Daemon stopped.")
 			return nil
 		},
 	}
+}
+
+// stopDaemon stops the daemon if it runs.
+func stopDaemon(ctx context.Context, env *Env) error {
+	_, err := stopDaemonReport(ctx, env)
+	return err
+}
+
+// stopDaemonReport stops the daemon: through the login service when one is
+// installed, then over its socket if a daemon still answers there (one
+// started by hand). It reports whether anything was stopped.
+func stopDaemonReport(ctx context.Context, env *Env) (bool, error) {
+	if env.Service != nil && env.Service.Installed() {
+		if err := env.Service.Stop(ctx); err != nil {
+			return false, err
+		}
+		if !daemonUp(ctx, env) {
+			return true, nil
+		}
+	}
+	paths, err := env.Paths()
+	if err != nil {
+		return false, err
+	}
+	// Only a daemon that answers on the socket is stopped: a pid file
+	// alone may name an unrelated process that reused the pid.
+	c, err := connect(ctx, env)
+	if err != nil {
+		return false, nil
+	}
+	err = c.Call(ctx, ipc.MethodStatus, nil, nil)
+	if err == nil {
+		err = c.Call(ctx, ipc.MethodDaemonShutdown, nil, nil)
+	} else if errors.Is(err, ipc.ErrClosed) {
+		c.Close()
+		return false, nil
+	}
+	c.Close()
+	switch {
+	case err == nil || errors.Is(err, ipc.ErrClosed):
+		if err := waitGone(ctx, func() bool {
+			_, err := os.Stat(paths.Socket)
+			return errors.Is(err, os.ErrNotExist)
+		}); err != nil {
+			return false, err
+		}
+	case ipc.IsKind(err, ipc.KindBadRequest):
+		// An older daemon without daemon.shutdown: signal the pid it recorded.
+		if err := stopByPID(ctx, paths.PIDFile()); err != nil {
+			return false, err
+		}
+	default:
+		return false, err
+	}
+	return true, nil
 }
 
 // waitGone polls gone until it reports true or stopWait passes.

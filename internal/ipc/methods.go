@@ -289,7 +289,10 @@ type FileView struct {
 	Size      int64  `json:"size"`
 }
 
+// StatusResult is the daemon's state. Version is the daemon binary's
+// version; a daemon from before v2 leaves it out.
 type StatusResult struct {
+	Version          string     `json:"version,omitempty"`
 	MachineID        string     `json:"machine_id"`
 	DeviceName       string     `json:"device_name"`
 	RelayURL         string     `json:"relay_url"`

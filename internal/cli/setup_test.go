@@ -151,6 +151,9 @@ type setupRig struct {
 // its login service is installed or started, claude detected and codex not,
 // and https://relay.example.com answering.
 func newSetupRig(t *testing.T, st ipc.StatusResult) *setupRig {
+	if st.Version == "" { // a daemon of this version (TestSetupRestartsAnotherVersion covers others)
+		st.Version = BuildVersion()
+	}
 	fd := newFakeDaemon(t)
 	fd.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, st)
 	return newSetupRigOn(t, fd)

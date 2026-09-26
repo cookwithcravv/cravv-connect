@@ -10,9 +10,9 @@ import (
 
 func init() { Register(newVersionCmd) }
 
-// buildVersion is Version as stamped by the release build, or the module
+// BuildVersion is Version as stamped by the release build, or the module
 // version for `go install ...@vX.Y.Z`, or "dev".
-func buildVersion() string {
+func BuildVersion() string {
 	if Version != "dev" {
 		return Version
 	}
@@ -28,7 +28,7 @@ func newVersionCmd(env *Env) *cobra.Command {
 		Short: "Print the version of this binary",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			fmt.Fprintf(env.Stdout, "cravv-connect %s (%s/%s)\n", buildVersion(), runtime.GOOS, runtime.GOARCH)
+			fmt.Fprintf(env.Stdout, "cravv-connect %s (%s/%s)\n", BuildVersion(), runtime.GOOS, runtime.GOARCH)
 			return nil
 		},
 	}

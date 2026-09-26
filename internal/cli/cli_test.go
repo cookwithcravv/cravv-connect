@@ -375,7 +375,7 @@ func (s *fakeService) Stop(context.Context) error  { s.stopped = true; return ni
 
 func TestDaemonStartUsesServiceOrSpawn(t *testing.T) {
 	fd := newFakeDaemon(t)
-	fd.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, ipc.StatusResult{})
+	fd.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, ipc.StatusResult{Version: BuildVersion()})
 	// Not running yet: the service start is followed by a status probe. Start
 	// serving only when Start is called.
 	svc := &fakeService{}

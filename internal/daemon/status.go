@@ -10,6 +10,7 @@ import (
 
 // DaemonStatus is what `status` reports. The API layer maps it to ipc.StatusResult.
 type DaemonStatus struct {
+	Version          string // the daemon binary's version (Options.Version)
 	MachineID        core.MachineID
 	DeviceName       string
 	RelayURL         string
@@ -33,6 +34,7 @@ type OutboxCounter interface {
 
 // StatusDeps are the StatusService collaborators.
 type StatusDeps struct {
+	Version    string
 	MachineID  core.MachineID
 	DeviceName string
 	RelayURL   string
@@ -57,7 +59,7 @@ func NewStatusService(d StatusDeps) *StatusService { return &StatusService{d: d}
 func (s *StatusService) Status(ctx context.Context) (DaemonStatus, error) {
 	_, connected := s.d.Mailboxes.Mailbox()
 	st := DaemonStatus{
-		MachineID: s.d.MachineID, DeviceName: s.d.DeviceName, RelayURL: s.d.RelayURL,
+		Version: s.d.Version, MachineID: s.d.MachineID, DeviceName: s.d.DeviceName, RelayURL: s.d.RelayURL,
 		RelayConnected: connected, Killed: s.d.Killed(), Online: map[core.MachineID]bool{},
 		LastSeen: map[core.MachineID]time.Time{},
 	}

@@ -15,7 +15,7 @@ func TestVersionCommand(t *testing.T) {
 	}
 	// A test binary has no module version: an unstamped build says dev.
 	Version = "dev"
-	if got := buildVersion(); got != "dev" {
+	if got := BuildVersion(); got != "dev" {
 		t.Fatalf("unstamped build reports %q", got)
 	}
 }

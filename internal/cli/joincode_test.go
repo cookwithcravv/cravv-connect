@@ -23,7 +23,7 @@ func pairDaemon(t *testing.T, relay string) *fakeDaemon {
 // pairDaemonUnstarted answers status (with relay), pairing and joining.
 func pairDaemonUnstarted(t *testing.T, relay string) *fakeDaemon {
 	fd := newFakeDaemon(t)
-	fd.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, ipc.StatusResult{RelayURL: relay, RelayConnected: true})
+	fd.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, ipc.StatusResult{Version: BuildVersion(), RelayURL: relay, RelayConnected: true})
 	fd.reply(ipc.MethodPairStart, ipc.GateUnlock, ipc.PairStartResult{PendingID: "P1", Code: "CRAVV-7K3F-9QXM-TR2A"})
 	fd.reply(ipc.MethodPairAwait, ipc.GateUnlock, ipc.PendingPeerResult{PendingID: "P1", SuggestedName: "gpu-box", MachineID: "m1"})
 	fd.reply(ipc.MethodJoinStart, ipc.GateUnlock, ipc.PendingPeerResult{PendingID: "P2", SuggestedName: "mac", MachineID: "m2"})
