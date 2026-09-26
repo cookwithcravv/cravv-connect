@@ -33,6 +33,7 @@ type Session struct {
 	projectDir string
 
 	agentSession    string // the agent's own chat ID, for the chat's hooks ("" if unknown)
+	runToken        string // a managed run's token ("" for a chat)
 	wakeDir         string // where wake files are written ("" for none)
 	listenerProgram string // how the listener command names cravv-connect
 
@@ -107,6 +108,15 @@ func (s *Session) Connect(ctx context.Context) (Conn, error) {
 	if err := c.Call(ctx, ipc.MethodSessionRegister, ipc.SessionRegisterParams{Agent: s.agent, ProjectDir: s.projectDir, PID: os.Getpid()}, &r); err != nil {
 		c.Close()
 		return nil, err
+	}
+	if s.runToken != "" {
+		// A managed run acts only as its run's session, on every connection.
+		if err := c.Call(ctx, ipc.MethodSessionRunBind, ipc.RunBindParams{RunToken: s.runToken}, nil); err != nil {
+			c.Close()
+			return nil, err
+		}
+		s.conn, s.name = c, r.Name
+		return c, nil
 	}
 	s.conn, s.name = c, r.Name
 	s.pending = s.reattach != ""

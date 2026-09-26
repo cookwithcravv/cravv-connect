@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/cravv/cravv-connect/internal/daemon"
 	"github.com/cravv/cravv-connect/internal/ipc"
 	"github.com/cravv/cravv-connect/internal/mcpserver"
 	"github.com/spf13/cobra"
@@ -51,6 +52,7 @@ func newMCPCmd(env *Env) *cobra.Command {
 				AgentSession:    agentSessionFromEnv(os.Getenv),
 				WakeDir:         filepath.Join(paths.Home, "wake"),
 				ListenerProgram: listenerProgram(env, exec.LookPath),
+				RunToken:        os.Getenv(daemon.EnvRunToken),
 			})
 			if ctx.Err() != nil && cmd.Context().Err() == nil {
 				return nil // stopped by a signal

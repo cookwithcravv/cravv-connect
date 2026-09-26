@@ -26,6 +26,10 @@ type Options struct {
 	// ListenerProgram names cravv-connect in the listener command
 	// (default "cravv-connect").
 	ListenerProgram string
+	// RunToken is set when a managed run started this server (the daemon
+	// put it in CRAVV_RUN_TOKEN): the connection binds to the run's
+	// session with it, and only RunTools are offered.
+	RunToken string
 }
 
 // New builds the MCP server and its daemon session.
@@ -39,18 +43,23 @@ type Options struct {
 func New(opts Options) (*mcp.Server, *Session) {
 	sess := NewSession(opts.Dial, opts.ProjectDir)
 	sess.agentSession, sess.wakeDir, sess.listenerProgram = opts.AgentSession, opts.WakeDir, opts.ListenerProgram
+	sess.runToken = opts.RunToken
+	instructions, tools := present.Instructions, Tools()
+	if opts.RunToken != "" {
+		instructions, tools = RunInstructions, RunTools()
+	}
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "cravv-connect", Version: opts.Version}, &mcp.ServerOptions{
-		Instructions: present.Instructions,
+		Instructions: instructions,
 		InitializedHandler: func(ctx context.Context, req *mcp.InitializedRequest) {
 			onInitialized(ctx, sess, req.Session.InitializeParams(), logger)
 		},
 	})
 	srv.AddReceivingMiddleware(agentNameMiddleware(sess))
-	for _, t := range Tools() {
+	for _, t := range tools {
 		t.Register(srv, sess)
 	}
 	return srv, sess
