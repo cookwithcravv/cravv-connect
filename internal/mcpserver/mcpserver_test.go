@@ -313,6 +313,67 @@ func TestShareKeepsReattachTokenForReconnects(t *testing.T) {
 	}
 }
 
+// A reattach that fails for a passing reason (here the kill switch) keeps
+// the token and is tried again on the next call; only not_found (the session
+// closed meanwhile) forgets it.
+func TestReattachForgetsTokenOnlyWhenNotFound(t *testing.T) {
+	d := newDaemonFake(t)
+	var mu sync.Mutex
+	var reattached []string
+	var fail error
+	d.handle(ipc.MethodSessionShare, ipc.GateSession, func(cs *ipc.ConnState, raw json.RawMessage) (any, error) {
+		return ipc.ShareResult{Session: ipc.SharedSessionView{Name: "lead", State: "open"}, WakeToken: "WAKE", ReattachToken: "R"}, nil
+	})
+	d.handle(ipc.MethodSessionReattach, ipc.GateSession, func(cs *ipc.ConnState, raw json.RawMessage) (any, error) {
+		var p ipc.SessionReattachParams
+		json.Unmarshal(raw, &p)
+		mu.Lock()
+		defer mu.Unlock()
+		reattached = append(reattached, p.ReattachToken)
+		return ipc.SharedSessionView{Name: "lead", State: "open"}, fail
+	})
+	d.handle(ipc.MethodLinks, ipc.GateNone, func(*ipc.ConnState, json.RawMessage) (any, error) {
+		return ipc.LinksResult{Links: []ipc.LinkView{}}, nil
+	})
+	setFail := func(err error) { mu.Lock(); fail = err; mu.Unlock() }
+	attempts := func() int { mu.Lock(); defer mu.Unlock(); return len(reattached) }
+	d.start()
+	cs, _ := connect(t, d, "claude-code")
+	if _, isErr := callTool(t, cs, "session_share", map[string]any{"name": "lead"}); isErr {
+		t.Fatal("share")
+	}
+
+	setFail(core.ErrKilled)
+	d.stop()
+	d.start()
+	if _, isErr := callTool(t, cs, "links", nil); isErr {
+		t.Fatal("links after the daemon restarted")
+	}
+	if n := attempts(); n != 1 {
+		t.Fatalf("reattach attempts %d, want 1", n)
+	}
+	setFail(nil)
+	callTool(t, cs, "links", nil)
+	if n := attempts(); n != 2 {
+		t.Fatalf("a transient failure forgot the token: %d attempts, want 2", n)
+	}
+	callTool(t, cs, "links", nil)
+	if n := attempts(); n != 2 {
+		t.Fatalf("reattached again after success: %d attempts", n)
+	}
+
+	setFail(core.ErrNotFound)
+	d.stop()
+	d.start()
+	callTool(t, cs, "links", nil)
+	d.stop()
+	d.start()
+	callTool(t, cs, "links", nil)
+	if n := attempts(); n != 3 {
+		t.Fatalf("not_found kept the token: %d attempts, want 3", n)
+	}
+}
+
 func TestDaemonDownThenUp(t *testing.T) {
 	d := newDaemonFake(t)
 	d.handle(ipc.MethodChatSend, ipc.GateSession, func(*ipc.ConnState, json.RawMessage) (any, error) {

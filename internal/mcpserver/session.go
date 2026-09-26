@@ -37,6 +37,9 @@ type Session struct {
 	conn     Conn
 	name     string
 	reattach string // reattach token of the session this chat shared ("" if none)
+	// pending is set while the current connection still has to take the
+	// session back with the reattach token.
+	pending bool
 }
 
 // NewSession returns an unconnected session for projectDir.
@@ -67,13 +70,14 @@ func (s *Session) Name() string {
 func (s *Session) SetReattach(token string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.reattach = token
+	s.reattach, s.pending = token, false
 }
 
 // Connect makes sure a live, registered connection exists. A chat that
 // shared a session takes it back on the new connection with its reattach
-// token; if the daemon refuses (the session closed meanwhile), the token is
-// forgotten and the chat must share again.
+// token. If the daemon answers not_found (the session closed meanwhile), the
+// token is forgotten and the chat must share again; any other failure keeps
+// the token and the reattach is tried again on the next call.
 func (s *Session) Connect(ctx context.Context) (Conn, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -83,6 +87,7 @@ func (s *Session) Connect(ctx context.Context) (Conn, error) {
 			s.conn.Close()
 			s.conn = nil
 		default:
+			s.reattachLocked(ctx)
 			return s.conn, nil
 		}
 	}
@@ -95,13 +100,25 @@ func (s *Session) Connect(ctx context.Context) (Conn, error) {
 		c.Close()
 		return nil, err
 	}
-	if s.reattach != "" {
-		if err := c.Call(ctx, ipc.MethodSessionReattach, ipc.SessionReattachParams{ReattachToken: s.reattach}, nil); err != nil {
-			s.reattach = ""
-		}
-	}
 	s.conn, s.name = c, r.Name
+	s.pending = s.reattach != ""
+	s.reattachLocked(ctx)
 	return c, nil
+}
+
+// reattachLocked takes the shared session back on s.conn if that is still
+// pending. s.mu must be held.
+func (s *Session) reattachLocked(ctx context.Context) {
+	if !s.pending || s.reattach == "" {
+		return
+	}
+	err := s.conn.Call(ctx, ipc.MethodSessionReattach, ipc.SessionReattachParams{ReattachToken: s.reattach}, nil)
+	switch {
+	case err == nil:
+		s.pending = false
+	case ipc.IsKind(err, ipc.KindNotFound):
+		s.reattach, s.pending = "", false
+	}
 }
 
 // retrySafe lists the read-only methods that may be sent again on a new
