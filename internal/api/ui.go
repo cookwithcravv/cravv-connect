@@ -20,6 +20,9 @@ type LocalSessionPort interface {
 	// OpenByName returns the ID of the open session called name, or
 	// core.ErrNotFound.
 	OpenByName(ctx context.Context, name string) (string, error)
+	// CloseByName closes the open or away session called name (a managed
+	// one through its host, which stops its run) and returns its view.
+	CloseByName(ctx context.Context, name string) (ipc.SharedSessionView, error)
 }
 
 // UIPorts are what the web UI methods need. They are kept apart from Ports
@@ -48,6 +51,18 @@ func RegisterUI(s *ipc.Server, p UIPorts) {
 	// that chat once it accepts, like accepting a link at messages: from
 	// the CLI or UI that decision needs the password.
 	s.Register(ipc.MethodLinkConnectAs, ipc.Typed(u.connectAs), ipc.GateUnlock)
+	// Closing a session is a cut-off, like disconnecting a link.
+	s.Register(ipc.MethodSessionsClose, ipc.Typed(u.close), ipc.GateAllowWhenKilled)
+}
+
+func (u uiHandlers) close(ctx context.Context, cs *ipc.ConnState, p ipc.SessionNameParams) (any, error) {
+	if err := humanOnly(cs); err != nil {
+		return nil, err
+	}
+	if err := required("name", p.Name); err != nil {
+		return nil, err
+	}
+	return u.p.Local.CloseByName(ctx, p.Name)
 }
 
 func humanOnly(cs *ipc.ConnState) error {

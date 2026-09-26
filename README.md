@@ -224,7 +224,9 @@ seconds). `kill_switch` stops everything.
 **Away.** When the chat's connection to the daemon drops (Claude Code
 closed, or the daemon restarted), its session is away: links stay open and
 what peers send waits for up to 10 minutes. The MCP server takes the
-session back on its own as soon as the daemon answers again. When the other
+session back on its own as soon as the daemon answers again, and after a
+Claude Code restart, `/cravv` with the same name in the same folder takes
+it back with its links. When the other
 machine stops answering (asleep or offline), its links show as away after
 150 seconds (`away (peer machine not answering)` in `cravv-connect links`)
 and close only if it stays silent for 10 minutes, or for a managed
@@ -318,7 +320,7 @@ any local process can run the CLI's.
 | Disconnect a link | `cravv-connect link disconnect <link>`, the chat's `disconnect`, the web UI's Sessions page | Closes the link on both sides. Its unfinished tasks fail (`link_closed`). Closed links never reopen |
 | Restrict a link | `cravv-connect link restrict <link> <level>`, the chat's `restrict`, the web UI's Sessions page | Lowers what the other session may do here, at once; tasks still waiting are rejected when it drops to `messages` |
 | Reject | `cravv-connect link reject <link>`, the chat's `review_pending`, the web UI's Approvals page | Refuses a link request; in the chat, also a held task |
-| Close a session | the chat's `session_close`; `cravv-connect session close <name>` for a managed one | Closes it and all its links; the other side learns within seconds |
+| Close a session | the chat's `session_close`; `cravv-connect session close <name>` or Close on the web UI's Sessions page (a chat's session) or Managed page (a managed one), no password | Closes it and all its links; the other side learns within seconds |
 | Pause | `cravv-connect pause <alias>` | Stops traffic with that machine both ways and closes every link with it. Undo with `resume-peer <alias>` (links must be requested again) |
 | Unpair | `cravv-connect unpair <alias>` | Closes every link, removes the machine and its keys on both sides (best effort for the notice). Pairing again needs a new code |
 | Kill switch | `cravv-connect kill`, the chat's `kill_switch`, the web UI | Stops managed runs, fails tasks claimed here (and tells their senders when it can), closes every link, stops file transfers, disconnects from the relay, and stops handling incoming messages (they wait on the relay). Until `cravv-connect resume` (password) every command and agent call is refused except `status`, `peers`, `log`, `kill`, `resume`, `reset-identity`, `offers list`, `session list`, `session close`, `ui` and `daemon stop`. Survives restarts |
@@ -355,7 +357,7 @@ any local process can run the CLI's.
 | `offers remove <machine> <label>` | Remove an offer and close its managed sessions (password) |
 | `session list` | Managed sessions running here |
 | `session open <name>` | Continue a managed session's conversation in this terminal (its queue waits until you exit) |
-| `session close <name>` | Close a managed session and its link |
+| `session close <name>` | Close a session on this machine, a chat's or a managed one, and all its links (no password) |
 | `ui [--no-browser]` | Open the local web UI |
 | `files` | List incoming and outgoing files |
 | `allow-path <dir>` | Allow sending files from another folder (password) |
@@ -457,6 +459,7 @@ daemon runs as.
 | `review_pending` shows no form | The VS Code extension declines forms: read the 4-digit code from the macOS notification and type `accept <code>` in the chat. On Linux there is no notifier: use `cravv-connect link accept <link>`, `cravv-connect approvals` or `cravv-connect ui`. After 3 wrong codes an item takes the password path only. |
 | A send fails with `link_closed` | The link is not active (still pending, or closed). Check `links`; ask for a new link with `connect`. Closed links never reopen. |
 | A call fails with `not_shared` | The chat has not shared a session, or its session closed or was taken over by another connection: share it again (`/cravv`). |
+| `a session named X is open in another chat` | Another chat on this machine shares that name. Close it there (or `cravv-connect session close X`) or pick another name. After Claude Code restarts, sharing the same name from the same folder takes the chat's away session back with its links. |
 | `sessions <machine>` says the machine did not answer in time | It is offline or paused. Check `cravv-connect peers` and `status` on both machines. |
 | `status` says a peer "runs an older cravv-connect without session links" | That machine still runs v1, and v2 refuses its link-less traffic. Upgrade it. |
 | A managed session's tasks fail with `run_failed` | The daemon could not run `claude`. Set `CRAVV_CLAUDE` to its path in the daemon's service environment (a daemon started by launchd or systemd has a short `PATH`), and check `daemon.log`. `rate_limited` means a cap was hit; `folder_refused` that the offer's folder moved. |

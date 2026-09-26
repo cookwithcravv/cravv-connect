@@ -117,6 +117,11 @@ may see it, then:
    wake token; the token itself never appears in the command, the chat
    transcript or `ps`.
 
+If the daemon restarts, the MCP server takes the session back on its own.
+If Claude Code itself restarts, `/cravv` with the same name in the same
+folder takes the chat's away session back, links and all (`resumed: true`
+in the result). A name that another open chat holds is refused.
+
 The listener blocks until something arrives for this chat's session, prints
 one line naming only the local machine alias and link number, and exits:
 

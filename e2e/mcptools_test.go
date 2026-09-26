@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,14 @@ type mcpAgent struct {
 
 func newMCPAgent(t *testing.T, n *Node) *mcpAgent {
 	t.Helper()
+	m, _ := newMCPAgentStoppable(t, n)
+	return m
+}
+
+// newMCPAgentStoppable is newMCPAgent plus a function that ends the MCP
+// server and its daemon connection, as when Claude Code exits.
+func newMCPAgentStoppable(t *testing.T, n *Node) (*mcpAgent, func()) {
+	t.Helper()
 	ctx := context.Background()
 	srv, sess := mcpserver.New(mcpserver.Options{
 		Dial:       func(ctx context.Context) (mcpserver.Conn, error) { return ipc.DialContext(ctx, n.Paths.Socket) },
@@ -43,8 +52,10 @@ func newMCPAgent(t *testing.T, n *Node) *mcpAgent {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cs.Close(); ss.Wait(); sess.Close() })
-	return &mcpAgent{t: t, cs: cs}
+	var once sync.Once
+	stop := func() { once.Do(func() { cs.Close(); ss.Wait(); sess.Close() }) }
+	t.Cleanup(stop)
+	return &mcpAgent{t: t, cs: cs}, stop
 }
 
 // try calls a tool and returns its text and whether it reported an error.
@@ -269,4 +280,48 @@ func TestMCPReattachesInTheBackground(t *testing.T) {
 		inbox += ma.call("check_inbox", map[string]any{})
 		return strings.Contains(inbox, "back in the background")
 	})
+}
+
+// Claude Code restarts: the old MCP server is gone (its session is away)
+// and the new chat in the same folder shares the same name again. It takes
+// the away session over: same link, what queued arrives, and the peer sees
+// it back. A second chat cannot take the name while it is open.
+func TestShareAgainAfterClaudeCodeRestart(t *testing.T) {
+	t.Parallel()
+	_, a, b := NewPair(t)
+	first, stop := newMCPAgentStoppable(t, a)
+	first.call("session_share", map[string]any{"name": "lead", "purpose": "leads", "visibility": "all-peers"})
+	sb := b.Share("claude", "trainer", "all-peers")
+	var out ipc.LinkView
+	first.decode("connect", map[string]any{"target": "bob/trainer", "permission": "messages"}, &out)
+	in := b.WaitLink(wait, "request at bob", func(v ipc.LinkView) bool { return v.State == "pending" && v.Direction == "in" })
+	b.Decide(in.Link, true, "")
+	a.WaitLink(wait, "link active", func(v ipc.LinkView) bool { return v.Link == out.Link && v.State == "active" })
+
+	stop() // Claude Code exits
+	b.WaitLink(wait, "bob sees lead away", func(v ipc.LinkView) bool { return v.Link == in.Link && v.RemoteAway })
+	sendChat(t, sb.C, in.Link, "while you restarted")
+
+	second := newMCPAgent(t, a)
+	text := second.call("session_share", map[string]any{"name": "lead"})
+	if !strings.Contains(text, `"resumed": true`) || !strings.Contains(text, `"visibility": "all-peers"`) {
+		t.Fatalf("share again: %s", text)
+	}
+	var links ipc.LinksResult
+	second.decode("links", nil, &links)
+	if len(links.Links) != 1 || links.Links[0].Link != out.Link || links.Links[0].State != "active" {
+		t.Fatalf("links after the takeover %+v", links.Links)
+	}
+	b.WaitLink(wait, "bob sees lead back", func(v ipc.LinkView) bool { return v.Link == in.Link && !v.RemoteAway })
+	var inbox string
+	Eventually(t, wait, "what queued", func() bool {
+		inbox += second.call("check_inbox", map[string]any{})
+		return strings.Contains(inbox, "while you restarted")
+	})
+
+	third := newMCPAgent(t, a)
+	if text, isErr := third.try("session_share", map[string]any{"name": "lead"}); !isErr ||
+		!strings.Contains(text, "a session named lead is open in another chat; close it there or pick another name") {
+		t.Fatalf("a second chat took an open name: %v %s", isErr, text)
+	}
 }

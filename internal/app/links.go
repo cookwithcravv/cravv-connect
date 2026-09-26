@@ -23,15 +23,20 @@ func (a shared) view(ctx context.Context, s store.SharedSession) ipc.SharedSessi
 }
 
 func (a shared) Share(ctx context.Context, conn uint64, agent, dir, name, purpose, visibility string) (string, ipc.ShareResult, error) {
-	vis, err := daemon.ParseVisibility(ctx, visibility, a.d.Peers())
-	if err != nil {
-		return "", ipc.ShareResult{}, err
+	// No visibility leaves it unset: new sessions are private, and a
+	// takeover of the chat's away session keeps what it had.
+	var vis core.Visibility
+	if strings.TrimSpace(visibility) != "" {
+		var err error
+		if vis, err = daemon.ParseVisibility(ctx, visibility, a.d.Peers()); err != nil {
+			return "", ipc.ShareResult{}, err
+		}
 	}
 	sh, err := a.d.Shared().Share(ctx, conn, daemon.ShareRequest{Agent: agent, ProjectDir: dir, Name: name, Purpose: purpose, Visibility: vis})
 	if err != nil {
 		return "", ipc.ShareResult{}, err
 	}
-	return sh.Session.ID, ipc.ShareResult{Session: a.view(ctx, sh.Session), WakeToken: sh.WakeToken, ReattachToken: sh.ReattachToken}, nil
+	return sh.Session.ID, ipc.ShareResult{Session: a.view(ctx, sh.Session), WakeToken: sh.WakeToken, ReattachToken: sh.ReattachToken, Resumed: sh.Resumed}, nil
 }
 
 func (a shared) Current(ctx context.Context, id string, conn uint64) error {

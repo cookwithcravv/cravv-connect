@@ -44,6 +44,11 @@ func sessionsDaemon(t *testing.T) *fakeDaemon {
 		return ipc.LinkView{Link: 5, State: "pending"}, nil
 	})
 	fd.reply(ipc.MethodLinkDisconnect, ipc.GateNone, nil)
+	fd.handle(ipc.MethodSessionsClose, ipc.GateAllowWhenKilled, func(_ *ipc.ConnState, p json.RawMessage) (any, error) {
+		var np ipc.SessionNameParams
+		json.Unmarshal(p, &np)
+		return ipc.SharedSessionView{Name: np.Name, Kind: "live", State: "closed"}, nil
+	})
 	fd.handle(ipc.MethodLinkRestrict, ipc.GateNone, func(_ *ipc.ConnState, p json.RawMessage) (any, error) {
 		var lp ipc.LinkPermissionParams
 		json.Unmarshal(p, &lp)
@@ -118,6 +123,20 @@ func TestDisconnectAndRestrict(t *testing.T) {
 	wantContains(t, b.follow("/sessions", "/sessions/disconnect", url.Values{"link": {"x"}}).body, "bad request: link must be a link number")
 	if got := fd.called(ipc.MethodLinkDisconnect); len(got) != 1 || got[0] != `{"link":1}` {
 		t.Fatalf("disconnect calls %v", got)
+	}
+}
+
+// A chat's session can be closed from the page (its links close too); no
+// password. Managed sessions are closed on the Managed page.
+func TestCloseLiveSessionFromTheSessionsPage(t *testing.T) {
+	fd := sessionsDaemon(t)
+	b := newUI(t, fd).open()
+	wantContains(t, b.get("/sessions").body,
+		`<form method="post" action="/sessions/close" data-confirm="Close lead? All its links close for good on both sides.">`,
+		`<input type="hidden" name="name" value="lead"><button type="submit" class="danger">Close</button>`)
+	wantContains(t, b.follow("/sessions", "/sessions/close", url.Values{"name": {"nap"}}).body, "Closed nap; its links closed too.")
+	if got := fd.called(ipc.MethodSessionsClose); len(got) != 1 || got[0] != `{"name":"nap"}` {
+		t.Fatalf("close calls %v", got)
 	}
 }
 

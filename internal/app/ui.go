@@ -34,6 +34,33 @@ func (a localSessions) Local(ctx context.Context) ([]ipc.SharedSessionView, erro
 	return out, nil
 }
 
+// CloseByName closes the open or away session called name. A managed one
+// closes through its host, which also stops a run in progress.
+func (a localSessions) CloseByName(ctx context.Context, name string) (ipc.SharedSessionView, error) {
+	list, err := a.d.Shared().List(ctx, core.SessionOpen, core.SessionAway)
+	if err != nil {
+		return ipc.SharedSessionView{}, err
+	}
+	for _, s := range list {
+		if s.Name != name {
+			continue
+		}
+		if s.Kind == core.SessionManaged {
+			err = a.d.Host().CloseByName(ctx, name)
+		} else {
+			err = a.d.Shared().Close(ctx, s.ID)
+		}
+		if err != nil {
+			return ipc.SharedSessionView{}, err
+		}
+		if s, err = a.d.Shared().Get(ctx, s.ID); err != nil {
+			return ipc.SharedSessionView{}, err
+		}
+		return shared{a.d}.view(ctx, s), nil
+	}
+	return ipc.SharedSessionView{}, fmt.Errorf("no open or away session %q on this machine: %w", name, core.ErrNotFound)
+}
+
 func (a localSessions) OpenByName(ctx context.Context, name string) (string, error) {
 	list, err := a.d.Shared().List(ctx, core.SessionOpen)
 	if err != nil {

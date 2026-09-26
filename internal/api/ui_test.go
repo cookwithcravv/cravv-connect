@@ -18,10 +18,20 @@ func (f *fUI) Start(context.Context) (string, error) {
 	return fmt.Sprintf("http://127.0.0.1:4000/launch?token=t%d", f.calls), nil
 }
 
-type fLocal struct{}
+type fLocal struct{ closed *[]string }
 
 func (fLocal) Local(context.Context) ([]ipc.SharedSessionView, error) {
 	return []ipc.SharedSessionView{{Name: "lead", State: "open", Visibility: "all-peers"}, {Name: "nap", State: "away"}}, nil
+}
+
+func (f fLocal) CloseByName(_ context.Context, name string) (ipc.SharedSessionView, error) {
+	if name != "lead" && name != "nap" {
+		return ipc.SharedSessionView{}, core.ErrNotFound
+	}
+	if f.closed != nil {
+		*f.closed = append(*f.closed, name)
+	}
+	return ipc.SharedSessionView{Name: name, Kind: "live", State: "closed"}, nil
 }
 
 func (fLocal) OpenByName(_ context.Context, name string) (string, error) {
@@ -77,7 +87,7 @@ func TestUIMethodsRefuseAgentConnections(t *testing.T) {
 	if err := c.Call(bg, ipc.MethodAuthUnlock, ipc.UnlockParams{Password: "hunter2"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range []string{ipc.MethodUIStart, ipc.MethodSessionsLocal} {
+	for _, m := range []string{ipc.MethodUIStart, ipc.MethodSessionsLocal, ipc.MethodSessionsClose} {
 		if err := c.Call(bg, m, nil, nil); !errors.Is(err, ipc.ErrBadRequest) {
 			t.Errorf("%s from an agent: %v", m, err)
 		}
@@ -126,5 +136,36 @@ func TestLinkConnectAsNeedsPasswordAndOpenSession(t *testing.T) {
 	}
 	if err := c.Call(bg, ipc.MethodLinkConnectAs, ipc.LinkConnectAsParams{Session: "lead", Permission: "messages"}, nil); !errors.Is(err, ipc.ErrBadRequest) {
 		t.Fatalf("missing target: %v", err)
+	}
+}
+
+// sessions.close closes a local session by name for the human (CLI or web
+// UI): no password, and it works while killed (a cut-off).
+func TestSessionsCloseByName(t *testing.T) {
+	var closed []string
+	srv := NewServer(newWorld().ports(), core.NewFakeClock(time.Unix(1_700_000_000, 0)), nil)
+	RegisterUI(srv, UIPorts{UI: &fUI{}, Local: fLocal{closed: &closed}})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	c, _ := srv.Pipe(ctx)
+	t.Cleanup(func() { c.Close() })
+	if gate := srv.Methods()[ipc.MethodSessionsClose]; gate != ipc.GateAllowWhenKilled {
+		t.Fatalf("gate %b", gate)
+	}
+	if err := c.Call(bg, ipc.MethodKill, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	var v ipc.SharedSessionView
+	if err := c.Call(bg, ipc.MethodSessionsClose, ipc.SessionNameParams{Name: "lead"}, &v); err != nil || v.Name != "lead" || v.State != "closed" {
+		t.Fatalf("close: %+v, %v", v, err)
+	}
+	if err := c.Call(bg, ipc.MethodSessionsClose, ipc.SessionNameParams{Name: "ghost"}, nil); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("unknown: %v", err)
+	}
+	if err := c.Call(bg, ipc.MethodSessionsClose, ipc.SessionNameParams{}, nil); !errors.Is(err, ipc.ErrBadRequest) {
+		t.Fatalf("no name: %v", err)
+	}
+	if len(closed) != 1 || closed[0] != "lead" {
+		t.Fatalf("closed %v", closed)
 	}
 }

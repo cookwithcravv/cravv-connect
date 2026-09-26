@@ -9,8 +9,8 @@ import (
 )
 
 // addSessions is the Sessions page: local shared sessions, their links, and
-// the sessions each paired device shows this machine. Disconnect and
-// restrict need nothing; asking for a link on a session's behalf needs the
+// the sessions each paired device shows this machine. Closing a chat's
+// session, disconnect and restrict need nothing; asking for a link on a session's behalf needs the
 // password (link.connect_as).
 func addSessions(r *Registry) {
 	r.AddPage(Page{Path: "/sessions", Title: "Sessions", Template: "sessions.html", Load: loadSessions})
@@ -24,6 +24,13 @@ func addSessions(r *Registry) {
 			return Reply{}, err
 		}
 		return Reply{Notice: fmt.Sprintf("Disconnected link %d.", n)}, nil
+	}})
+	r.AddAction(Action{Path: "/sessions/close", Back: "/sessions", Run: func(ctx context.Context, rq *Request) (Reply, error) {
+		var v ipc.SharedSessionView
+		if err := rq.Call(ctx, ipc.MethodSessionsClose, ipc.SessionNameParams{Name: rq.Form("name")}, &v); err != nil {
+			return Reply{}, err
+		}
+		return Reply{Notice: "Closed " + v.Name + "; its links closed too."}, nil
 	}})
 	r.AddAction(Action{Path: "/sessions/restrict", Back: "/sessions", Run: func(ctx context.Context, rq *Request) (Reply, error) {
 		n, err := formLink(rq)

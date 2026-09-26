@@ -41,7 +41,16 @@ type Shared struct {
 	Session       store.SharedSession
 	WakeToken     string // lets a listener learn "something is pending" (counts only)
 	ReattachToken string // lets the same agent and folder take the session over
+	// Resumed is set when the share took over an away session of the same
+	// name, agent and folder (a restarted chat): same session, same links.
+	Resumed bool
 }
+
+// nameInUse is a refused share name. It matches store.ErrNameTaken.
+type nameInUse struct{ msg string }
+
+func (e nameInUse) Error() string { return e.msg }
+func (e nameInUse) Unwrap() error { return store.ErrNameTaken }
 
 // SessionService owns shared sessions (v2 spec 3.2): sharing, the binding of
 // a session to one IPC connection, away and reattach, close, visibility.
@@ -92,19 +101,42 @@ func checkShareFields(name, purpose string, vis core.Visibility) error {
 	return nil
 }
 
-// Share creates a live session bound to connection conn.
+// Share creates a live session bound to connection conn. When the name
+// belongs to an away live session shared by the same agent from the same
+// folder (the chat restarted and shares again), it takes that session over
+// instead: same session, same links, new tokens (the old ones stop
+// working), and the purpose and visibility of the request when it gives
+// them. Any other session holding the name refuses the share.
 func (s *SessionService) Share(ctx context.Context, conn uint64, req ShareRequest) (Shared, error) {
-	if req.Visibility.Mode == "" {
+	explicitVis := req.Visibility.Mode != ""
+	if !explicitVis {
 		req.Visibility = core.Visibility{Mode: core.VisibilityPrivate}
 	}
 	if err := checkShareFields(req.Name, req.Purpose, req.Visibility); err != nil {
 		return Shared{}, err
 	}
+	sh, err := s.share(ctx, conn, req, explicitVis)
+	if err == nil && sh.Resumed {
+		s.notify(func(o SessionObserver) { o.SessionBack(ctx, sh.Session) })
+	}
+	return sh, err
+}
+
+func (s *SessionService) share(ctx context.Context, conn uint64, req ShareRequest, explicitVis bool) (Shared, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, c := range s.bound {
 		if c == conn {
 			return Shared{}, ErrAlreadyShared
+		}
+	}
+	live, err := s.store.ListShared(ctx, core.SessionOpen, core.SessionAway)
+	if err != nil {
+		return Shared{}, err
+	}
+	for _, rec := range live {
+		if rec.Name == req.Name {
+			return s.takeOverLocked(ctx, conn, rec, req, explicitVis)
 		}
 	}
 	wake, wakeHash := newToken()
@@ -120,6 +152,35 @@ func (s *SessionService) Share(ctx context.Context, conn uint64, req ShareReques
 	}
 	s.bound[rec.ID] = conn
 	return Shared{Session: rec, WakeToken: wake, ReattachToken: reattach}, nil
+}
+
+// takeOverLocked shares rec, which holds the requested name, again on conn
+// when it is an away live session of the same agent and folder. s.mu must
+// be held. This is a reattach checked by agent and folder instead of the
+// reattach token (docs/security.md).
+func (s *SessionService) takeOverLocked(ctx context.Context, conn uint64, rec store.SharedSession, req ShareRequest, explicitVis bool) (Shared, error) {
+	_, bound := s.bound[rec.ID]
+	switch {
+	case rec.Kind == core.SessionLive && (rec.State == core.SessionOpen || bound):
+		return Shared{}, nameInUse{fmt.Sprintf("a session named %s is open in another chat; close it there or pick another name", rec.Name)}
+	case rec.Kind != core.SessionLive || rec.Agent != req.Agent || rec.ProjectDir != req.ProjectDir:
+		return Shared{}, nameInUse{fmt.Sprintf("a session named %s is already shared on this machine by another agent or folder; pick another name", rec.Name)}
+	}
+	wake, wakeHash := newToken()
+	reattach, reattachHash := newToken()
+	rec.WakeHash, rec.ReattachHash = wakeHash, reattachHash
+	rec.State, rec.StateSince = core.SessionOpen, s.clock.Now()
+	if req.Purpose != "" {
+		rec.Purpose = req.Purpose
+	}
+	if explicitVis {
+		rec.Visibility = req.Visibility
+	}
+	if err := s.store.PutShared(ctx, rec); err != nil {
+		return Shared{}, err
+	}
+	s.bound[rec.ID] = conn
+	return Shared{Session: rec, WakeToken: wake, ReattachToken: reattach, Resumed: true}, nil
 }
 
 // Get returns a session record.

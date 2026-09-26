@@ -81,10 +81,12 @@ A session is a named endpoint on one machine: `<machine-alias>/<session-name>`, 
 - **Listener.** The listener (section 7.1) gets a **wake token**. It lets the listener learn "something is pending for this session" (counts only) and nothing else. The MCP server hands it to the agent in the `session_share` result, and the agent passes it to `cravv-connect listen` on **stdin**, never as an argument.
 - **Managed runs.** A managed child run gets a **run token** in an environment variable. The daemon maps it to exactly one managed session for one run, and revokes it when the run ends.
 
+- **Sharing a name again.** A chat that restarted (Claude Code closed and opened again) has lost its reattach token. A `session_share` whose name belongs to an **away** live session of the same agent and project folder takes that session over, as a reattach would: same session ID, links kept, what queued is delivered, new wake and reattach tokens (the old ones stop working). This weakens the reattach check to agent and folder for away sessions only; same-user processes are already outside the isolation boundary (docs/security.md). An **open** session of that name refuses the share: "a session named X is open in another chat; close it there or pick another name". So do sessions of another agent or folder, and managed sessions.
+
 #### Lifecycle
 
 - **Away.** A live session whose connection disappears goes to `away`. Peers see "away". Sends to it queue for up to the **away grace of 10 minutes**, and its links stay open.
-- **Close.** It becomes `closed` on `session_close`, or when the away grace runs out, and all its links close. Reattaching during `away` returns it to `open` and delivers what queued.
+- **Close.** It becomes `closed` on `session_close`, on the human's `cravv-connect session close <name>` (or Close on the web UI's Sessions page; no password, a cut-off), or when the away grace runs out, and all its links close. Reattaching during `away` returns it to `open` and delivers what queued.
 - **Unshared connections** are "attachments" (the v1 session registry). They can use discovery and management tools but cannot send or receive link traffic.
 - **Hooks.** Claude Code hooks identify their session through the `session_share` result, which the MCP server records against Claude Code's own session ID (passed to hooks as `session_id`). Two chats in one folder are no longer confused.
 

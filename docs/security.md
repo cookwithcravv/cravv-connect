@@ -147,10 +147,14 @@ These are the honest limits. Read them before you rely on it.
   you can do without the password:
   - talk to the daemon socket, run the CLI, or start the web UI
     (`cravv-connect ui`) and use every no-password action (reject, restrict,
-    disconnect, pause, unpair, kill);
+    disconnect, pause, unpair, kill, and closing any session with
+    `cravv-connect session close`);
   - read and change `store.db` (on Linux it also holds the identity seed),
     edit the audit log, and read files you received;
   - share a session of their own, which peers could then ask to link with;
+  - take over a chat's session while it is away (for example while Claude
+    Code restarts), by sharing its name from the same folder as the same
+    agent (see "Tokens and session identity");
   - read a chat's wake file (counts only) and, where the system lets a
     process read another's memory or environment, take tokens from the
     MCP server or a managed run.
@@ -214,7 +218,23 @@ Three secrets let the right client, and only it, reach a session:
 All three are 32 random bytes from `crypto/rand`. A reattach takes the
 session away from the old connection at once. When a chat's connection
 drops, the session is away for up to 10 minutes: its links stay open and
-what arrives waits; then it closes and its links close.
+what arrives waits; then it closes and its links close. The MCP server
+reconnects and reattaches on its own as soon as the daemon answers again.
+
+**Sharing a name again (a trade-off).** A chat that restarted (Claude Code
+closed and opened again) has lost its reattach token. So that it gets its
+session and links back without asking anyone, `session_share` with the
+name of an **away** live session, from a connection registered with the
+**same agent and project folder**, takes that session over: same links,
+new tokens, and the old tokens stop working. This is a reattach checked by
+agent and folder instead of by the token, so any process of your user that
+registers as that agent in that folder could take over a session while it
+is away. Processes of the same user are already outside what cravv-connect
+isolates (above: they can run the CLI and use every no-password action),
+so this adds no new reach. It does not apply to an **open** session (the
+share fails: "a session named <name> is open in another chat; close it
+there or pick another name"), to another agent or folder, or to a managed
+session.
 
 Hooks find the chat's session through Claude Code's chat ID: Claude Code
 starts the MCP server with it in `CLAUDE_CODE_SESSION_ID` and gives it to

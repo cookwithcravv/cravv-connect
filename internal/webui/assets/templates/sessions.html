@@ -3,9 +3,10 @@
 <h2>Shared sessions on this machine</h2>
 {{if .Local}}
 <div class="table-wrap"><table>
-<thead><tr><th>Session</th><th>Purpose</th><th>Visible to</th><th>State</th><th>Agent</th></tr></thead>
+<thead><tr><th>Session</th><th>Purpose</th><th>Visible to</th><th>State</th><th>Agent</th><th></th></tr></thead>
 <tbody>
-{{range .Local}}<tr><td>{{.Name}}</td><td>{{dash (clean .Purpose)}}</td><td>{{.Visibility}}</td><td>{{.State}}</td><td>{{dash .Agent}}</td></tr>
+{{range .Local}}<tr><td>{{.Name}}</td><td>{{dash (clean .Purpose)}}</td><td>{{.Visibility}}</td><td>{{.State}}</td><td>{{dash .Agent}}</td>
+<td>{{if eq .Kind "live"}}<form method="post" action="/sessions/close" data-confirm="Close {{.Name}}? All its links close for good on both sides."><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="name" value="{{.Name}}"><button type="submit" class="danger">Close</button></form>{{else}}<a href="/managed">Managed</a>{{end}}</td></tr>
 {{end}}
 </tbody>
 </table></div>

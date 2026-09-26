@@ -46,10 +46,15 @@ type sessionShareIn struct {
 // the wake token only when no wake file could be written.
 type shareOut struct {
 	Session   ipc.SharedSessionView `json:"session"`
+	Resumed   bool                  `json:"resumed,omitempty"`
+	Note      string                `json:"note,omitempty"`
 	Listener  string                `json:"listener"`
 	WakeToken string                `json:"wake_token,omitempty"`
 	Next      string                `json:"next"`
 }
+
+// ResumedNote tells the model a share took over its earlier session.
+const ResumedNote = "This chat took over its earlier session of the same name (it was away): its links and anything that waited are kept. Call links and check_inbox."
 
 // Listener instructions returned by session_share.
 const (
@@ -73,6 +78,9 @@ func (sessionShareTool) Register(s *mcp.Server, c Caller) {
 				ra.SetReattach(r.ReattachToken)
 			}
 			out := shareOut{Session: r.Session, Listener: "cravv-connect listen", WakeToken: r.WakeToken, Next: ListenerNextStdin}
+			if r.Resumed {
+				out.Resumed, out.Note = true, ResumedNote
+			}
 			if wk, ok := c.(WakeKeeper); ok {
 				if path, err := wk.WriteWakeFile(r.WakeToken); err == nil {
 					out.Listener, out.WakeToken, out.Next = wk.ListenerCommand(path), "", ListenerNext

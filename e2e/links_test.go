@@ -246,3 +246,21 @@ func TestLinkDecideIsScoped(t *testing.T) {
 		t.Fatalf("the human's reject: %+v", v)
 	}
 }
+
+// The human closes a chat's session from the terminal, without a password:
+// its links close and the peer learns it (session_closed).
+func TestSessionCloseFromTheCLI(t *testing.T) {
+	t.Parallel()
+	_, a, b := NewPair(t)
+	l := LinkUp(t, a, b, "messages")
+	if r := b.RunCLI("", "session", "close", l.B.Name); r.Code != 0 || r.Stdout != "Closed trainer; its links closed too.\n" {
+		t.Fatalf("session close: %+v", r)
+	}
+	a.WaitLink(wait, "session_closed at alice", func(v ipc.LinkView) bool {
+		return v.Link == l.ANum && v.State == "closed" && v.Reason == core.CloseSessionClosed
+	})
+	wantKind(t, TryCall(l.B.C, ipc.MethodChatSend, ipc.ChatSendParams{Link: l.BNum, Text: "x"}, nil), ipc.KindNotShared)
+	if r := b.RunCLI("", "session", "close", "ghost"); r.Code == 0 {
+		t.Fatalf("closing an unknown session: %+v", r)
+	}
+}

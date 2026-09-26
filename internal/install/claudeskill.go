@@ -23,7 +23,7 @@ description: Share this chat with chats on other machines through cravv-connect,
 
 ## Share this chat
 1. If this chat does not share a session yet, ask the user for a short name (a-z, 0-9 and -), a one-line purpose and who may see it (private, all-peers or peers:<alias>), unless they said so already.
-2. Call session_share(name, purpose, visibility).
+2. Call session_share(name, purpose, visibility). After Claude Code restarts, share again with the same name: the chat takes its earlier session back with its links (the result says "resumed").
 3. Run the "listener" command it returns with the Bash tool and run_in_background: true. Do not print the wake file.
 
 ## When the listener exits

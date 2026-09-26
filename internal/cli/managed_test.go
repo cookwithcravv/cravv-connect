@@ -92,7 +92,15 @@ func TestSessionListAndClose(t *testing.T) {
 	fd.reply(ipc.MethodManagedList, ipc.GateNone, ipc.ManagedListResult{Sessions: []ipc.ManagedView{
 		{Name: "trainer-ab12", Machine: "mac", Offer: "trainer", State: "running", Link: 4, Folder: "/srv/train"},
 	}})
-	fd.reply(ipc.MethodManagedClose, ipc.GateNone, nil)
+	fd.handle(ipc.MethodSessionsClose, ipc.GateAllowWhenKilled, func(_ *ipc.ConnState, p json.RawMessage) (any, error) {
+		var np ipc.SessionNameParams
+		json.Unmarshal(p, &np)
+		kind := "managed"
+		if np.Name == "lead" {
+			kind = "live"
+		}
+		return ipc.SharedSessionView{Name: np.Name, Kind: kind, State: "closed"}, nil
+	})
 	fd.start()
 	r := fd.run(nil, "session", "list")
 	want := "" +
@@ -103,6 +111,13 @@ func TestSessionListAndClose(t *testing.T) {
 	}
 	if r := fd.run(nil, "session", "close", "trainer-ab12"); r.code != 0 || r.stdout != "Closed trainer-ab12; its link closed too.\n" {
 		t.Fatalf("close: %d %q %q", r.code, r.stdout, r.stderr)
+	}
+	// A chat's (live) session closes the same way, with no password.
+	if r := fd.run(nil, "session", "close", "lead"); r.code != 0 || r.stdout != "Closed lead; its links closed too.\n" {
+		t.Fatalf("close live: %d %q %q", r.code, r.stdout, r.stderr)
+	}
+	if got := fd.params(ipc.MethodSessionsClose); got != `{"name":"lead"}` {
+		t.Fatalf("params %s", got)
 	}
 }
 

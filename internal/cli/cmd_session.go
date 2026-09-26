@@ -24,7 +24,7 @@ var runInteractive = func(ctx context.Context, env *Env, dir string, argv []stri
 func newSessionCmd(env *Env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "session",
-		Short: "Managed sessions on this machine: list, open and close them",
+		Short: "Sessions on this machine: list and open managed sessions, close any session",
 	}
 	cmd.AddCommand(newSessionListCmd(env), newSessionOpenCmd(env), newSessionCloseCmd(env))
 	return cmd
@@ -100,15 +100,20 @@ func newSessionOpenCmd(env *Env) *cobra.Command {
 func newSessionCloseCmd(env *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "close <name>",
-		Short: "Close a managed session (its link closes too)",
+		Short: "Close a session on this machine, a chat's or a managed one (its links close too; no password)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			return withConn(ctx, env, func(c Caller) error {
-				if err := c.Call(ctx, ipc.MethodManagedClose, ipc.ManagedNameParams{Name: args[0]}, nil); err != nil {
+				var v ipc.SharedSessionView
+				if err := c.Call(ctx, ipc.MethodSessionsClose, ipc.SessionNameParams{Name: args[0]}, &v); err != nil {
 					return err
 				}
-				fmt.Fprintf(env.Stdout, "Closed %s; its link closed too.\n", terminalSafe(args[0]))
+				if v.Kind == "managed" {
+					fmt.Fprintf(env.Stdout, "Closed %s; its link closed too.\n", terminalSafe(args[0]))
+				} else {
+					fmt.Fprintf(env.Stdout, "Closed %s; its links closed too.\n", terminalSafe(args[0]))
+				}
 				return nil
 			})
 		},

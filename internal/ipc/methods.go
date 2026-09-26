@@ -330,10 +330,13 @@ type SharedSessionView struct {
 // ShareResult carries the two secrets for the client that shared: the wake
 // token for the listener (counts only) and the reattach token for taking the
 // session back after a reconnect. Neither may be put on a command line.
+// Resumed is set when the share took over this chat's earlier session of
+// the same name (away, same agent and folder): its links are kept.
 type ShareResult struct {
 	Session       SharedSessionView `json:"session"`
 	WakeToken     string            `json:"wake_token"`
 	ReattachToken string            `json:"reattach_token"`
+	Resumed       bool              `json:"resumed,omitempty"`
 }
 
 // SessionSetParams changes the session; a nil field is left unchanged.

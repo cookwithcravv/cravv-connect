@@ -95,7 +95,7 @@ A connection that never calls `session.register` is a human's: the CLI or
 a web UI browser session. It acts on every link of the machine (`links`,
 `link.decide`, `link.disconnect`, `link.restrict` are not limited to one
 session), and it is the only kind that may call the owner's methods
-(`offers.*`, `managed.*`, `ui.start`, `sessions.local`,
+(`offers.*`, `managed.*`, `ui.start`, `sessions.local`, `sessions.close`,
 `link.connect_as`); an agent connection gets `bad_request` for those.
 
 ### 3.2 Attachments and shared sessions
@@ -135,6 +135,15 @@ session other machines can link to, bound to this connection.
   failure (unknown token, other agent or folder, closed session) looks the
   same, `not_found`. The old connection loses the session at once
   (`not_shared` on its next call).
+- **Sharing a name again.** A `session.share` whose name belongs to an
+  away live session shared by the same agent from the same project folder
+  (a chat that restarted and lost its reattach token) takes that session
+  over: same session and links, what waited is delivered, new wake and
+  reattach tokens (the old ones stop working), `resumed: true` in the
+  result, and the `purpose` and `visibility` of the call when it gives
+  them. An open session of that name fails with `bad_request` "a session
+  named <name> is open in another chat; close it there or pick another
+  name"; one of another agent or folder, or a managed one, fails too.
 
 ### 3.3 Managed runs
 
@@ -264,6 +273,7 @@ run's connection may call it.
 | `session.run_bind` | registered | no | yes |
 | `session.set` | shared session | no | no |
 | `session.share` | registered | no | no |
+| `sessions.close` | nothing | yes | no |
 | `sessions.list` | nothing | no | no |
 | `sessions.local` | nothing | yes | no |
 | `status` | nothing | yes | no |
@@ -290,7 +300,7 @@ whitespace fail with `bad_request`; `result` and `reason` may be empty.
 | Method | Params | Result |
 |---|---|---|
 | `session.register` | `{agent, project_dir, pid}` | `{name}` |
-| `session.share` | `{name, purpose?, visibility?, agent_session?}` | `{session: SharedSessionView, wake_token, reattach_token}` |
+| `session.share` | `{name, purpose?, visibility?, agent_session?}` | `{session: SharedSessionView, wake_token, reattach_token, resumed?}` |
 | `session.reattach` | `{reattach_token, agent_session?}` | `SharedSessionView` |
 | `session.close` | `{}` | `{}` |
 | `session.set` | `{purpose?, visibility?}` | `SharedSessionView` |
@@ -298,7 +308,8 @@ whitespace fail with `bad_request`; `result` and `reason` may be empty.
 | `session.run_bind` | `{run_token}` | `SharedSessionView` |
 
 - **`session.share`** fails with `bad_request` when this connection already
-  shares an open session or the name is taken.
+  shares an open session or the name is taken (section 3.2: an away session
+  of the same agent and folder is taken over instead).
 - **`session.close`** closes the session and every link it has
   (`link.closed{session_closed}` to each peer); pending requests to it are
   rejected. A listener waiting on the session exits with a line saying the
@@ -509,6 +520,7 @@ whitespace fail with `bad_request`; `result` and `reason` may be empty.
 | `managed.close` | `{name}` | `{}` |
 | `ui.start` | `{}` | `{url}` |
 | `sessions.local` | `{}` | `{sessions: [SharedSessionView]}` |
+| `sessions.close` | `{name}` | `SharedSessionView` |
 | `link.connect_as` | `{session, target, permission, note?}` | `LinkView` |
 
 All of these are for human connections only (section 3.1).
@@ -536,6 +548,10 @@ All of these are for human connections only (section 3.1).
   no password, and it runs while killed.
 - **`ui.start`** starts the web UI if it is not running and returns a URL
   with a new one-time launch token.
+- **`sessions.close`** closes the open or away session called `name`, a
+  chat's (`live`) or a managed one (like `managed.close`), and so all its
+  links; the peers see `session_closed`. A cut-off: no password, and it
+  runs while killed.
 - **`link.connect_as`** is `link.connect` for the human, on behalf of the
   open local session named `session`. It needs the password, because the
   session's chat will receive what the other side sends.

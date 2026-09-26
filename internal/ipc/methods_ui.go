@@ -12,7 +12,16 @@ const (
 	// MethodLinkConnectAs asks for a link from a named local session on the
 	// human's behalf (CLI or UI connections only; needs the password).
 	MethodLinkConnectAs = "link.connect_as"
+	// MethodSessionsClose closes this machine's open or away session called
+	// name, a chat's or a managed one, and so all its links (CLI or UI
+	// connections only; a cut-off: no password, works while killed).
+	MethodSessionsClose = "sessions.close"
 )
+
+// SessionNameParams names a local session.
+type SessionNameParams struct {
+	Name string `json:"name"`
+}
 
 // UIStartResult is the launch URL. The token in it works once.
 type UIStartResult struct {

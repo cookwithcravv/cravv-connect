@@ -281,3 +281,79 @@ func TestVisibilityAndSet(t *testing.T) {
 		t.Errorf("missing session: %v", err)
 	}
 }
+
+// After Claude Code restarts, its chat shares the same name again from the
+// same agent and folder: the away session is taken over (same session and
+// links, new tokens) instead of refused. The old tokens stop working.
+func TestShareTakesOverAwaySessionFromSameAgentAndFolder(t *testing.T) {
+	ctx := context.Background()
+	svc, _, ev, _ := newSessionSvc(t)
+	old := share(t, svc, 1, "trainer")
+	if err := svc.Detach(ctx, old.Session.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	again, err := svc.Share(ctx, 2, ShareRequest{Agent: "claude", ProjectDir: "/p", Name: "trainer"})
+	if err != nil {
+		t.Fatalf("share again: %v", err)
+	}
+	if again.Session.ID != old.Session.ID || again.Session.State != core.SessionOpen || !again.Resumed {
+		t.Fatalf("share again = %+v", again)
+	}
+	if again.Session.Purpose != "work" || again.Session.Visibility.Mode != core.VisibilityPrivate {
+		t.Fatalf("a share without purpose or visibility changed them: %+v", again.Session)
+	}
+	if again.WakeToken == old.WakeToken || again.ReattachToken == old.ReattachToken {
+		t.Fatal("the takeover kept the old tokens")
+	}
+	if _, err := svc.Current(ctx, old.Session.ID, 2); err != nil {
+		t.Fatalf("not bound to the new chat: %v", err)
+	}
+	if _, err := svc.Reattach(ctx, 3, old.ReattachToken, "claude", "/p"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("old reattach token: %v", err)
+	}
+	if _, err := svc.ByWakeToken(ctx, old.WakeToken); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("old wake token: %v", err)
+	}
+	if ev.all() != "away:trainer,back:trainer" {
+		t.Fatalf("events %q", ev.all())
+	}
+
+	// A takeover that names a purpose or visibility sets them.
+	if err := svc.Detach(ctx, old.Session.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	third, err := svc.Share(ctx, 3, ShareRequest{Agent: "claude", ProjectDir: "/p", Name: "trainer", Purpose: "new work",
+		Visibility: core.Visibility{Mode: core.VisibilityAllPeers}})
+	if err != nil || third.Session.Purpose != "new work" || third.Session.Visibility.Mode != core.VisibilityAllPeers {
+		t.Fatalf("third share = %+v, %v", third.Session, err)
+	}
+}
+
+// The name is refused when the session is open in another chat, or away
+// but shared by another agent or from another folder, or managed.
+func TestShareRefusesNameInUse(t *testing.T) {
+	ctx := context.Background()
+	svc, _, _, _ := newSessionSvc(t)
+	sh := share(t, svc, 1, "trainer")
+	_, err := svc.Share(ctx, 2, ShareRequest{Agent: "claude", ProjectDir: "/p", Name: "trainer"})
+	if !errors.Is(err, store.ErrNameTaken) || err.Error() != "a session named trainer is open in another chat; close it there or pick another name" {
+		t.Fatalf("open elsewhere: %v", err)
+	}
+	if err := svc.Detach(ctx, sh.Session.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	for _, req := range []ShareRequest{{Agent: "codex", ProjectDir: "/p", Name: "trainer"}, {Agent: "claude", ProjectDir: "/other", Name: "trainer"}} {
+		if _, err := svc.Share(ctx, 2, req); !errors.Is(err, store.ErrNameTaken) || !strings.Contains(err.Error(), "pick another name") {
+			t.Fatalf("away, %+v: %v", req, err)
+		}
+	}
+	if got, _ := svc.Get(ctx, sh.Session.ID); got.State != core.SessionAway {
+		t.Fatalf("a refused share changed the session: %s", got.State)
+	}
+	if _, err := svc.CreateManaged(ctx, "helper-ab12", "", "/p"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Share(ctx, 3, ShareRequest{Agent: "claude", ProjectDir: "/p", Name: "helper-ab12"}); !errors.Is(err, store.ErrNameTaken) {
+		t.Fatalf("managed name: %v", err)
+	}
+}
