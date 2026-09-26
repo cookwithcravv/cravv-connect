@@ -59,7 +59,9 @@ func newServer(o Options, port int) (*server, error) {
 		return nil, err
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /launch", s.launch)
+	// Not "GET /launch": that pattern also answers HEAD, and a HEAD (a link
+	// preview or prefetch) must not use up the one-time token.
+	mux.HandleFunc("/launch", s.launch)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	mux.HandleFunc("GET /{$}", s.home)
 	for _, p := range o.Pages.Pages() {
@@ -161,6 +163,11 @@ func (s *server) takeToken(tok string) bool {
 // launch swaps a launch token for a session cookie and redirects to a URL
 // without the token.
 func (s *server) launch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		s.deny(w, http.StatusMethodNotAllowed, "Open the launch link with GET.")
+		return
+	}
 	if !s.takeToken(r.URL.Query().Get("token")) {
 		s.deny(w, http.StatusForbidden, "This link was already used or has expired. Run cravv-connect ui again for a new one.")
 		return

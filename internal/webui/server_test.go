@@ -80,6 +80,22 @@ func TestLaunchTokenWorksOnceAndExpires(t *testing.T) {
 	}
 }
 
+// Only GET swaps a launch token: a HEAD (a link preview, a prefetch) or
+// any other method gets 405 and leaves the token usable.
+func TestOnlyGetConsumesTheLaunchToken(t *testing.T) {
+	u := newUI(t, statusDaemon(t))
+	launch := u.launchURL()
+	b := newBrowser(t, launch)
+	for _, m := range []string{"HEAD", "POST", "PUT", "DELETE", "OPTIONS"} {
+		if r := b.do(m, launch, nil, nil); r.code != http.StatusMethodNotAllowed || b.cookie != nil {
+			t.Fatalf("%s: %d, cookie %v", m, r.code, b.cookie)
+		}
+	}
+	if r := b.do("GET", launch, nil, nil); r.code != http.StatusSeeOther || b.cookie == nil {
+		t.Fatalf("GET after the other methods: %d", r.code)
+	}
+}
+
 // Only 127.0.0.1:<port> and localhost:<port> are served (DNS rebinding).
 func TestHostMustBeTheUIAddress(t *testing.T) {
 	u := newUI(t, statusDaemon(t))
