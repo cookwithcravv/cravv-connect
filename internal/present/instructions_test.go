@@ -22,7 +22,7 @@ func TestInstructionsCoverTheRules(t *testing.T) {
 		"disconnect", "kill_switch",
 		"listener", "run_in_background", "start the listener again", "after every wake",
 		"review_pending", "Do not ask the user to approve them again", "never guess it",
-		"password",
+		"password", "web UI (cravv-connect ui)",
 	}
 	for _, m := range must {
 		if !strings.Contains(Instructions, m) {

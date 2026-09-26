@@ -190,7 +190,7 @@ func TestReviewPendingTierAndTaskText(t *testing.T) {
 		t.Fatalf("forms %d", len(forms))
 	}
 	if c := choicesOf(t, forms[0]); !slices.Equal(c, []string{"accept as tasks-ask", "accept as messages", "reject"}) ||
-		!strings.Contains(forms[0].Message, "cravv-connect link accept 4") {
+		!strings.Contains(forms[0].Message, "cravv-connect link accept 4") || !strings.Contains(forms[0].Message, "web UI (cravv-connect ui)") {
 		t.Fatalf("tasks-auto form %v %q", c, forms[0].Message)
 	}
 	if c := choicesOf(t, forms[1]); !slices.Equal(c, []string{"accept", "reject"}) || !strings.Contains(forms[1].Message, "SECRET-TASK wipe the disk") {
@@ -229,7 +229,8 @@ func TestReviewPendingWithoutForms(t *testing.T) {
 	d.codeErr = errTestNoDesktop
 	cs, _ := connect(t, d.daemonFake, "claude-code")
 	text, _ := callTool(t, cs, "review_pending", nil)
-	if !strings.Contains(text, "cravv-connect link accept 3") || !strings.Contains(text, "cravv-connect approvals") {
+	if !strings.Contains(text, "cravv-connect link accept 3") || !strings.Contains(text, "cravv-connect approvals") ||
+		strings.Count(text, "web UI (cravv-connect ui)") != 2 {
 		t.Fatalf("headless: %q", text)
 	}
 }

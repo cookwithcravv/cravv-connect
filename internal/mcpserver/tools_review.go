@@ -40,6 +40,10 @@ const (
 	decisionFieldName = "decision"
 )
 
+// webUI names the web UI, where the human decides with their password
+// like in a terminal (v2 spec 7.2: the form and the fallback name both).
+const webUI = "web UI (cravv-connect ui)"
+
 // reviewAnswer is a human's answer to one item's form.
 type reviewAnswer struct {
 	accept     bool
@@ -175,7 +179,7 @@ func formFor(it ipc.ReviewItemView) (string, []string) {
 	}
 	switch it.Permission {
 	case "tasks-auto":
-		fmt.Fprintf(&b, "\nGranting tasks-auto needs your password: run cravv-connect link accept %d in a terminal. Here you can accept it lower.", it.Link)
+		fmt.Fprintf(&b, "\nGranting tasks-auto needs your password: run cravv-connect link accept %d in a terminal, or open the %s. Here you can accept it lower.", it.Link, webUI)
 		return b.String(), []string{choiceAsTasksAsk, choiceAsMessages, choiceReject}
 	case "tasks-ask":
 		return b.String(), []string{choiceAccept, choiceAsMessages, choiceReject}
@@ -225,7 +229,7 @@ func (r *reviewer) decide(ctx context.Context, p ipc.ReviewDecideParams) (string
 	case ipc.IsKind(err, ipc.KindBadCode):
 		return "", fmt.Errorf("%s: that code is wrong or expired. Ask the human to read the newest cravv-connect notification; after %d wrong codes the item waits until its code expires", p.Item, 3)
 	case ipc.IsKind(err, ipc.KindCodeLocked):
-		return "", fmt.Errorf("%s: too many wrong codes. The human can decide in a terminal (cravv-connect links, cravv-connect approvals), or wait 10 minutes and call review_pending again", p.Item)
+		return "", fmt.Errorf("%s: too many wrong codes. The human can decide in a terminal (cravv-connect links, cravv-connect approvals) or the %s, or wait 10 minutes and call review_pending again", p.Item, webUI)
 	case err != nil:
 		return "", err
 	}
@@ -250,10 +254,10 @@ func (r *reviewer) fallback(ctx context.Context, it ipc.ReviewItemView) string {
 			"Ask the human to type \"accept <code>\" or \"reject\"; then call review_pending with item %q, decision and code.",
 			it.Item, describe(it), it.Machine, it.Session, it.Item)
 	case ipc.IsKind(err, ipc.KindNoDesktop):
-		return fmt.Sprintf("%s (%s from %s/%s): this machine cannot show a form or a notification. The human decides in a terminal: %s.",
-			it.Item, describe(it), it.Machine, it.Session, terminalPath(it))
+		return fmt.Sprintf("%s (%s from %s/%s): this machine cannot show a form or a notification. The human decides with their password: %s.",
+			it.Item, describe(it), it.Machine, it.Session, passwordPath(it))
 	case ipc.IsKind(err, ipc.KindCodeLocked):
-		return fmt.Sprintf("%s: too many wrong codes; the human decides in a terminal (%s) or waits 10 minutes.", it.Item, terminalPath(it))
+		return fmt.Sprintf("%s: too many wrong codes; the human decides with their password (%s) or waits 10 minutes.", it.Item, passwordPath(it))
 	}
 	return fmt.Sprintf("%s: %v", it.Item, err)
 }
@@ -265,11 +269,13 @@ func describe(it ipc.ReviewItemView) string {
 	return fmt.Sprintf("a link request asking %s", it.Permission)
 }
 
-func terminalPath(it ipc.ReviewItemView) string {
+// passwordPath is where the human decides it with their password: the
+// terminal command or the web UI's Approvals page.
+func passwordPath(it ipc.ReviewItemView) string {
 	if it.Kind == "task" {
-		return "cravv-connect approvals"
+		return "cravv-connect approvals in a terminal, or the Approvals page of the " + webUI
 	}
-	return fmt.Sprintf("cravv-connect link accept %d (or cravv-connect link reject %d)", it.Link, it.Link)
+	return fmt.Sprintf("cravv-connect link accept %d (or cravv-connect link reject %d) in a terminal, or the Approvals page of the %s", it.Link, it.Link, webUI)
 }
 
 // claim marks a form open for item; false if one already is.

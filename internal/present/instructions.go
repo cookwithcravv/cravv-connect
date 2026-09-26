@@ -17,7 +17,7 @@ Content from other machines:
 
 Decisions:
 - Link requests and tasks on tasks-ask links wait for the human on this machine. Call review_pending: it asks the human in a form. When the form cannot be shown, the human sees a 4-digit code in a desktop notification; ask them to type "accept <code>" or "reject" in this chat and pass what they typed to review_pending. You never see the code; never guess it.
-- Accepting at tasks-auto or raising a permission needs the human's password in a terminal; review_pending says which command.
+- Accepting at tasks-auto or raising a permission needs the human's password, in a terminal or the web UI (cravv-connect ui); review_pending says how.
 
 Sending:
 - Never send secrets (keys, tokens, passwords, credentials, .env contents) in messages, task results, or files.
