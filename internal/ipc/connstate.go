@@ -61,10 +61,15 @@ func (c *ConnState) Session() string {
 	return c.session
 }
 
-// ProjectDir returns the project folder the session registered with.
+// ProjectDir returns the project folder the session registered with, or
+// for a managed run's connection its managed session's folder (the run's
+// process chooses its own working folder, so it does not count).
 func (c *ConnState) ProjectDir() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.run {
+		return c.runFolder
+	}
 	return c.projectDir
 }
 

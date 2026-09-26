@@ -123,10 +123,10 @@ func (a managed) Close(ctx context.Context, name string) error {
 
 type runs struct{ d *daemon.Daemon }
 
-func (a runs) Bind(ctx context.Context, token string, conn uint64) (string, ipc.SharedSessionView, error) {
+func (a runs) Bind(ctx context.Context, token string, conn uint64) (api.RunBinding, error) {
 	s, err := a.d.Host().BindRun(ctx, token, conn)
 	if err != nil {
-		return "", ipc.SharedSessionView{}, err
+		return api.RunBinding{}, err
 	}
-	return s.ID, shared{a.d}.view(ctx, s), nil
+	return api.RunBinding{ID: s.ID, Folder: s.ProjectDir, View: shared{a.d}.view(ctx, s)}, nil
 }

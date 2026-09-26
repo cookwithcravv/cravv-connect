@@ -67,14 +67,14 @@ func (f fManaged) Close(_ context.Context, name string) error {
 }
 
 // Bind knows one token, for session S-run.
-func (f *fManagedPorts) Bind(_ context.Context, token string, conn uint64) (string, ipc.SharedSessionView, error) {
+func (f *fManagedPorts) Bind(_ context.Context, token string, conn uint64) (RunBinding, error) {
 	if token != "run-token" {
-		return "", ipc.SharedSessionView{}, core.ErrNotFound
+		return RunBinding{}, core.ErrNotFound
 	}
 	f.lw.mu.Lock()
 	f.lw.bound["S-run"] = conn
 	f.lw.mu.Unlock()
-	return "S-run", ipc.SharedSessionView{Name: "trainer-ab12", Kind: "managed", State: "open"}, nil
+	return RunBinding{ID: "S-run", Folder: "/srv/managed", View: ipc.SharedSessionView{Name: "trainer-ab12", Kind: "managed", State: "open"}}, nil
 }
 
 func managedServer(t *testing.T) (*world, *fManagedPorts, func() *ipc.Client) {
@@ -248,5 +248,24 @@ func TestManagedOpenHoldsUntilTheConnectionEnds(t *testing.T) {
 	}
 	if err := k.Call(bg, ipc.MethodManagedClose, ipc.ManagedNameParams{Name: "trainer-ab12"}, nil); err != nil {
 		t.Fatalf("close while killed: %v", err)
+	}
+}
+
+// A run's connection sends files from its managed session's folder, not
+// from the folder its process registered with.
+func TestRunBoundFilesUseTheManagedFolder(t *testing.T) {
+	w, _, dial := managedServer(t)
+	c := dial()
+	if err := c.Call(bg, ipc.MethodSessionRegister, ipc.SessionRegisterParams{Agent: "claude", ProjectDir: "/"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Call(bg, ipc.MethodSessionRunBind, ipc.RunBindParams{RunToken: "run-token"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Call(bg, ipc.MethodFileSend, ipc.FileSendParams{Link: 4, Path: "out/model.bin"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.lastCall(); got != "file S-run 4 /srv/managed out/model.bin" {
+		t.Fatalf("file sent as %q", got)
 	}
 }

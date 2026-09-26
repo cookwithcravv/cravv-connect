@@ -22,10 +22,17 @@ type ManagedPort interface {
 	Close(ctx context.Context, name string) error
 }
 
+// RunBinding is the managed session a run token bound a connection to.
+type RunBinding struct {
+	ID     string // kept in the connection state
+	Folder string // the managed session's folder: files are sent from it
+	View   ipc.SharedSessionView
+}
+
 // RunPort binds a connection to the managed session of the run holding a
-// run token, and returns the session's ID (kept in the connection state).
+// run token.
 type RunPort interface {
-	Bind(ctx context.Context, token string, conn uint64) (id string, view ipc.SharedSessionView, err error)
+	Bind(ctx context.Context, token string, conn uint64) (RunBinding, error)
 }
 
 // ManagedPorts are what the managed-session methods need; like UIPorts
@@ -62,13 +69,13 @@ func (m managedHandlers) runBind(ctx context.Context, cs *ipc.ConnState, p ipc.R
 	if cs.Shared() != "" && !cs.RunBound() {
 		return nil, badRequest("this connection already shares a session")
 	}
-	id, view, err := m.p.Runs.Bind(ctx, p.RunToken, cs.ID())
+	b, err := m.p.Runs.Bind(ctx, p.RunToken, cs.ID())
 	if err != nil {
 		return nil, err
 	}
-	cs.SetShared(id)
-	cs.SetRunBound("")
-	return view, nil
+	cs.SetShared(b.ID)
+	cs.SetRunBound(b.Folder)
+	return b.View, nil
 }
 
 func (m managedHandlers) offersList(ctx context.Context, cs *ipc.ConnState, p ipc.OffersListParams) (any, error) {
