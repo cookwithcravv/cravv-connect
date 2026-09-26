@@ -48,7 +48,7 @@ func TestConfirmCodeSingleUseAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := desk.shownCode(t)
-	if texts := desk.all(); !strings.HasSuffix(texts[0], "Code "+code) {
+	if texts := desk.all(); !strings.HasPrefix(texts[0], "Code "+code+". cravv-connect: link request") {
 		t.Fatalf("text %q", texts[0])
 	}
 	if err := c.Show("s1", "link-1", "again"); err != nil || desk.shownCode(t) != code {

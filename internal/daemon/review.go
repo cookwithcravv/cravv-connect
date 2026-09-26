@@ -164,15 +164,20 @@ func (s *ReviewService) ShowCode(ctx context.Context, session, id string) error 
 	return s.d.Codes.Show(session, id, codeText(it))
 }
 
-// codeText describes an item for its code notification.
+// codeText describes an item for its code notification, which puts the
+// code first. What the peer wrote comes last, after "From
+// <alias>/<session>:" and cut short, so it can never stand before the
+// code or pass for the daemon's own words.
 func codeText(it ReviewItem) string {
+	from := fmt.Sprintf("From %s/%s", it.Alias, it.Link.RemoteName)
 	if it.Task == nil {
-		return fmt.Sprintf("cravv-connect: link request from %s/%s asking %s. Type accept <code> or reject in the chat.",
-			it.Alias, it.Link.RemoteName, it.Link.Proposed)
+		return fmt.Sprintf("Link request asking %s. Type accept and the code, or reject, in the chat. %s.", it.Link.Proposed, from)
 	}
-	preview := strings.Join(strings.Fields(previewText(it.Task.Instructions, reviewPreview)), " ")
-	return fmt.Sprintf("cravv-connect: task from %s/%s on link %d waits for approval: %s. Type accept <code> or reject in the chat.",
-		it.Alias, it.Link.RemoteName, it.Link.Num, preview)
+	preview := strings.Join(strings.Fields(it.Task.Instructions), " ")
+	if cut := previewText(preview, reviewPreview); cut != preview {
+		preview = cut + "..."
+	}
+	return fmt.Sprintf("Task on link %d waits for approval. Type accept and the code, or reject, in the chat. %s: %s", it.Link.Num, from, preview)
 }
 
 func (s *ReviewService) alias(ctx context.Context, id core.MachineID) string {

@@ -195,8 +195,8 @@ func (c *ConfirmCodes) lockedLocked(now time.Time, session, item string) bool {
 		len(c.wrong.Sessions[session]) >= CodeSessionMaxWrong
 }
 
-// Show displays the item's code with text (which says what is being
-// decided) for session's human. An unexpired code is shown again rather
+// Show displays the item's code, then text (which says what is being
+// decided), for session's human. An unexpired code is shown again rather
 // than replaced, so a code the human already read stays valid. It fails
 // with ErrNoDesktop when nothing can be shown and ErrCodeLocked once the
 // item or the session had too many wrong tries. The code is never
@@ -224,7 +224,7 @@ func (c *ConfirmCodes) Show(session, item, text string) error {
 	}
 	code := st.code
 	c.mu.Unlock()
-	c.desktop.Notify(codeTitleText+code, text+" Code "+code)
+	c.desktop.Notify(codeTitleText+code, "Code "+code+". "+text)
 	return nil
 }
 

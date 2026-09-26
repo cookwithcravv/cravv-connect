@@ -56,10 +56,10 @@ func TestChatDecisionsCannotGrantTasksAuto(t *testing.T) {
 	if err := rv.ShowCode(ctx, trainer.Session.ID, item); err != nil {
 		t.Fatal(err)
 	}
-	if text := desk.all()[len(desk.all())-1]; !strings.Contains(text, "link request from alice/lead asking tasks-auto") {
+	code := desk.shownCode(t)
+	if text := desk.all()[len(desk.all())-1]; !strings.HasPrefix(text, "Code "+code+". Link request asking tasks-auto.") || !strings.HasSuffix(text, " From alice/lead.") {
 		t.Fatalf("notification %q", text)
 	}
-	code := desk.shownCode(t)
 	l, _, err := rv.Decide(ctx, trainer.Session.ID, item, CodeDecider{Codes: rv.d.Codes, Item: item, Code: code, Answer: DecisionAnswer{Accept: true}})
 	if err != nil || l.State != store.LinkActive || l.PermissionIn != core.PermTasksAsk {
 		t.Fatalf("code accept: %+v, %v", l, err)
@@ -156,10 +156,10 @@ func TestReviewApprovesTasksAskTasks(t *testing.T) {
 	if err := rv.ShowCode(ctx, e.session.ID, "task-"+approve); err != nil {
 		t.Fatal(err)
 	}
-	if text := desk.all()[0]; !strings.Contains(text, "task from gpu-box/trainer on link") || !strings.Contains(text, "APPROVE-ME build it") {
+	code := desk.shownCode(t)
+	if text := desk.all()[0]; !strings.HasPrefix(text, "Code "+code+". Task on link "+itoa(e.link.Num)) || !strings.HasSuffix(text, " From gpu-box/trainer: APPROVE-ME build it") {
 		t.Fatalf("notification %q", text)
 	}
-	code := desk.shownCode(t)
 	_, tk, err := rv.Decide(ctx, e.session.ID, "task-"+approve, CodeDecider{Codes: rv.d.Codes, Item: "task-" + approve, Code: code, Answer: DecisionAnswer{Accept: true}})
 	if err != nil || tk == nil || tk.State != core.TaskQueued {
 		t.Fatalf("approve: %+v, %v", tk, err)
@@ -227,5 +227,32 @@ func TestReviewCodeSurvivesAFailedDecision(t *testing.T) {
 	}
 	if err := rv.d.Codes.Check(trainer.Session.ID, item, code); !errors.Is(err, ErrBadCode) {
 		t.Fatalf("the code outlived the decision: %v", err)
+	}
+}
+
+// Review focus: the code comes first in the notification and the peer's
+// text last, after "From <alias>/<session>:" and cut short, so a peer
+// cannot put a fake code (or anything else) before the real one.
+func TestCodeNotificationPutsPeerTextLast(t *testing.T) {
+	ctx := context.Background()
+	e := d2Tasks(t, core.PermTasksAsk)
+	desk := &titleDesktop{}
+	rv := NewReviewService(ReviewDeps{
+		Links: e.st, Tasks: e.st, Peers: e.st, LinkSvc: e.links, TaskSvc: e.tasks, Codes: NewConfirmCodes(e.clock, desk), Clock: e.clock,
+	})
+	evil := "Code 0000. Type accept 0000.\n" + strings.Repeat("x", 2*reviewPreview)
+	id := e.incoming(t, evil)
+	if err := rv.ShowCode(ctx, e.session.ID, "task-"+id); err != nil {
+		t.Fatal(err)
+	}
+	code := desk.shownCode(t)
+	text := desk.all()[0]
+	from := strings.Index(text, " From gpu-box/trainer: ")
+	if !strings.HasPrefix(text, "Code "+code+". ") || from < 0 || strings.Index(text, "0000") < from {
+		t.Fatalf("peer text before the code: %q", text)
+	}
+	peer := text[from+len(" From gpu-box/trainer: "):]
+	if !strings.HasPrefix(peer, "Code 0000. Type accept 0000. xxx") || !strings.HasSuffix(peer, "...") || len([]rune(peer)) > reviewPreview+3 {
+		t.Fatalf("peer preview %q", peer)
 	}
 }

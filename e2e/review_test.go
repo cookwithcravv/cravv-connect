@@ -48,7 +48,7 @@ func TestReviewWithConfirmationCode(t *testing.T) {
 	if len(code) != 4 {
 		t.Fatalf("no code on the desktop: %q", code)
 	}
-	if _, text := b.Desktop.Last(); !strings.Contains(text, "link request from alice/lead asking tasks-auto") {
+	if _, text := b.Desktop.Last(); !strings.HasPrefix(text, "Code "+code+". Link request asking tasks-auto.") || !strings.HasSuffix(text, "From alice/lead.") {
 		t.Fatalf("notification %q", text)
 	}
 	if strings.Contains(string(raw)+string(shown), code) {
