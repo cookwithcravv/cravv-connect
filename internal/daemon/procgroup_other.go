@@ -13,3 +13,6 @@ func killGroup(c *exec.Cmd) {
 		_ = c.Process.Kill()
 	}
 }
+
+// killPGID does nothing where process groups are not available.
+func killPGID(int) error { return nil }

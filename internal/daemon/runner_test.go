@@ -123,3 +123,23 @@ func TestCapBuffer(t *testing.T) {
 		t.Fatalf("head %q tail %q", head.bytes(), tail.bytes())
 	}
 }
+
+// A run that ends normally still ends everything it left in its process
+// group, and OnStart learns the group.
+func TestExecRunnerEndsTheGroupAfterANormalExit(t *testing.T) {
+	cmd, env, log := fakeAgent(t, "bg")
+	var group int
+	cmd.OnStart = func(pgid int) { group = pgid }
+	out := ExecRunner{}.Run(context.Background(), cmd, env, time.Minute)
+	if out.Err != nil || out.ExitCode != 0 || out.TimedOut || out.Stopped {
+		t.Fatalf("outcome %+v", out)
+	}
+	recs := records(t, log)
+	if len(recs) != 1 || recs[0].ChildPID == 0 {
+		t.Fatalf("records %+v", recs)
+	}
+	if group != recs[0].PID {
+		t.Fatalf("OnStart saw group %d, the agent is %d", group, recs[0].PID)
+	}
+	waitGone(t, recs[0].ChildPID)
+}

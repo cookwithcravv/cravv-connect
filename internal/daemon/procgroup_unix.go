@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"errors"
 	"os/exec"
 	"syscall"
 )
@@ -21,4 +22,16 @@ func killGroup(c *exec.Cmd) {
 	if err := syscall.Kill(-c.Process.Pid, syscall.SIGKILL); err != nil {
 		_ = c.Process.Kill()
 	}
+}
+
+// killPGID kills process group pgid (a run's, recorded when it started).
+// A missing group is not an error.
+func killPGID(pgid int) error {
+	if pgid <= 1 {
+		return nil
+	}
+	if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return err
+	}
+	return nil
 }

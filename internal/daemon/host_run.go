@@ -55,9 +55,11 @@ func (h *SessionHost) wake() {
 	}
 }
 
-// recoverRuns fails the tasks managed sessions had claimed: their run
-// ended with the daemon.
+// recoverRuns kills the process groups runs of the last daemon left, and
+// fails the tasks managed sessions had claimed: their run ended with the
+// daemon.
 func (h *SessionHost) recoverRuns(ctx context.Context) {
+	h.killRecordedGroups()
 	all, err := h.d.Store.ListManaged(ctx)
 	if err != nil {
 		h.d.Log.Warn("list managed sessions", "err", err)
@@ -252,12 +254,14 @@ func (h *SessionHost) run(ctx context.Context, m store.ManagedSession, o store.O
 		h.mu.Unlock()
 		spec := RunSpec{Folder: o.RealFolder, AgentSession: m.AgentSession, Resume: m.Started, RunMode: o.RunMode, MCPConfig: cfg}
 		cmd := adapter.Command(spec, runPrompt(sess, l, h.alias(ctx, l.Peer), e, taskID, notes))
+		cmd.OnStart = func(pgid int) { h.startGroup(sess.ID, runID, pgid) }
 		rctx, cancel := context.WithCancel(ctx)
 		h.mu.Lock()
 		h.cancel[sess.ID] = cancel
 		h.mu.Unlock()
 		out = h.d.Runner.Run(rctx, cmd, append(h.env(), cmd.Env...), o.RunTimeout)
 		cancel()
+		h.endGroup(sess.ID, runID)
 		res = adapter.Result(out.Stdout)
 	}
 	// The run is over: its token and binding end before anything else,
@@ -362,7 +366,7 @@ func (h *SessionHost) alias(ctx context.Context, id core.MachineID) string {
 	return id.Short()
 }
 
-// stop ends the session's current run, if any.
+// stop ends the session's current run, if any, and kills its process group.
 func (h *SessionHost) stop(id string) {
 	h.mu.Lock()
 	cancel := h.cancel[id]
@@ -370,6 +374,7 @@ func (h *SessionHost) stop(id string) {
 	if cancel != nil {
 		cancel()
 	}
+	h.killGroupOf(id)
 }
 
 // StopAll ends every run (kill switch, shutdown). Their process groups are killed.
@@ -379,9 +384,18 @@ func (h *SessionHost) StopAll() {
 	for _, c := range h.cancel {
 		cancels = append(cancels, c)
 	}
+	groups := make([]int, 0, len(h.groups))
+	for _, g := range h.groups {
+		groups = append(groups, g)
+	}
 	h.mu.Unlock()
 	for _, c := range cancels {
 		c()
+	}
+	for _, g := range groups {
+		if err := killPGID(g); err != nil {
+			h.d.Log.Warn("kill run process group", "err", err)
+		}
 	}
 }
 

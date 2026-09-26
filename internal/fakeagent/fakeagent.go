@@ -19,7 +19,7 @@ import (
 // Environment the fake agent reads (the daemon passes its own environment
 // to the child, so a test sets these with t.Setenv).
 const (
-	// EnvMode selects the behaviour: ok, fail or hang.
+	// EnvMode selects the behaviour: ok, fail, bg (leaves a child behind) or hang.
 	EnvMode = "CRAVV_FAKE_AGENT"
 	// EnvLog is a file every run appends its Record to, one JSON line.
 	EnvLog = "CRAVV_FAKE_AGENT_LOG"
@@ -80,6 +80,14 @@ func run(mode string) int {
 	case "fail":
 		fmt.Fprintln(os.Stderr, "fake agent: failing on purpose")
 		code = 3
+	case "bg":
+		// A background child in the same process group that outlives the
+		// agent, with its output detached so the agent's exit is seen at
+		// once: the run must still end it.
+		child := exec.Command("sleep", "300")
+		if err := child.Start(); err == nil {
+			rec.ChildPID = child.Process.Pid
+		}
 	case "hang":
 		// A grandchild in the same process group: a timeout must end it too.
 		child := exec.Command("sleep", "300")

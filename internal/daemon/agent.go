@@ -34,6 +34,9 @@ type AgentCommand struct {
 	Dir   string
 	Stdin string
 	Env   []string // KEY=VALUE pairs the adapter adds to the child's environment
+	// OnStart, when set, is called with the process group of the started
+	// agent (the host records it; see Runner).
+	OnStart func(pgid int)
 }
 
 // AgentResult is what the adapter could read from a run's output.

@@ -36,8 +36,13 @@ type Runner interface {
 }
 
 // ExecRunner runs each command in a process group of its own and kills the
-// whole group (the agent and everything it started) at the timeout or when
-// ctx ends.
+// whole group (the agent and everything it started) at the timeout, when
+// ctx ends, and also after the agent exits on its own, so nothing a run
+// started in the background outlives it.
+//
+// A process that leaves the group (setsid, or a double fork that calls
+// setpgid) escapes this, and only a shell run can do that: it runs as your
+// user and is not contained (docs/security.md).
 type ExecRunner struct{}
 
 // Run implements Runner.
@@ -52,6 +57,9 @@ func (ExecRunner) Run(ctx context.Context, cmd AgentCommand, env []string, timeo
 	ownGroup(c)
 	if err := c.Start(); err != nil {
 		return RunOutcome{Err: err, ExitCode: -1}
+	}
+	if cmd.OnStart != nil {
+		cmd.OnStart(c.Process.Pid) // ownGroup: the group ID is the agent's PID
 	}
 	done := make(chan error, 1)
 	go func() { done <- c.Wait() }()
@@ -70,6 +78,9 @@ func (ExecRunner) Run(ctx context.Context, cmd AgentCommand, env []string, timeo
 		killGroup(c)
 		err = <-done
 	}
+	// The agent is gone; end whatever it left in its group. While any
+	// member lives, the group ID cannot be reused, so this reaches only them.
+	killGroup(c)
 	out.Stdout, out.Stderr, out.Duration = stdout.bytes(), string(stderr.bytes()), time.Since(start)
 	out.ExitCode = c.ProcessState.ExitCode()
 	var exit *exec.ExitError

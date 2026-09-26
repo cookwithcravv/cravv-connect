@@ -90,6 +90,7 @@ type SessionHost struct {
 	mu      sync.Mutex
 	busy    map[string]bool               // sessions with a worker
 	cancel  map[string]context.CancelFunc // sessions with a run: stops it
+	groups  map[string]int                // sessions with a run: its process group
 	notes   map[string][]string           // file notices for the next run
 	live    map[string]int                // sessions a human opened: their queue waits
 	noticed map[string]time.Time          // links last told of a refused message
@@ -112,7 +113,7 @@ func NewSessionHost(d HostDeps) *SessionHost {
 	}
 	return &SessionHost{
 		d: d, tokens: runTokens{byHash: map[string]runGrant{}}, poke: make(chan struct{}, 1),
-		busy: map[string]bool{}, cancel: map[string]context.CancelFunc{}, notes: map[string][]string{},
+		busy: map[string]bool{}, cancel: map[string]context.CancelFunc{}, groups: map[string]int{}, notes: map[string][]string{},
 		live: map[string]int{}, noticed: map[string]time.Time{}, changed: make(chan struct{}),
 	}
 }
