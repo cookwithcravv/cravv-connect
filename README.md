@@ -44,7 +44,9 @@ reference relay `cravv-relay` for local testing. Protocols:
 
 ## Install
 
-On macOS or Linux (arm64 or amd64):
+On macOS or Linux (arm64 or amd64). The Linux binaries need
+glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later); on an
+older or a musl system such as Alpine, install from source.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cravv/cravv-connect/main/scripts/install.sh | sh

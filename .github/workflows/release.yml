@@ -20,8 +20,10 @@ jobs:
         include:
           - { runner: macos-14, goos: darwin, goarch: arm64 }
           - { runner: macos-15-intel, goos: darwin, goarch: amd64 }
-          - { runner: ubuntu-24.04, goos: linux, goarch: amd64 }
-          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
+          # cravv-connect links glibc through cgo and needs the glibc it was
+          # built with or newer: Ubuntu 22.04 keeps that at 2.35.
+          - { runner: ubuntu-22.04, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-22.04-arm, goos: linux, goarch: arm64 }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -53,6 +55,12 @@ jobs:
           CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/$name/cravv-conformance" ./cmd/cravv-conformance
           cp README.md "dist/$name/"
           "dist/$name/cravv-connect" version | grep -F "cravv-connect ${TAG} (${GOOS}/${GOARCH})"
+          if [ "$GOOS" = linux ]; then
+            # The README promises glibc 2.35: fail if a newer symbol slipped in.
+            need="$(objdump -T "dist/$name/cravv-connect" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -n 1)"
+            echo "cravv-connect needs glibc $need"
+            test "$(printf '%s\n' "$need" 2.35 | sort -V | tail -n 1)" = 2.35
+          fi
           tar -C dist -czf "dist/$name.tar.gz" "$name"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

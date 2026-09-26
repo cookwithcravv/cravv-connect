@@ -27,8 +27,11 @@ func TestReleaseWorkflowShape(t *testing.T) {
 	for _, want := range []string{
 		"{ runner: macos-14, goos: darwin, goarch: arm64 }",
 		"{ runner: macos-15-intel, goos: darwin, goarch: amd64 }",
-		"{ runner: ubuntu-24.04, goos: linux, goarch: amd64 }",
-		"{ runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }",
+		// Linux builds link glibc through cgo: the oldest runner keeps the
+		// requirement at glibc 2.35 (Ubuntu 22.04, Debian 12).
+		"{ runner: ubuntu-22.04, goos: linux, goarch: amd64 }",
+		"{ runner: ubuntu-22.04-arm, goos: linux, goarch: arm64 }",
+		`test "$(printf '%s\n' "$need" 2.35 | sort -V | tail -n 1)" = 2.35`,
 		"libpam0g-dev",
 		`CGO_ENABLED=1 go build`,
 		`CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/$name/cravv-relay" ./cmd/cravv-relay`,
@@ -63,6 +66,17 @@ func TestReleaseWorkflowStampsTheVersion(t *testing.T) {
 	out, err := exec.Command(bin, "version").Output()
 	if want := "cravv-connect v9.9.9-test (" + runtime.GOOS + "/" + runtime.GOARCH + ")\n"; err != nil || string(out) != want {
 		t.Fatalf("version: %v %q, want %q", err, out, want)
+	}
+}
+
+// The README states the glibc the Linux release binaries need.
+func TestReadmeStatesGlibc(t *testing.T) {
+	readme, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(readme), "glibc 2.35 or newer") {
+		t.Error("README does not state the minimum glibc")
 	}
 }
 
