@@ -665,3 +665,42 @@ func TestSetupAdvisesNewLANRelayAfterRestart(t *testing.T) {
 		t.Errorf("another machine's relay: %d %q", code, r.errb.String())
 	}
 }
+
+// checkedInstaller is an installer that can tell whether its integration
+// is in place (current) or older, as the Claude Code installer does.
+type checkedInstaller struct {
+	fakeInstaller
+	current, older bool
+}
+
+func (c *checkedInstaller) Installed() bool { return c.current }
+func (c *checkedInstaller) Outdated() bool  { return c.older }
+
+// setup never asks again about an agent that is set up, and updates an
+// older integration without asking.
+func TestSetupSkipsCurrentAgentsAndUpdatesOlderOnes(t *testing.T) {
+	for _, tc := range []struct {
+		current, older bool
+		want           string
+		installs       bool
+	}{
+		{true, false, "claude: already set up.\n", false},
+		{false, true, "Updated cravv-connect for claude to this version. Restart it so it loads the new version.\n", true},
+	} {
+		r := newSetupRig(t, connected)
+		r.configure(t, "https://relay.example.com")
+		r.daemon.up()
+		claude := &checkedInstaller{fakeInstaller: fakeInstaller{name: "claude", detected: true}, current: tc.current, older: tc.older}
+		r.env.Agents = install.NewRegistry(claude, r.codex)
+		r.prompt.lines = []string{"n"} // pairing
+		if code := r.run(); code != 0 {
+			t.Fatalf("code %d stderr %s", code, r.errb.String())
+		}
+		if !strings.Contains(r.out.String(), tc.want) || (claude.installed != "") != tc.installs {
+			t.Fatalf("%+v: installed %q\n%s", tc, claude.installed, r.out.String())
+		}
+		if !slices.Equal(r.prompt.asked, []string{"line: Pair a device now? (y/N)"}) && !slices.Equal(r.prompt.asked, []string{"line: Pair a device now? (Y/n)"}) {
+			t.Fatalf("%+v: asked %q", tc, r.prompt.asked)
+		}
+	}
+}

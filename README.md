@@ -139,7 +139,9 @@ Waiting for the other machine...
 ```
 
 Run `cravv-connect setup` again at any time: it shows what is set up and
-offers only the missing steps. `cravv-connect setup --reset` starts over (it
+offers only the missing steps. After an upgrade it restarts a daemon still
+running the old version and updates an older Claude Code integration
+without asking; an agent that is already set up is not asked about again. `cravv-connect setup --reset` starts over (it
 asks first). Without questions:
 `cravv-connect setup --yes --relay <url> [--relay-token <token>] [--name <name>] [--no-agents]`.
 

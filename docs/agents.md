@@ -72,6 +72,13 @@ the send rules as they are. Rules and skills you wrote yourself are never
 changed, and `cravv-connect uninstall claude` removes exactly what it added.
 Restart Claude Code afterwards.
 
+The install records its integration version (in
+`~/.cravv-connect/claude-allow-rules.json`). `cravv-connect setup` skips
+Claude Code when the MCP server (in `~/.claude.json`), both hooks, the
+`/cravv` skill and the current version are all in place, and installs again
+without asking when an older version is (for example one from v1). For
+Codex it looks for the `[mcp_servers.cravv-connect]` table.
+
 Manual equivalent:
 
 ```sh

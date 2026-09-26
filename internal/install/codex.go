@@ -60,6 +60,20 @@ func (c *Codex) Install(_ context.Context, bin string) error {
 	return writeFileAtomic(c.configPath(), []byte(strings.Join(lines, "\n")+"\n"), 0o600)
 }
 
+// Installed reports whether config.toml has our MCP server table.
+func (c *Codex) Installed() bool {
+	lines, err := c.read()
+	if err != nil {
+		return false
+	}
+	for _, l := range lines {
+		if isOurHeader(l) {
+			return true
+		}
+	}
+	return false
+}
+
 // Uninstall removes our table only.
 func (c *Codex) Uninstall(context.Context) error {
 	if _, err := os.Stat(c.configPath()); errors.Is(err, os.ErrNotExist) {

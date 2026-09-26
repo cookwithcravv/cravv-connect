@@ -364,6 +364,11 @@ func (s *setup) run(f Factory) error {
 // integration is already in place; setup then skips them.
 type installChecker interface{ Installed() bool }
 
+// outdatedChecker is implemented by installers that can tell an older
+// version of their integration is in place; setup updates it without
+// asking (it was agreed to when it was installed).
+type outdatedChecker interface{ Outdated() bool }
+
 // agents offers the integration for every detected agent.
 func (s *setup) agents() error {
 	s.section("Agents")
@@ -387,6 +392,13 @@ func (s *setup) agents() error {
 		}
 		if c, ok := i.(installChecker); ok && c.Installed() {
 			fmt.Fprintf(s.w, "%s: already set up.\n", name)
+			continue
+		}
+		if c, ok := i.(outdatedChecker); ok && c.Outdated() {
+			if err := i.Install(s.ctx, bin); err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
+			fmt.Fprintf(s.w, "Updated cravv-connect for %s to this version. Restart it so it loads the new version.\n", name)
 			continue
 		}
 		ok, err := s.agree(fmt.Sprintf("Add cravv-connect to %s?", name), true)

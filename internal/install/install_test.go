@@ -601,3 +601,109 @@ func TestClaudeSkill(t *testing.T) {
 		t.Fatalf("the user's skill was changed: %q", b)
 	}
 }
+
+// claudeCLI stands in for the claude command: `claude mcp add --scope user`
+// records the server in ~/.claude.json, and remove takes it out, as the
+// real CLI does.
+type claudeCLI struct {
+	fakeRunner
+	home string
+}
+
+func (c *claudeCLI) Run(ctx context.Context, name string, args ...string) (string, error) {
+	out, err := c.fakeRunner.Run(ctx, name, args...)
+	if err != nil || name != "claude" || len(args) < 2 || args[0] != "mcp" {
+		return out, err
+	}
+	path := filepath.Join(c.home, ".claude.json")
+	cfg := map[string]any{}
+	if b, err := os.ReadFile(path); err == nil {
+		json.Unmarshal(b, &cfg)
+	}
+	servers, _ := cfg["mcpServers"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+	}
+	switch args[1] {
+	case "add":
+		servers[ServerName] = map[string]any{"type": "stdio", "command": args[len(args)-2], "args": []string{"mcp"}}
+	case "remove":
+		delete(servers, ServerName)
+	}
+	cfg["mcpServers"] = servers
+	b, _ := json.Marshal(cfg)
+	return out, os.WriteFile(path, b, 0o600)
+}
+
+// Installed is true only when everything this version installs is in
+// place; Outdated when an older integration is (setup then updates it
+// without asking). A piece the user removed at this version is neither:
+// setup asks.
+func TestClaudeInstalledAndOutdated(t *testing.T) {
+	home := t.TempDir()
+	c := &Claude{Home: home, Run: &claudeCLI{home: home}, LookPath: found}
+	check := func(what string, installed, outdated bool) {
+		t.Helper()
+		if c.Installed() != installed || c.Outdated() != outdated {
+			t.Fatalf("%s: installed %v outdated %v, want %v %v", what, c.Installed(), c.Outdated(), installed, outdated)
+		}
+	}
+	check("fresh", false, false)
+	if err := c.Install(bg, bin); err != nil {
+		t.Fatal(err)
+	}
+	check("installed", true, false)
+
+	skill := filepath.Join(home, ".claude", "skills", "cravv", "SKILL.md")
+	os.WriteFile(skill, []byte(strings.Replace(CravvSkill, "check_inbox", "check_inbox()", 1)), 0o644)
+	check("an older /cravv skill of ours", false, true)
+	os.WriteFile(skill, []byte("my own cravv skill"), 0o644)
+	check("the user's own skill", true, false)
+	os.Remove(skill)
+	check("skill removed by the user", false, false)
+	if err := c.Install(bg, bin); err != nil {
+		t.Fatal(err)
+	}
+	check("installed again", true, false)
+
+	// A v1 install: the MCP server and the hooks, no version and no skill.
+	state := filepath.Join(home, ".cravv-connect", "claude-allow-rules.json")
+	os.WriteFile(state, []byte(`{"added": []}`), 0o600)
+	os.Remove(skill)
+	check("v1", false, true)
+	if err := c.Install(bg, bin); err != nil {
+		t.Fatal(err)
+	}
+	check("updated", true, false)
+
+	// The MCP server removed with the claude CLI.
+	if _, err := c.Run.Run(bg, "claude", "mcp", "remove", "--scope", "user", ServerName); err != nil {
+		t.Fatal(err)
+	}
+	check("no MCP server", false, false)
+	if err := c.Uninstall(bg); err != nil {
+		t.Fatal(err)
+	}
+	check("uninstalled", false, false)
+}
+
+// Codex is set up when config.toml has our MCP server table.
+func TestCodexInstalled(t *testing.T) {
+	home := t.TempDir()
+	c := &Codex{Home: home, LookPath: found}
+	if c.Installed() {
+		t.Fatal("installed before install")
+	}
+	if err := c.Install(bg, bin); err != nil {
+		t.Fatal(err)
+	}
+	if !c.Installed() {
+		t.Fatal("not installed after install")
+	}
+	if err := c.Uninstall(bg); err != nil {
+		t.Fatal(err)
+	}
+	if c.Installed() {
+		t.Fatal("installed after uninstall")
+	}
+}

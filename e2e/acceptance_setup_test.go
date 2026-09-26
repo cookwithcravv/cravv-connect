@@ -47,6 +47,12 @@ func (b *syncBuffer) Write(p []byte) (int, error) {
 	return b.buf.Write(p)
 }
 
+func (b *syncBuffer) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
+
 func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -104,8 +110,11 @@ func (p *scriptPrompter) left() []promptStep {
 	return append([]promptStep(nil), p.steps...)
 }
 
-// claudeCLI stands in for the claude command the installer runs.
+// claudeCLI stands in for the claude command the installer runs:
+// `claude mcp add --scope user` records the server in ~/.claude.json, as
+// the real CLI does.
 type claudeCLI struct {
+	home string
 	mu   sync.Mutex
 	runs []string
 }
@@ -114,6 +123,10 @@ func (c *claudeCLI) Run(_ context.Context, name string, args ...string) (string,
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.runs = append(c.runs, name+" "+strings.Join(args, " "))
+	if len(args) > 1 && args[0] == "mcp" && args[1] == "add" {
+		cfg := `{"mcpServers": {"cravv-connect": {"type": "stdio", "command": "` + args[len(args)-2] + `", "args": ["mcp"]}}}`
+		return "", os.WriteFile(filepath.Join(c.home, ".claude.json"), []byte(cfg), 0o600)
+	}
 	return "", nil
 }
 
@@ -179,7 +192,7 @@ func newFreshMachine(t *testing.T, r *Relay, name string) *freshMachine {
 		}
 	}
 	return &freshMachine{
-		t: t, name: name, relay: r, home: home, prompt: &scriptPrompter{}, out: &syncBuffer{}, claude: &claudeCLI{},
+		t: t, name: name, relay: r, home: home, prompt: &scriptPrompter{}, out: &syncBuffer{}, claude: &claudeCLI{home: home},
 		paths: config.Paths{
 			Home: state, Config: filepath.Join(state, "config.toml"), DB: filepath.Join(state, "store.db"),
 			Audit: filepath.Join(state, "audit.log"), Socket: filepath.Join(state, "d.sock"),
@@ -410,4 +423,15 @@ func TestAcceptance_6_Setup(t *testing.T) {
 	Eventually(t, wait, "the message in the GPU box's chat", func() bool {
 		return strings.Contains(trainer.call("check_inbox", nil), "ACC6-HELLO")
 	})
+
+	// Setup again only reports: nothing is asked about Claude Code, and
+	// nothing is installed twice.
+	mac.out.Reset()
+	mac.prompt.steps = []promptStep{askLine("Pair a device now?", "n")}
+	if got := mac.Run("setup"); got != 0 {
+		t.Fatalf("setup again exited %d:\n%s", got, mac.out.String())
+	}
+	if out := mac.out.String(); !strings.Contains(out, "claude: already set up.") || len(mac.claude.runs) != 1 {
+		t.Fatalf("setup again: runs %q\n%s", mac.claude.runs, out)
+	}
 }

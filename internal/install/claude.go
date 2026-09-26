@@ -26,6 +26,9 @@ type Claude struct {
 	Home     string
 	Run      Runner
 	LookPath func(string) (string, error)
+	// ConfigDir is CLAUDE_CONFIG_DIR when set: where Claude Code keeps
+	// .claude.json instead of the home folder.
+	ConfigDir string
 }
 
 func (c *Claude) Name() string { return "claude" }
@@ -97,7 +100,7 @@ func (c *Claude) Uninstall(ctx context.Context) error {
 		return err
 	}
 	if _, err := os.Stat(c.settingsPath()); errors.Is(err, os.ErrNotExist) {
-		return c.saveAllowState(nil)
+		return c.removeAllowState()
 	}
 	if err := c.editSettings(func(s map[string]any) {
 		removeClaudeHooks(s)
@@ -105,7 +108,116 @@ func (c *Claude) Uninstall(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	return c.saveAllowState(nil)
+	return c.removeAllowState()
+}
+
+// IntegrationVersion is the version of what InstallWith puts into Claude
+// Code (the MCP server entry, the hooks, the allow rules and the /cravv
+// skill). Bump it when any of them changes, so `setup` updates an older
+// install without asking. It is recorded in the allow-rules state file.
+const IntegrationVersion = 2
+
+// integration is what is in place in Claude Code.
+type integration struct {
+	mcp, hooks bool
+	skillOK    bool // our skill as this version writes it, or one the user wrote
+	ourSkill   bool // a skill file of ours, of any version
+	staleSkill bool // a skill file of ours that is not this version's
+	version    int  // from the state file (0: none, or from before versions)
+}
+
+func (c *Claude) inspect() integration {
+	var in integration
+	in.mcp = c.mcpRegistered()
+	in.hooks = c.hooksPresent()
+	if b, err := os.ReadFile(c.skillPath()); err == nil {
+		ours := strings.Contains(string(b), skillMarker)
+		in.ourSkill = ours
+		in.staleSkill = ours && string(b) != CravvSkill
+		in.skillOK = !ours || !in.staleSkill
+	}
+	if st, err := c.readAllowState(); err == nil {
+		in.version = st.Version
+	}
+	return in
+}
+
+// Installed reports whether this version's integration is in place: the
+// MCP server registered for the user, both hooks, the /cravv skill (this
+// version's, or one the user wrote), and this IntegrationVersion recorded.
+// setup skips Claude Code then.
+func (c *Claude) Installed() bool {
+	in := c.inspect()
+	return in.mcp && in.hooks && in.skillOK && in.version >= IntegrationVersion
+}
+
+// Outdated reports whether an older integration is in place (from an
+// earlier version: an older version recorded, or none, or an older /cravv
+// skill of ours). setup updates it without asking. A piece the user
+// removed from a current install is not outdated: setup asks.
+func (c *Claude) Outdated() bool {
+	in := c.inspect()
+	if in.mcp && in.hooks && in.skillOK && in.version >= IntegrationVersion {
+		return false
+	}
+	return (in.mcp || in.hooks || in.ourSkill) && (in.version < IntegrationVersion || in.staleSkill)
+}
+
+// claudeUserConfig is where the claude CLI keeps user-scope MCP servers.
+func (c *Claude) claudeUserConfig() string {
+	if c.ConfigDir != "" {
+		return filepath.Join(c.ConfigDir, ".claude.json")
+	}
+	return filepath.Join(c.Home, ".claude.json")
+}
+
+// mcpRegistered reports whether ~/.claude.json lists our MCP server for
+// the user (what `claude mcp add --scope user` writes). Reading the file
+// avoids `claude mcp get`, which starts the server to check it.
+func (c *Claude) mcpRegistered() bool {
+	b, err := os.ReadFile(c.claudeUserConfig())
+	if err != nil {
+		return false
+	}
+	var cfg struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if json.Unmarshal(b, &cfg) != nil {
+		return false
+	}
+	_, ok := cfg.MCPServers[ServerName]
+	return ok
+}
+
+// hooksPresent reports whether settings.json runs our hook on every event
+// we use.
+func (c *Claude) hooksPresent() bool {
+	b, err := os.ReadFile(c.settingsPath())
+	if err != nil {
+		return false
+	}
+	var s struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if json.Unmarshal(b, &s) != nil {
+		return false
+	}
+	for _, ev := range claudeHookEvents {
+		found := false
+		for _, g := range s.Hooks[ev] {
+			for _, h := range g.Hooks {
+				found = found || isOurHook(h.Command)
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // editSettings loads settings.json (or {}), applies fn, and writes it back.

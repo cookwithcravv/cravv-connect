@@ -53,36 +53,50 @@ func (c *Claude) allowStatePath() string {
 	return filepath.Join(c.Home, ".cravv-connect", "claude-allow-rules.json")
 }
 
+// claudeAllowState is the state file: the allow rules we added and the
+// IntegrationVersion that installed them (0: before versions were kept).
 type claudeAllowState struct {
-	Added []string `json:"added"`
+	Added   []string `json:"added"`
+	Version int      `json:"version,omitempty"`
+}
+
+// readAllowState returns the state file (zero if there is none).
+func (c *Claude) readAllowState() (claudeAllowState, error) {
+	var st claudeAllowState
+	b, err := os.ReadFile(c.allowStatePath())
+	if errors.Is(err, os.ErrNotExist) {
+		return st, nil
+	}
+	if err != nil {
+		return st, err
+	}
+	if err := json.Unmarshal(b, &st); err != nil {
+		return st, fmt.Errorf("%s is not valid JSON, not changing the allow rules: %w", c.allowStatePath(), err)
+	}
+	return st, nil
 }
 
 // loadAllowState returns the rules we added (none if there is no state file).
 func (c *Claude) loadAllowState() ([]string, error) {
-	b, err := os.ReadFile(c.allowStatePath())
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var st claudeAllowState
-	if err := json.Unmarshal(b, &st); err != nil {
-		return nil, fmt.Errorf("%s is not valid JSON, not changing the allow rules: %w", c.allowStatePath(), err)
-	}
-	return st.Added, nil
+	st, err := c.readAllowState()
+	return st.Added, err
 }
 
-// saveAllowState records added, or removes the state file when it is empty.
+// removeAllowState removes the state file (uninstall).
+func (c *Claude) removeAllowState() error {
+	if err := os.Remove(c.allowStatePath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// saveAllowState records added and this IntegrationVersion.
 func (c *Claude) saveAllowState(added []string) error {
 	path := c.allowStatePath()
-	if len(added) == 0 {
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		return nil
+	if added == nil {
+		added = []string{}
 	}
-	b, err := json.MarshalIndent(claudeAllowState{Added: added}, "", "  ")
+	b, err := json.MarshalIndent(claudeAllowState{Added: added, Version: IntegrationVersion}, "", "  ")
 	if err != nil {
 		return err
 	}

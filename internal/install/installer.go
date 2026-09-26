@@ -95,7 +95,7 @@ func (r *Registry) Names() []string {
 // home directory.
 func DefaultRegistry(home string, run Runner) *Registry {
 	return NewRegistry(
-		&Claude{Home: home, Run: run, LookPath: exec.LookPath},
+		&Claude{Home: home, Run: run, LookPath: exec.LookPath, ConfigDir: os.Getenv("CLAUDE_CONFIG_DIR")},
 		&Codex{Home: home, LookPath: exec.LookPath},
 	)
 }

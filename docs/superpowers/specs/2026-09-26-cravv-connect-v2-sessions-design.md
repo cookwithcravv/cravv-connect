@@ -312,6 +312,7 @@ Machine management (pause, resume, unpair, alias) moves to the CLI, the web UI a
   3. `init` and `daemon install`, then wait until the daemon is online.
   4. Detect `claude` and `codex`, and install their integrations (MCP server, hooks, the `/cravv` skill, allow rules).
   5. Offer "pair a device now", which shows a **join code** and waits.
+- **Running it again** only reports what is in place. A running daemon whose `status` version is not the CLI's (a v1 daemon reports none) is restarted, through the login service when installed: "Restarted the daemon (was <old>, now <new>)"; `daemon start` does the same. An agent whose integration is complete at the current integration version (Claude Code: MCP server entry, both hooks, the `/cravv` skill, and the version recorded in the allow-rules state; Codex: its `mcp_servers` table) is skipped; an older one is installed again without asking.
 - **Join code.** `cravv-join:<base32(relay origin)>:<nameplate>-<secret>`, also shown as a terminal QR code.
 - **`setup --join <code>` (other machine).**
   - It decodes the relay origin and shows it: "Join relay https://... ? (y/N)".
