@@ -35,6 +35,10 @@ npm run dev         # wrangler dev on http://127.0.0.1:8787
 
 ## Deploy
 
+First enable R2 for the account in the Cloudflare dashboard (R2 Object
+Storage, then accept the plan; the free tier is enough). Until R2 is enabled,
+`wrangler r2 bucket create` fails.
+
 ```sh
 cd relay-cf
 npm ci
