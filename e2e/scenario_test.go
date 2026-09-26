@@ -113,10 +113,13 @@ func TestScenario_MacAndGPUBox(t *testing.T) {
 		task  string
 		reply string
 	}{{training, trainTask.TaskID, "SCN-TRAINER-REPLY"}, {voice, voiceTask.TaskID, "SCN-WAKEWORD-REPLY"}} {
+		// The task turns done before its update reaches the inbox, so wait
+		// for the update itself: an unread one would wake the listener below.
+		var inbox string
 		Eventually(t, wait, "the result and the reply", func() bool {
-			c.chat.m.call("check_inbox", nil)
+			inbox += c.chat.m.call("check_inbox", nil)
 			done := strings.Contains(c.chat.m.call("get_task", map[string]any{"task_id": c.task}), `"state": "done"`)
-			return done && strings.Contains(strings.Join(*c.chat.seen, "\n"), c.reply)
+			return done && strings.Contains(inbox, "state: done") && strings.Contains(strings.Join(*c.chat.seen, "\n"), c.reply)
 		})
 	}
 
