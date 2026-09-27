@@ -97,4 +97,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" dist/*.tar.gz dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes --verify-tag
+        # A tag with a suffix (v1.2.0-rc.1) is a prerelease, which GitHub never
+        # marks as latest, so install.sh keeps installing the last real release.
+        run: |
+          set -eu
+          pre=""
+          case "$TAG" in *-*) pre="--prerelease" ;; esac
+          gh release create "$TAG" dist/*.tar.gz dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes --verify-tag $pre
