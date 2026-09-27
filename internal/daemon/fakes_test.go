@@ -62,6 +62,9 @@ type fakeMailbox struct {
 	token      string
 	deliveries chan transport.Delivery
 	done       chan struct{}
+	// onSend, if set, runs inside Send before the relay's answer is returned:
+	// it models traffic from the peer that arrives while the send is in flight.
+	onSend func(id string)
 }
 
 func newFakeMailbox(log *callLog) *fakeMailbox {
@@ -85,6 +88,11 @@ func (f *fakeMailbox) Send(_ context.Context, to core.MachineID, id string, fram
 		return "", f.sendErr
 	}
 	f.sent = append(f.sent, sentFrame{To: to, ID: id, Frame: append([]byte(nil), frame...)})
+	if hook := f.onSend; hook != nil {
+		f.mu.Unlock()
+		hook(id)
+		f.mu.Lock()
+	}
 	if len(f.statuses) == 0 {
 		return transport.SendQueued, nil
 	}

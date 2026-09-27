@@ -196,6 +196,29 @@ func (s *memOutbox) SetStatus(_ context.Context, id string, st store.OutboxStatu
 	return nil
 }
 
+func (s *memOutbox) SetStatusIf(_ context.Context, id string, from, st store.OutboxStatus, attempts int, next time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	it, ok := s.m[id]
+	if !ok || it.Status != from {
+		return false, nil
+	}
+	it.Status, it.Attempts, it.NextAttempt = st, attempts, next
+	s.m[id] = it
+	return true, nil
+}
+
+func (s *memOutbox) DeleteIf(_ context.Context, id string, from store.OutboxStatus) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	it, ok := s.m[id]
+	if !ok || it.Status != from {
+		return false, nil
+	}
+	delete(s.m, id)
+	return true, nil
+}
+
 func (s *memOutbox) Delete(_ context.Context, ids ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -209,7 +232,7 @@ func (s *memOutbox) HoldPeer(_ context.Context, to core.MachineID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, it := range s.m {
-		if it.To == to && (it.Status == store.OutboxPending || it.Status == store.OutboxQueued) && !memIsControl(it) {
+		if it.To == to && (it.Status == store.OutboxPending || it.Status == store.OutboxQueued || it.Status == store.OutboxSending) && !memIsControl(it) {
 			it.Status = store.OutboxHeld
 			s.m[id] = it
 		}
@@ -322,7 +345,7 @@ func (s *memOutbox) RequeueStale(_ context.Context, now time.Time) (int, error) 
 	defer s.mu.Unlock()
 	n := 0
 	for id, it := range s.m {
-		if it.Status == store.OutboxQueued && !it.NextAttempt.After(now) {
+		if (it.Status == store.OutboxQueued || it.Status == store.OutboxSending) && !it.NextAttempt.After(now) {
 			it.Status = store.OutboxPending
 			s.m[id] = it
 			n++

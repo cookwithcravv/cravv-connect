@@ -56,6 +56,10 @@ const (
 	OutboxPending OutboxStatus = "pending"
 	OutboxQueued  OutboxStatus = "queued"
 	OutboxHeld    OutboxStatus = "held"
+	// OutboxSending marks an item whose send is in flight. Whatever the relay
+	// answers is recorded only if the item is still sending, so a concurrent
+	// change (a reseal, a delivery receipt, a hold) is never overwritten.
+	OutboxSending OutboxStatus = "sending"
 )
 
 type OutboxItem struct {
@@ -73,14 +77,20 @@ type OutboxStore interface {
 	Due(ctx context.Context, now time.Time, limit int) ([]OutboxItem, error) // Status=pending AND NextAttempt<=now, oldest first
 	Get(ctx context.Context, id string) (OutboxItem, error)
 	SetStatus(ctx context.Context, id string, st OutboxStatus, attempts int, next time.Time) error
+	// SetStatusIf is SetStatus only while the item's status is still from;
+	// it reports whether it applied (false also when the item is gone).
+	SetStatusIf(ctx context.Context, id string, from, st OutboxStatus, attempts int, next time.Time) (bool, error)
+	// DeleteIf deletes the item only while its status is still from.
+	DeleteIf(ctx context.Context, id string, from OutboxStatus) (bool, error)
 	Delete(ctx context.Context, ids ...string) error                         // on delivered
-	HoldPeer(ctx context.Context, to core.MachineID) error                   // pending|queued -> held, except control.* envelopes
+	HoldPeer(ctx context.Context, to core.MachineID) error                   // pending|queued|sending -> held, except control.* envelopes
 	ReleasePeer(ctx context.Context, to core.MachineID, now time.Time) error // held -> pending, next=now
 	DeleteOutboxForPeer(ctx context.Context, to core.MachineID) error        // all items to a peer (unpair)
 	PurgeOutboxBefore(ctx context.Context, t time.Time) (int, error)         // CreatedAt < t
-	CountOutbox(ctx context.Context) (pending int, held int, err error)      // pending = status pending or queued
-	// RequeueStale moves queued items whose NextAttempt <= now back to pending
-	// (the relay dropped them after its TTL without a control.delivered).
+	CountOutbox(ctx context.Context) (pending int, held int, err error)      // pending = status pending, sending or queued
+	// RequeueStale moves queued or sending items whose NextAttempt <= now back
+	// to pending (the relay dropped them after its TTL without a
+	// control.delivered, or the daemon stopped in the middle of a send).
 	RequeueStale(ctx context.Context, now time.Time) (int, error)
 }
 

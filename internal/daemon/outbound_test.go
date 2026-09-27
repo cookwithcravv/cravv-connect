@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -154,6 +155,41 @@ func TestStalePrekeyReseal(t *testing.T) {
 	mustPut(t, f.peers, other.rec)
 	if err := f.o.Reseal(ctx, other.rec.MachineID, id); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("reseal by a different peer err = %v, want ErrNotFound", err)
+	}
+}
+
+// A control.stale_prekey can arrive while the first send is still waiting
+// for the relay's answer (the relay delivers before it replies). The reseal
+// it triggers must survive the send's own "queued" bookkeeping, or the
+// message waits a whole RelayTTL before it is sent again (and the peer
+// answers stale_prekey only once per message).
+func TestResealDuringSendIsNotOverwritten(t *testing.T) {
+	f := newOutboundFixture(t)
+	ctx := context.Background()
+	newPK, err := keys.GeneratePrekey(testEpoch.Add(8 * 24 * time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := f.send(t, "sealed to the old prekey")
+	var once sync.Once
+	f.mb.onSend = func(sent string) {
+		once.Do(func() {
+			p := mustGetPeer(t, f.peers, f.gpu.rec.MachineID)
+			p.Prekey = newPK.Signed(f.gpu.id).Wire()
+			mustPut(t, f.peers, p)
+			if err := f.o.Reseal(ctx, f.gpu.rec.MachineID, sent); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	f.pass(t) // first send; the reseal lands before its "queued" answer
+	f.pass(t) // the resealed message goes out now, not after RelayTTL
+	sent := f.mb.sentFrames()
+	if len(sent) != 2 || sent[1].ID != id {
+		t.Fatalf("sent %d frames, want the first send and the resend", len(sent))
+	}
+	if fr, _, err := openAs(t, f.me, f.gpu, sent[1].Frame, newPK); err != nil || fr.Header.PKID != newPK.ID {
+		t.Fatalf("resend: pk %s err %v", fr.Header.PKID, err)
 	}
 }
 

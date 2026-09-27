@@ -273,3 +273,57 @@ func TestOutboxDueKeepsQueueOrderWithinATimestamp(t *testing.T) {
 		t.Fatalf("due order %v, want queue order %v", got, queued)
 	}
 }
+
+// An in-flight (sending) item is updated or deleted only while it is still
+// sending; a concurrent change wins. It counts as pending, can be held, and
+// returns to pending after its timeout (a daemon that stopped mid-send).
+func TestOutboxSendingCompareAndSet(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	at := time.UnixMilli(1_700_000_000_000)
+	if err := db.Enqueue(ctx, outItem("A", "peer", at, at)); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := db.SetStatusIf(ctx, "A", store.OutboxPending, store.OutboxSending, 0, at.Add(time.Minute)); err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	if ok, _ := db.SetStatusIf(ctx, "A", store.OutboxPending, store.OutboxSending, 0, at); ok {
+		t.Fatal("claimed twice")
+	}
+	if pending, held, _ := db.CountOutbox(ctx); pending != 1 || held != 0 {
+		t.Fatalf("count while sending: pending %d held %d", pending, held)
+	}
+	// A reseal lands mid-send: the send's own bookkeeping must not apply.
+	if err := db.SetStatus(ctx, "A", store.OutboxPending, 0, at); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := db.SetStatusIf(ctx, "A", store.OutboxSending, store.OutboxQueued, 1, at.Add(time.Hour)); ok {
+		t.Fatal("queued overwrote the reseal")
+	}
+	if ok, _ := db.DeleteIf(ctx, "A", store.OutboxSending); ok {
+		t.Fatal("deleted after the reseal")
+	}
+	if got := dueIDs(t, db, at, 10); !equalStrings(got, []string{"A"}) {
+		t.Fatalf("due %v", got)
+	}
+	// Mid-send crash: sending past its timeout goes back to pending.
+	if ok, _ := db.SetStatusIf(ctx, "A", store.OutboxPending, store.OutboxSending, 0, at.Add(time.Minute)); !ok {
+		t.Fatal("reclaim")
+	}
+	if n, err := db.RequeueStale(ctx, at.Add(2*time.Minute)); err != nil || n != 1 {
+		t.Fatalf("requeue stale sending: %d %v", n, err)
+	}
+	// A hold also covers an item in flight.
+	if ok, _ := db.SetStatusIf(ctx, "A", store.OutboxPending, store.OutboxSending, 0, at.Add(time.Minute)); !ok {
+		t.Fatal("reclaim")
+	}
+	if err := db.HoldPeer(ctx, "peer"); err != nil {
+		t.Fatal(err)
+	}
+	if _, held, _ := db.CountOutbox(ctx); held != 1 {
+		t.Fatalf("held %d, want 1", held)
+	}
+	if ok, _ := db.DeleteIf(ctx, "gone", store.OutboxSending); ok {
+		t.Fatal("deleted a missing item")
+	}
+}

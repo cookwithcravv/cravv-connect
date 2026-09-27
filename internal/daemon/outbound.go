@@ -239,10 +239,19 @@ func (o *Outbound) attempt(ctx context.Context, mb transport.Mailbox, it store.O
 		o.recordError(fmt.Sprintf("cannot seal to %s: %v", peer.Alias, err))
 		return o.backoff(ctx, it)
 	}
+	// Mark the send in flight. The relay may deliver the frame, and the peer
+	// may answer (control.stale_prekey, control.delivered), before the relay's
+	// own reply reaches us; everything below is recorded only if the item is
+	// still sending, so such a change is never overwritten. A daemon that
+	// stops mid-send leaves the item sending until RequeueStale picks it up.
+	claimed, err := o.outbox.SetStatusIf(ctx, it.ID, store.OutboxPending, store.OutboxSending, it.Attempts, o.clock.Now().Add(sendingTimeout))
+	if err != nil || !claimed {
+		return err // changed since Due (held, resealed, deleted): leave it
+	}
 	st, err := mb.Send(ctx, it.To, it.ID, frame)
 	if err != nil {
 		o.logger.Info("relay send failed", "id", it.ID, "err", err)
-		return o.backoff(ctx, it)
+		return o.backoffSending(ctx, it)
 	}
 	switch st {
 	case transport.SendQueued:
@@ -251,38 +260,57 @@ func (o *Outbound) attempt(ctx context.Context, mb transport.Mailbox, it store.O
 			// queued control item would otherwise sit in the outbox (and in the
 			// status counts) until the purge, and RequeueStale would resend it
 			// after every RelayTTL. The relay now owns it.
-			return o.outbox.Delete(ctx, it.ID)
+			return o.deleteSending(ctx, it.ID)
 		}
 		// The relay keeps the frame for RelayTTL; if no control.delivered arrives by
 		// then, SendDue moves the item back to pending and it is sent again.
-		return o.outbox.SetStatus(ctx, it.ID, store.OutboxQueued, it.Attempts+1, o.clock.Now().Add(core.RelayTTL))
+		_, err := o.outbox.SetStatusIf(ctx, it.ID, store.OutboxSending, store.OutboxQueued, it.Attempts+1, o.clock.Now().Add(core.RelayTTL))
+		return err
 	case transport.SendNotAllowed:
 		if o.clock.Now().Sub(peer.PairedAt) < PairingGrace {
 			attempts := it.Attempts + 1
 			delay := min(backoffDelay(attempts), PairingGraceRetry)
-			return o.outbox.SetStatus(ctx, it.ID, store.OutboxPending, attempts, o.clock.Now().Add(delay))
+			_, err := o.outbox.SetStatusIf(ctx, it.ID, store.OutboxSending, store.OutboxPending, attempts, o.clock.Now().Add(delay))
+			return err
 		}
-		if err := o.markPausedByPeer(ctx, peer); err != nil {
+		if err := o.markPausedByPeer(ctx, peer); err != nil { // holds this item too
 			return err
 		}
 		if env.Kind.IsControl() {
 			// Keep retrying: the peer may have paused us after we paused them, and
 			// only our control.resumed tells it we are back.
-			return o.backoff(ctx, it)
+			return o.backoffSending(ctx, it)
 		}
 		return nil
 	case transport.SendTooLarge:
 		o.recordError(fmt.Sprintf("dropped message %s to %s: too large for the relay", it.ID, peer.Alias))
-		return o.outbox.Delete(ctx, it.ID)
+		return o.deleteSending(ctx, it.ID)
 	case transport.SendUnknownMailbox:
 		o.recordError(fmt.Sprintf("dropped message %s: %s has no mailbox on this relay", it.ID, peer.Alias))
-		return o.outbox.Delete(ctx, it.ID)
+		return o.deleteSending(ctx, it.ID)
 	case transport.SendQueueFull:
 		o.recordError(fmt.Sprintf("peer's mailbox full: %s", peer.Alias))
-		return o.backoff(ctx, it)
+		return o.backoffSending(ctx, it)
 	default: // rate_limited and anything unknown
-		return o.backoff(ctx, it)
+		return o.backoffSending(ctx, it)
 	}
+}
+
+// sendingTimeout is how long an item may stay marked in flight before
+// RequeueStale returns it to pending (a daemon that stopped mid-send).
+const sendingTimeout = 2 * time.Minute
+
+// backoffSending schedules a retry for an item whose send is still in flight.
+func (o *Outbound) backoffSending(ctx context.Context, it store.OutboxItem) error {
+	attempts := it.Attempts + 1
+	_, err := o.outbox.SetStatusIf(ctx, it.ID, store.OutboxSending, store.OutboxPending, attempts, o.clock.Now().Add(backoffDelay(attempts)))
+	return err
+}
+
+// deleteSending drops an item whose send is still in flight.
+func (o *Outbound) deleteSending(ctx context.Context, id string) error {
+	_, err := o.outbox.DeleteIf(ctx, id, store.OutboxSending)
+	return err
 }
 
 func (o *Outbound) seal(peer store.Peer, env core.Envelope) ([]byte, error) {

@@ -74,11 +74,31 @@ func (d *DB) Delete(ctx context.Context, ids ...string) error {
 
 // HoldPeer holds a peer's pending and queued items, except control.* envelopes: those
 // must keep flowing (a held control.resumed would deadlock a mutual pause).
+func (d *DB) SetStatusIf(ctx context.Context, id string, from, st store.OutboxStatus, attempts int, next time.Time) (bool, error) {
+	res, err := d.sql.ExecContext(ctx,
+		`UPDATE outbox SET status = ?, attempts = ?, next_attempt = ? WHERE id = ? AND status = ?`,
+		string(st), attempts, toMS(next), id, string(from))
+	if err != nil {
+		return false, err
+	}
+	n, err := affected(res)
+	return n > 0, err
+}
+
+func (d *DB) DeleteIf(ctx context.Context, id string, from store.OutboxStatus) (bool, error) {
+	res, err := d.sql.ExecContext(ctx, `DELETE FROM outbox WHERE id = ? AND status = ?`, id, string(from))
+	if err != nil {
+		return false, err
+	}
+	n, err := affected(res)
+	return n > 0, err
+}
+
 func (d *DB) HoldPeer(ctx context.Context, to core.MachineID) error {
 	_, err := d.sql.ExecContext(ctx,
-		`UPDATE outbox SET status = ? WHERE to_machine = ? AND status IN (?, ?)
+		`UPDATE outbox SET status = ? WHERE to_machine = ? AND status IN (?, ?, ?)
 AND COALESCE(CASE WHEN json_valid(CAST(envelope AS TEXT)) THEN json_extract(CAST(envelope AS TEXT), '$.kind') END, '') NOT LIKE 'control.%'`,
-		string(store.OutboxHeld), string(to), string(store.OutboxPending), string(store.OutboxQueued))
+		string(store.OutboxHeld), string(to), string(store.OutboxPending), string(store.OutboxQueued), string(store.OutboxSending))
 	return err
 }
 
@@ -107,9 +127,9 @@ func (d *DB) PurgeOutboxBefore(ctx context.Context, t time.Time) (int, error) {
 func (d *DB) CountOutbox(ctx context.Context) (int, int, error) {
 	var pending, held int
 	err := d.sql.QueryRowContext(ctx, `SELECT
-	COALESCE(SUM(CASE WHEN status IN (?, ?) THEN 1 ELSE 0 END), 0),
+	COALESCE(SUM(CASE WHEN status IN (?, ?, ?) THEN 1 ELSE 0 END), 0),
 	COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0)
-FROM outbox`, string(store.OutboxPending), string(store.OutboxQueued), string(store.OutboxHeld)).Scan(&pending, &held)
+FROM outbox`, string(store.OutboxPending), string(store.OutboxQueued), string(store.OutboxSending), string(store.OutboxHeld)).Scan(&pending, &held)
 	return pending, held, err
 }
 
@@ -131,8 +151,8 @@ func scanOutbox(s rowScanner) (store.OutboxItem, error) {
 
 // RequeueStale moves queued items whose next_attempt has passed back to pending.
 func (d *DB) RequeueStale(ctx context.Context, now time.Time) (int, error) {
-	res, err := d.sql.ExecContext(ctx, `UPDATE outbox SET status = ? WHERE status = ? AND next_attempt <= ?`,
-		string(store.OutboxPending), string(store.OutboxQueued), toMS(now))
+	res, err := d.sql.ExecContext(ctx, `UPDATE outbox SET status = ? WHERE status IN (?, ?) AND next_attempt <= ?`,
+		string(store.OutboxPending), string(store.OutboxQueued), string(store.OutboxSending), toMS(now))
 	if err != nil {
 		return 0, err
 	}
