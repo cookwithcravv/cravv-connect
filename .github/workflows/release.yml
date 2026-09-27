@@ -15,7 +15,8 @@ jobs:
   build:
     name: build ${{ matrix.goos }}/${{ matrix.goarch }}
     strategy:
-      fail-fast: true
+      # Every platform reports its own result; publish still needs all four.
+      fail-fast: false
       matrix:
         include:
           - { runner: macos-14, goos: darwin, goarch: arm64 }
