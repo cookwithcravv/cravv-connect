@@ -1,6 +1,12 @@
 .PHONY: all build test vet relay-test clean
 
 GO ?= go
+
+# github.com/msteinert/pam compiles with -std=c99, which hides RTLD_NEXT on
+# older glibc headers (Ubuntu 22.04) unless _GNU_SOURCE is defined.
+ifeq ($(shell uname -s),Linux)
+export CGO_CFLAGS ?= -O2 -g -D_GNU_SOURCE
+endif
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 all: vet test build
