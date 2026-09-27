@@ -393,6 +393,11 @@ func TestResetIdentity(t *testing.T) {
 	stop := d2Run(t, d)
 	d2Eventually(t, "connection", func() bool { _, ok := d.Mailbox(); return ok })
 	old := d.Identity().MachineID()
+	d2Eventually(t, "the first prekey", func() bool { _, err := d.store.CurrentPrekey(ctx); return err == nil })
+	oldPK, err := d.store.CurrentPrekey(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if err := d.ResetIdentity(ctx, true); err != nil {
 		t.Fatal(err)
@@ -406,8 +411,13 @@ func TestResetIdentity(t *testing.T) {
 	if peers, _ := d.store.ListPeers(ctx); len(peers) != 0 {
 		t.Fatalf("peers left after reset: %d", len(peers))
 	}
-	if _, err := d.store.CurrentPrekey(ctx); !errors.Is(err, core.ErrNotFound) {
-		t.Fatalf("prekey left after reset: %v", err)
+	// The old identity's prekeys are gone. The restarted services may already
+	// have made the new identity its first prekey, which is expected.
+	if _, err := d.store.GetPrekey(ctx, oldPK.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("the old identity's prekey is left after reset: %v", err)
+	}
+	if cur, err := d.store.CurrentPrekey(ctx); err == nil && cur.ID == oldPK.ID {
+		t.Fatal("the old prekey is still current")
 	}
 	if pending, held, _ := d.store.CountOutbox(ctx); pending+held != 0 {
 		t.Fatalf("outbox left after reset: %d/%d", pending, held)
