@@ -19,6 +19,10 @@ const (
 	pushBatch        = 64
 )
 
+// afterHandshake is a test seam: it runs after the handshake and before the
+// connection is set up. nil in production.
+var afterHandshake func()
+
 // errHandled means the connection was already answered and closed.
 var errHandled = errors.New("relayserver: handled")
 
@@ -68,15 +72,26 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		closeWithError(ctx, ws, relayproto.CodeBadRequest, "missing or invalid ik query parameter")
 		return
 	}
-	ik, err := s.handshake(ctx, ws, routeIK)
+	// The connection goes live just before its final handshake reply, so
+	// "the newest connection wins" follows the order clients see: a
+	// connection whose setup finishes late can never kick a newer one.
+	var c *mailboxConn
+	goLive := func(ik ed25519.PublicKey) {
+		c = &mailboxConn{s: s, ws: ws, ik: ik, mailbox: relayproto.MailboxID(ik), wake: make(chan struct{}, 1), ctx: ctx, cancel: cancel}
+		if old := s.hub.register(c); old != nil {
+			old.kick()
+		}
+	}
+	_, err = s.handshake(ctx, ws, routeIK, goLive)
+	if c != nil {
+		defer s.hub.unregister(c)
+	}
 	if err != nil {
 		return
 	}
-	c := &mailboxConn{s: s, ws: ws, ik: ik, mailbox: relayproto.MailboxID(ik), wake: make(chan struct{}, 1), ctx: ctx, cancel: cancel}
-	if old := s.hub.register(c); old != nil {
-		old.kick()
+	if afterHandshake != nil {
+		afterHandshake()
 	}
-	defer s.hub.unregister(c)
 	s.log.Info("mailbox connected", "mailbox", c.mailbox)
 	c.wakeUp()
 	go c.pushLoop()
@@ -85,7 +100,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 // handshake runs hello/welcome/challenge/auth and, for a new key, register.
-func (s *Server) handshake(ctx context.Context, ws *websocket.Conn, routeIK ed25519.PublicKey) (ed25519.PublicKey, error) {
+func (s *Server) handshake(ctx context.Context, ws *websocket.Conn, routeIK ed25519.PublicKey, goLive func(ed25519.PublicKey)) (ed25519.PublicKey, error) {
 	hctx, cancel := context.WithTimeout(ctx, handshakeTimeout)
 	defer cancel()
 
@@ -139,17 +154,20 @@ func (s *Server) handshake(ctx context.Context, ws *websocket.Conn, routeIK ed25
 		closeWithError(ctx, ws, relayproto.CodeInternal, "registry unavailable")
 		return nil, errHandled
 	}
+	if registered {
+		goLive(ik)
+	}
 	if err := writeJSON(ctx, ws, relayproto.AuthOK{T: relayproto.TypeAuthOK, Registered: registered, MailboxID: mailbox}); err != nil {
 		return nil, err
 	}
 	if registered {
 		return ik, nil
 	}
-	return ik, s.register(ctx, hctx, ws, mailbox)
+	return ik, s.register(ctx, hctx, ws, mailbox, func() { goLive(ik) })
 }
 
 // register handles the one frame an unregistered key may send.
-func (s *Server) register(ctx, hctx context.Context, ws *websocket.Conn, mailbox string) error {
+func (s *Server) register(ctx, hctx context.Context, ws *websocket.Conn, mailbox string, goLive func()) error {
 	h, raw, err := readFrame(hctx, ws)
 	if err != nil {
 		return err
@@ -175,6 +193,7 @@ func (s *Server) register(ctx, hctx context.Context, ws *websocket.Conn, mailbox
 		return errHandled
 	}
 	s.log.Info("mailbox registered", "mailbox", mailbox, "via_invite", reg.Invite != "" && reg.AdminToken == "")
+	goLive()
 	return reply(ctx, ws, relayproto.Res{RID: reg.RID, Status: relayproto.StatusOK})
 }
 

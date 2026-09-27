@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -347,4 +348,37 @@ func TestPaddedBase64Accepted(t *testing.T) {
 	sig := ed25519.Sign(k, relayproto.AuthMessage(tr.ts.URL, ch["nonce"].(string)))
 	c.write(relayproto.Auth{T: relayproto.TypeAuth, IK: relayproto.B64(pubOf(k)) + "=", Sig: relayproto.B64(sig) + "=="})
 	c.expect(relayproto.TypeAuthOK)
+}
+
+// The connection whose handshake the client saw finish last is the live one,
+// even if the server is slow to finish setting up an earlier connection: a
+// connection becomes live before its final handshake reply, so a late
+// earlier connection can never kick a newer one.
+func TestNewestHandshakeWinsEvenIfEarlierSetupIsSlow(t *testing.T) {
+	tr := newTestRelay(t, Limits{})
+	ka, kb := newKey(t), newKey(t)
+	release := make(chan struct{})
+	var once sync.Once
+	afterHandshake = func() {
+		first := false
+		once.Do(func() { first = true })
+		if first {
+			<-release // hold the first connection between handshake and setup
+		}
+	}
+	t.Cleanup(func() { afterHandshake = nil })
+
+	first := tr.member(t, ka)  // client sees the handshake finish
+	second := tr.member(t, ka) // then a newer connection finishes too
+	close(release)             // the first one's setup completes late
+	first.expectError(relayproto.CodeGone)
+
+	b := tr.member(t, kb)
+	second.allow(kb)
+	if st := b.send(ka, "x", []byte("x")); st != relayproto.StatusQueued {
+		t.Fatal(st)
+	}
+	if d := deliveries(t, second, 1)[0]; d["id"] != "x" {
+		t.Fatalf("got %v", d)
+	}
 }
