@@ -617,9 +617,30 @@ func TestStalePrekeyResend(t *testing.T) {
 	Eventually(t, wait, "request held while paused", func() bool { return a.Status().OutboxHeld >= 1 })
 	Call(t, b.Conn(), ipc.MethodPeerResume, ipc.AliasParams{Alias: "alice"}, nil)
 
-	b.WaitLink(wait, "request after the stale_prekey round trip", func(v ipc.LinkView) bool {
-		return v.State == "pending" && v.Direction == "in" && v.RemoteSession == "lead"
-	})
+	// On a timeout, record both sides' state so a failure in CI shows where
+	// the request stopped (the daemons' own logs are discarded in e2e).
+	arrived := func() bool {
+		for _, v := range b.AllLinks() {
+			if v.State == "pending" && v.Direction == "in" && v.RemoteSession == "lead" {
+				return true
+			}
+		}
+		return false
+	}
+	deadline := time.Now().Add(wait)
+	for !arrived() {
+		if time.Now().After(deadline) {
+			as, bs := a.Status(), b.Status()
+			ab, _ := a.PeerView("bob")
+			ba, _ := b.PeerView("alice")
+			t.Logf("alice: outbox pending=%d held=%d relay=%v errors=%v outbound=%v", as.OutboxPending, as.OutboxHeld, as.RelayConnected, as.Errors, a.Daemon.Outbound().Errors())
+			t.Logf("alice sees bob: %+v; bob prekey at alice %s (old %s)", ab, bobAtAlice().ID, old)
+			t.Logf("bob: outbox pending=%d held=%d relay=%v errors=%v outbound=%v", bs.OutboxPending, bs.OutboxHeld, bs.RelayConnected, bs.Errors, b.Daemon.Outbound().Errors())
+			t.Logf("bob sees alice: %+v; bob links %+v", ba, b.AllLinks())
+			t.Fatal("timed out waiting for bob: request after the stale_prekey round trip")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if got := bobAtAlice().ID; got == old {
 		t.Fatal("alice still holds the purged prekey after delivery")
 	}
