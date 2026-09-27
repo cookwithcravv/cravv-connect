@@ -254,3 +254,22 @@ func TestOutboxHoldPeerSkipsControlItems(t *testing.T) {
 		}
 	}
 }
+
+// Items queued in the same millisecond leave in the order they were queued,
+// whatever their IDs: a sender that queues a task update and then a
+// link.closed must not have the close overtake the update.
+func TestOutboxDueKeepsQueueOrderWithinATimestamp(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	at := time.UnixMilli(1_700_000_000_000)
+	// IDs chosen so that sorting by ID would reverse the queue order.
+	queued := []string{"ZZZ", "MMM", "AAA"}
+	for _, id := range queued {
+		if err := db.Enqueue(ctx, outItem(id, "peer", at, at)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := dueIDs(t, db, at, 10); !equalStrings(got, queued) {
+		t.Fatalf("due order %v, want queue order %v", got, queued)
+	}
+}

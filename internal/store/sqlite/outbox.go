@@ -21,7 +21,7 @@ func (d *DB) Enqueue(ctx context.Context, it store.OutboxItem) error {
 
 func (d *DB) Due(ctx context.Context, now time.Time, limit int) ([]store.OutboxItem, error) {
 	rows, err := d.sql.QueryContext(ctx, `SELECT `+outboxCols+` FROM outbox
-WHERE status = ? AND next_attempt <= ? ORDER BY created_at, id LIMIT ?`,
+WHERE status = ? AND next_attempt <= ? ORDER BY created_at, rowid LIMIT ?`,
 		string(store.OutboxPending), toMS(now), limit)
 	if err != nil {
 		return nil, err
