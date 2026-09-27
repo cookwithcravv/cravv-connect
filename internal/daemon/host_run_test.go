@@ -381,11 +381,15 @@ func TestHostRunTokenBindsOnlyItsSession(t *testing.T) {
 	if tk := e.finished(t, id); tk.State != core.TaskDone || tk.Result != "42 lines" {
 		t.Fatalf("task %+v", tk)
 	}
+	// The task is done as soon as the child completes it, which is before its
+	// run ends; the token and the run's connection are revoked when the run
+	// ends. Wait for that (it must happen), then check both.
+	d2Eventually(t, "the run's connection to be revoked after the run", func() bool {
+		_, err := e.shared.Current(ctx, e.sess.ID, 777)
+		return errors.Is(err, core.ErrNotShared)
+	})
 	if _, err := e.host.BindRun(ctx, token, 779); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("a token after its run: %v", err)
-	}
-	if _, err := e.shared.Current(ctx, e.sess.ID, 777); !errors.Is(err, core.ErrNotShared) {
-		t.Fatalf("the run's connection after the run: %v", err)
 	}
 }
 
