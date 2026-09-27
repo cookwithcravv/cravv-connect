@@ -44,7 +44,6 @@ type Server struct {
 	runPeer atomic.Pointer[func(pid int) bool]
 	mu      sync.RWMutex
 	methods map[string]method
-	conns   sync.WaitGroup
 	active  atomic.Int64 // requests running on all connections
 }
 
@@ -123,10 +122,13 @@ func (s *Server) Methods() map[string]Gate {
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	stop := context.AfterFunc(ctx, func() { ln.Close() })
 	defer stop()
+	// conns belongs to this call: a Server served again (a restart that
+	// reuses it) must not wait for, or race with, another Serve's connections.
+	var conns sync.WaitGroup
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			s.conns.Wait()
+			conns.Wait()
 			if ctx.Err() != nil {
 				return nil
 			}
@@ -137,9 +139,9 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 			conn.Close()
 			continue
 		}
-		s.conns.Add(1)
+		conns.Add(1)
 		go func() {
-			defer s.conns.Done()
+			defer conns.Done()
 			s.ServeConn(ctx, conn)
 		}()
 	}
