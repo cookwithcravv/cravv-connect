@@ -1,10 +1,10 @@
 package app
 
 import (
-	"github.com/cravv/cravv-connect/internal/auth"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/auth"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Wire kinds for daemon and auth errors that have no core sentinel.

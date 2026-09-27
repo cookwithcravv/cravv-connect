@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
 )
 
 // SetupSystem is what `cravv-connect setup` needs from the network and the

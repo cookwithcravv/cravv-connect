@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 var aliasRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,23}$`)

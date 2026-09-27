@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/api"
-	"github.com/cravv/cravv-connect/internal/app"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/api"
+	"github.com/cookwithcravv/cravv-connect/internal/app"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // ipcDoc is the local API's specification.

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 func TestChunkCount(t *testing.T) {

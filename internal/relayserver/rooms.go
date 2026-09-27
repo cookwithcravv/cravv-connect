@@ -11,7 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/cravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
 )
 
 // maxBufferedRoomMsgs bounds messages the creator may send before the joiner arrives.

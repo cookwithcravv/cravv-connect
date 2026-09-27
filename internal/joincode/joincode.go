@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/bindcode"
-	"github.com/cravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/bindcode"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
 )
 
 // Prefix starts every join code.

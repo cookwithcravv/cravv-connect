@@ -11,9 +11,9 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/cravv/cravv-connect/internal/relayproto"
-	"github.com/cravv/cravv-connect/internal/transport"
-	"github.com/cravv/cravv-connect/internal/transport/relayclient"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/transport/relayclient"
 )
 
 // The reader must never stall on an undrained Deliveries channel: request replies

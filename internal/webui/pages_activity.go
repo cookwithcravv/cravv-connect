@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // ActivityLimit is how many audit events the Activity page shows.

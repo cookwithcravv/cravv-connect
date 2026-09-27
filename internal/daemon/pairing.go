@@ -11,13 +11,13 @@ import (
 
 	"golang.org/x/crypto/chacha20poly1305"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/bindcode"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/keys"
-	"github.com/cravv/cravv-connect/internal/pake"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/bindcode"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/keys"
+	"github.com/cookwithcravv/cravv-connect/internal/pake"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
 
 var (

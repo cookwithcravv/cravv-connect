@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // handlers holds what every method group needs.

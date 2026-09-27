@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // ConnState is the per-connection state: the registered session (the

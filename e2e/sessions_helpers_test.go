@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // SharedChat is one agent chat that shared a session: its connection (the

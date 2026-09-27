@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // A human decision re-checks the link: approving a task on a link that no

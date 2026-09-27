@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // ShareAs is Share for an agent chat whose own ID (Claude Code's session

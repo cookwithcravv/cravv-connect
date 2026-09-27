@@ -10,7 +10,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/install"
+	"github.com/cookwithcravv/cravv-connect/internal/install"
 	"github.com/spf13/cobra"
 )
 

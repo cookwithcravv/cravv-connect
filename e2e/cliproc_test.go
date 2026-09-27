@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/cli"
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/fakeagent"
+	"github.com/cookwithcravv/cravv-connect/internal/cli"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/fakeagent"
 )
 
 // envAsCLI makes this test binary run as the cravv-connect command line, so

@@ -15,8 +15,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/auth"
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/auth"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Config is the user-editable configuration.

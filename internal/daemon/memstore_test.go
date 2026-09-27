@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // In-memory store fakes for daemon unit tests. They follow the store.* contracts

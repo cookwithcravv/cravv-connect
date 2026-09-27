@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func linkNet(t *testing.T) (*v2Net, *v2Node, *v2Node) {

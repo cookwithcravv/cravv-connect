@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Offer is a managed-session rule the owner made for one paired machine

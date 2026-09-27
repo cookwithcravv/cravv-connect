@@ -6,10 +6,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/store/sqlite"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store/sqlite"
 )
 
 // d2Audit records audit events.

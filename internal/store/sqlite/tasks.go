@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 const taskCols = `id, direction, peer, from_session, to_session, instructions, state, claimed_by,

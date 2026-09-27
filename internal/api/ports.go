@@ -7,10 +7,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // SessionPort registers and ends agent sessions.

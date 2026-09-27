@@ -3,7 +3,7 @@ package webui
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // addStatus is the Status page: machine status and the kill switch.

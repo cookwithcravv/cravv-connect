@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 const linkCols = `num, peer, link_id, direction, session_id, remote_session, remote_name, remote_purpose,

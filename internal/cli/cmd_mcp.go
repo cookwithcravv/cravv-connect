@@ -8,13 +8,13 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/mcpserver"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/mcpserver"
 	"github.com/spf13/cobra"
 )
 
-// Version is set at build time with -ldflags "-X github.com/cravv/cravv-connect/internal/cli.Version=v1.0.0".
+// Version is set at build time with -ldflags "-X github.com/cookwithcravv/cravv-connect/internal/cli.Version=v1.0.0".
 var Version = "dev"
 
 func init() { Register(newMCPCmd) }

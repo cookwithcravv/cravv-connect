@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // OfferPort edits the managed-session offer rules. Set and Remove take

@@ -12,8 +12,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/mcpserver"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/mcpserver"
 )
 
 // Human answers elicitation forms in the test's place. Each form is

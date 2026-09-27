@@ -11,9 +11,9 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/relayproto"
-	"github.com/cravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
 
 // mailbox is a live relay-v1 mailbox connection. One reader goroutine owns all reads;

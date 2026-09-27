@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/relayproto"
-	"github.com/cravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
 
 // Client holds what every relay-v1 connection needs: base URLs, HTTP client, clock.

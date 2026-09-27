@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/present"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // DefaultInboxLimit is used when Check or Wait is called with limit <= 0.

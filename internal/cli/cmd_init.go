@@ -11,8 +11,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
 	"github.com/spf13/cobra"
 )
 

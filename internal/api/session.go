@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func (h *handlers) registerSession(s *ipc.Server) {

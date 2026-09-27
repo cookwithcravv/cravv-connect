@@ -6,7 +6,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/cravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

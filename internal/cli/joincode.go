@@ -8,10 +8,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/bindcode"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/joincode"
-	"github.com/cravv/cravv-connect/internal/qrcode"
+	"github.com/cookwithcravv/cravv-connect/internal/bindcode"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/joincode"
+	"github.com/cookwithcravv/cravv-connect/internal/qrcode"
 	"golang.org/x/term"
 )
 

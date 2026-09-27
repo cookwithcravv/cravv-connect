@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Audit event types for managed sessions.

@@ -7,8 +7,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func testPeer(id, alias string) store.Peer {

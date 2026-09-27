@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // shortDir returns a temp dir with a short path: unix socket paths are limited

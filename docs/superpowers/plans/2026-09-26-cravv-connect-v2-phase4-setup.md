@@ -31,7 +31,7 @@
 
 ## Decisions
 
-- **The version variable is the existing `cli.Version`.** It was already declared (and reported by the MCP server) with the documented `-X github.com/cravv/cravv-connect/internal/cli.Version=...`; a second `version` variable would drift. `cravv-connect version` falls back to the module version for `go install ...@vX.Y.Z` builds.
+- **The version variable is the existing `cli.Version`.** It was already declared (and reported by the MCP server) with the documented `-X github.com/cookwithcravv/cravv-connect/internal/cli.Version=...`; a second `version` variable would drift. `cravv-connect version` falls back to the module version for `go install ...@vX.Y.Z` builds.
 - **Archive names drop the tag's `v`:** tag `v1.2.0` gives `cravv-connect_1.2.0_darwin_arm64.tar.gz`, and `cravv-connect version` prints `v1.2.0`.
 - **Setup refuses a public plain-http relay URL** even when typed by the person, because every joining machine would refuse its join codes; `init` still accepts it for special cases.
 - **The LAN test relay is not a service:** it runs in memory until the machine restarts (documented), on the fixed port 8787, listening on every interface.
@@ -171,9 +171,9 @@ go test ./internal/relayaddr -run '^(TestCheck|TestPrivateHost)$' -count=1
 Expected: FAIL, with output starting like this (paths relative to the repository):
 
 ```
-FAIL	github.com/cravv/cravv-connect/internal/relayaddr [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/relayaddr [build failed]
 FAIL
-# github.com/cravv/cravv-connect/internal/relayaddr [github.com/cravv/cravv-connect/internal/relayaddr.test]
+# github.com/cookwithcravv/cravv-connect/internal/relayaddr [github.com/cookwithcravv/cravv-connect/internal/relayaddr.test]
 internal/relayaddr/relayaddr_test.go:18:13: undefined: Check
 internal/relayaddr/relayaddr_test.go:23:13: undefined: Check
 internal/relayaddr/relayaddr_test.go:27:12: undefined: Check
@@ -261,7 +261,7 @@ index c00999d..7a7dd9e 100644
 -
 -// cgnat is the carrier-grade NAT range that Tailscale uses for node addresses.
 -var cgnat = netip.MustParsePrefix("100.64.0.0/10")
-+import "github.com/cravv/cravv-connect/internal/relayaddr"
++import "github.com/cookwithcravv/cravv-connect/internal/relayaddr"
  
  // validRelayURL accepts a relay URL learned from a peer (pairing payload or
 -// control.relay_moved): https with a host, or plain http only for relays on
@@ -373,7 +373,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/bindcode"
+	"github.com/cookwithcravv/cravv-connect/internal/bindcode"
 )
 
 var bind = bindcode.Code{Nameplate: "7K3F", Secret: "9QXMTR2A"}
@@ -488,9 +488,9 @@ go test ./internal/joincode -run '^(TestStringFormat|TestNewRefusesBadInput|Test
 Expected: FAIL, with output starting like this (paths relative to the repository):
 
 ```
-FAIL	github.com/cravv/cravv-connect/internal/joincode [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/joincode [build failed]
 FAIL
-# github.com/cravv/cravv-connect/internal/joincode [github.com/cravv/cravv-connect/internal/joincode.test]
+# github.com/cookwithcravv/cravv-connect/internal/joincode [github.com/cookwithcravv/cravv-connect/internal/joincode.test]
 internal/joincode/joincode_test.go:14:12: undefined: New
 internal/joincode/joincode_test.go:24:11: undefined: New
 internal/joincode/joincode_test.go:31:15: undefined: New
@@ -524,8 +524,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/bindcode"
-	"github.com/cravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/bindcode"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
 )
 
 // Prefix starts every join code.
@@ -698,8 +698,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/qrcode"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/qrcode"
 )
 
 const testJoinCode = "cravv-join:nb2hi4dthixs64tfnrqxsltfpbqw24dmmuxgg33n:7K3F-9QXMTR2A" // https://relay.example.com
@@ -869,13 +869,13 @@ go test ./internal/cli ./internal/qrcode -run '^(TestPairShowsJoinCodeAndQR|Test
 Expected: FAIL, with output starting like this (paths relative to the repository):
 
 ```
-FAIL	github.com/cravv/cravv-connect/internal/qrcode [setup failed]
-FAIL	github.com/cravv/cravv-connect/internal/cli [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/qrcode [setup failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/cli [build failed]
 FAIL
-# github.com/cravv/cravv-connect/internal/qrcode
+# github.com/cookwithcravv/cravv-connect/internal/qrcode
 internal/qrcode/qrcode_test.go:8:2: no required module provides package rsc.io/qr; to add it:
 	go get rsc.io/qr
-github.com/cravv/cravv-connect/internal/qrcode: no non-test Go files in internal/qrcode
+github.com/cookwithcravv/cravv-connect/internal/qrcode: no non-test Go files in internal/qrcode
 ```
 
 - [ ] **Step 3: Implement**
@@ -892,10 +892,10 @@ import (
 	"io"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/bindcode"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/joincode"
-	"github.com/cravv/cravv-connect/internal/qrcode"
+	"github.com/cookwithcravv/cravv-connect/internal/bindcode"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/joincode"
+	"github.com/cookwithcravv/cravv-connect/internal/qrcode"
 )
 
 // daemonRelay returns the relay URL the daemon uses, or "" when it cannot
@@ -1268,11 +1268,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/install"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/relayproto"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/install"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // serve starts the fake daemon and returns a function that stops it; the
@@ -1802,9 +1802,9 @@ go test ./internal/cli -run '^(TestSetupFirstMachine|TestSetupYesAsksNothing|Tes
 Expected: FAIL, with output starting like this (paths relative to the repository):
 
 ```
-FAIL	github.com/cravv/cravv-connect/internal/cli [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/cli [build failed]
 FAIL
-# github.com/cravv/cravv-connect/internal/cli [github.com/cravv/cravv-connect/internal/cli.test]
+# github.com/cookwithcravv/cravv-connect/internal/cli [github.com/cookwithcravv/cravv-connect/internal/cli.test]
 internal/cli/setup_test.go:174:8: r.env.Setup undefined (type *Env has no field or method Setup)
 internal/cli/setup_test.go:207:27: undefined: setup
 internal/cli/setup_test.go:351:9: undefined: setup
@@ -1832,9 +1832,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/relayaddr"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/relayaddr"
 	"github.com/spf13/cobra"
 )
 
@@ -2313,7 +2313,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
 )
 
 // SetupSystem is what `cravv-connect setup` needs from the network and the
@@ -2518,9 +2518,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/bindcode"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/joincode"
+	"github.com/cookwithcravv/cravv-connect/internal/bindcode"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/joincode"
 )
 
 func joinRig(t *testing.T) *setupRig {
@@ -2685,9 +2685,9 @@ go test ./internal/cli -run '^(TestSetupJoinNewMachine|TestSetupJoinDeclined|Tes
 Expected: FAIL, with output starting like this (paths relative to the repository):
 
 ```
-FAIL	github.com/cravv/cravv-connect/internal/cli [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/cli [build failed]
 FAIL
-# github.com/cravv/cravv-connect/internal/cli [github.com/cravv/cravv-connect/internal/cli.test]
+# github.com/cookwithcravv/cravv-connect/internal/cli [github.com/cookwithcravv/cravv-connect/internal/cli.test]
 internal/cli/setup_join_test.go:91:13: undefined: setupJoinCode
 ```
 
@@ -2702,9 +2702,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/joincode"
-	"github.com/cravv/cravv-connect/internal/relayaddr"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/joincode"
+	"github.com/cookwithcravv/cravv-connect/internal/relayaddr"
 )
 
 // setupJoinCode parses the code given to `setup --join` and applies the relay
@@ -2826,10 +2826,10 @@ index 2ac5a92..131682f 100644
 +++ b/internal/cli/cmd_setup.go
 @@ -11,6 +11,7 @@ import (
  
- 	"github.com/cravv/cravv-connect/internal/config"
- 	"github.com/cravv/cravv-connect/internal/ipc"
-+	"github.com/cravv/cravv-connect/internal/joincode"
- 	"github.com/cravv/cravv-connect/internal/relayaddr"
+ 	"github.com/cookwithcravv/cravv-connect/internal/config"
+ 	"github.com/cookwithcravv/cravv-connect/internal/ipc"
++	"github.com/cookwithcravv/cravv-connect/internal/joincode"
+ 	"github.com/cookwithcravv/cravv-connect/internal/relayaddr"
  	"github.com/spf13/cobra"
  )
 @@ -22,6 +23,7 @@ type setupOptions struct {
@@ -2937,7 +2937,7 @@ A `v*` tag builds the release archives on native runners (cgo for PAM), writes `
 
 **Interfaces:**
 
-Consumes: the existing `cli.Version` variable (`internal/cli/cmd_mcp.go`, already documented for `-X github.com/cravv/cravv-connect/internal/cli.Version=...` and reported by the MCP server).
+Consumes: the existing `cli.Version` variable (`internal/cli/cmd_mcp.go`, already documented for `-X github.com/cookwithcravv/cravv-connect/internal/cli.Version=...` and reported by the MCP server).
 
 Produces:
 
@@ -3071,10 +3071,10 @@ Expected: FAIL, with output starting like this (paths relative to the repository
 --- FAIL: TestReleaseWorkflowStampsTheVersion (0.00s)
     release_test.go:53: open ../../.github/workflows/release.yml: no such file or directory
 FAIL
-FAIL	github.com/cravv/cravv-connect/cmd/cravv-connect	0.599s
-FAIL	github.com/cravv/cravv-connect/internal/cli [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	0.599s
+FAIL	github.com/cookwithcravv/cravv-connect/internal/cli [build failed]
 FAIL
-# github.com/cravv/cravv-connect/internal/cli [github.com/cravv/cravv-connect/internal/cli.test]
+# github.com/cookwithcravv/cravv-connect/internal/cli [github.com/cookwithcravv/cravv-connect/internal/cli.test]
 internal/cli/version_test.go:18:12: undefined: buildVersion
 ```
 
@@ -3188,7 +3188,7 @@ jobs:
           version="${TAG#v}"
           name="cravv-connect_${version}_${GOOS}_${GOARCH}"
           mkdir -p "dist/$name"
-          CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X github.com/cravv/cravv-connect/internal/cli.Version=${TAG}" \
+          CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X github.com/cookwithcravv/cravv-connect/internal/cli.Version=${TAG}" \
             -o "dist/$name/cravv-connect" ./cmd/cravv-connect
           CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/$name/cravv-relay" ./cmd/cravv-relay
           CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/$name/cravv-conformance" ./cmd/cravv-conformance
@@ -3282,7 +3282,7 @@ index f4bc433..a6b32b0 100644
  
  build:
 -	$(GO) build -o bin/cravv-connect ./cmd/cravv-connect
-+	$(GO) build -ldflags "-X github.com/cravv/cravv-connect/internal/cli.Version=$(VERSION)" -o bin/cravv-connect ./cmd/cravv-connect
++	$(GO) build -ldflags "-X github.com/cookwithcravv/cravv-connect/internal/cli.Version=$(VERSION)" -o bin/cravv-connect ./cmd/cravv-connect
  	CGO_ENABLED=0 $(GO) build -o bin/cravv-relay ./cmd/cravv-relay
  	CGO_ENABLED=0 $(GO) build -o bin/cravv-conformance ./cmd/cravv-conformance
  
@@ -3606,7 +3606,7 @@ func TestInstallDefaultRepository(t *testing.T) {
 	fake := t.TempDir()
 	log := filepath.Join(fake, "curl.log")
 	os.WriteFile(filepath.Join(fake, "curl"), []byte("#!/bin/sh\necho \"$*\" >> "+log+"\nexit 22\n"), 0o755)
-	for repo, want := range map[string]string{"": "https://github.com/cravv/cravv-connect/releases/latest", "acme/cc": "https://github.com/acme/cc/releases/latest"} {
+	for repo, want := range map[string]string{"": "https://github.com/cookwithcravv/cravv-connect/releases/latest", "acme/cc": "https://github.com/acme/cc/releases/latest"} {
 		os.Remove(log)
 		cmd := exec.Command("sh", "install.sh")
 		cmd.Env = []string{"HOME=" + t.TempDir(), "PATH=" + fake + ":" + os.Getenv("PATH")}
@@ -3929,7 +3929,7 @@ Expected: FAIL, with output starting like this (paths relative to the repository
     readme_test.go:28: README lacks "\ncravv-connect setup --join cravv-join:"
     readme_test.go:28: README lacks "type `/cravv`"
 FAIL
-FAIL	github.com/cravv/cravv-connect/scripts	0.539s
+FAIL	github.com/cookwithcravv/cravv-connect/scripts	0.539s
 FAIL
 ```
 

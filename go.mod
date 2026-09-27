@@ -1,4 +1,4 @@
-module github.com/cravv/cravv-connect
+module github.com/cookwithcravv/cravv-connect
 
 go 1.26.0
 

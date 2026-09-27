@@ -1,6 +1,6 @@
 package daemon
 
-import "github.com/cravv/cravv-connect/internal/core"
+import "github.com/cookwithcravv/cravv-connect/internal/core"
 
 // Peers choose their session names, purposes and agent labels. They are
 // shown to agents and humans, so each is checked on receipt: an entry with

@@ -19,7 +19,7 @@
 
 ## Global Constraints
 
-- Module `github.com/cravv/cravv-connect`, `go 1.26`; cgo only in `internal/auth`, every other package builds with `CGO_ENABLED=0`.
+- Module `github.com/cookwithcravv/cravv-connect`, `go 1.26`; cgo only in `internal/auth`, every other package builds with `CGO_ENABLED=0`.
 - After every task: `gofmt -l internal e2e cmd` prints nothing, `go vet ./...` is clean, `go test ./... -race -count=1` passes (e2e included).
 - Time only through `core.Clock`; tests drive `core.FakeClock`; `time.Now` only inside `core.SystemClock`. Randomness only from `crypto/rand`.
 - SOLID: one responsibility per file; consumers declare the narrow interfaces they need; kinds, IPC methods, MCP tools, CLI commands and inbox renderers are added by registering; wiring only in `internal/daemon/wire.go`, `internal/app`, `internal/cli` and `cmd/`.
@@ -1647,8 +1647,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func linkFixture(peer core.MachineID, id string) store.Link {
@@ -1792,8 +1792,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func sharedFixture(id, name string) store.SharedSession {
@@ -2091,7 +2091,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // LinkDirection says which side asked for the link.
@@ -2175,7 +2175,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // SharedSession is a session an agent chat shared (v2 spec 3.2). It is
@@ -2285,8 +2285,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 const inboxCols = `seq, msg_id, from_machine, from_session, to_session, kind, body, task_id, note, received_at, read_by_any, link_id`
@@ -2531,8 +2531,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 const linkCols = `num, peer, link_id, direction, session_id, remote_session, remote_name, remote_purpose,
@@ -2903,8 +2903,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 const sharedCols = `id, name, purpose, kind, agent, project_dir, visibility_json, state,
@@ -3037,8 +3037,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 const taskCols = `id, direction, peer, from_session, to_session, instructions, state, claimed_by,
@@ -3426,7 +3426,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 ```
 
@@ -3823,8 +3823,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // sessionEvents records SessionObserver calls as "away:<name>" and so on.
@@ -4186,8 +4186,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Errors for invalid share and set requests (the API maps them to bad_request).
@@ -4725,7 +4725,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 func discoveryPair(t *testing.T) (*v2Net, *v2Node, *v2Node) {
@@ -4885,10 +4885,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/sealing"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/sealing"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
 
 // sealKind seals an envelope of any kind from p to the fixture's machine.
@@ -4960,7 +4960,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 func TestRateLimiterWindowPerKey(t *testing.T) {
@@ -5015,10 +5015,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/keys"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/store/sqlite"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/keys"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store/sqlite"
 )
 
 // An in-process network of v2 test machines. Envelopes sent through the
@@ -5283,8 +5283,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // DiscoveryTimeout bounds how long List waits for a peer's sessions.listed.
@@ -5594,7 +5594,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // rateLimiterPrune is how many keys a RateLimiter holds before it drops
@@ -5656,7 +5656,7 @@ Create `internal/daemon/remotesessions.go`:
 ```go
 package daemon
 
-import "github.com/cravv/cravv-connect/internal/core"
+import "github.com/cookwithcravv/cravv-connect/internal/core"
 
 // Peers choose their session names, purposes and agent labels. They are
 // shown to agents and humans, so each is checked on receipt: an entry with
@@ -5960,8 +5960,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func linkNet(t *testing.T) (*v2Net, *v2Node, *v2Node) {
@@ -6401,10 +6401,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/keys"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/store/sqlite"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/keys"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store/sqlite"
 )
 ```
 
@@ -6624,8 +6624,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Authority is how a human decision reached the daemon (v2 spec section 10).
@@ -6858,8 +6858,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // LinkReplies sends the two rate-limited answers to traffic this machine
@@ -6927,9 +6927,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // ReasonDisconnected is the local close reason when this side disconnected
@@ -8057,8 +8057,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // tickBoth runs one presence round on both machines and delivers everything.
@@ -8500,8 +8500,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // maxPingLinks caps the link IDs one ping may ask about.
@@ -8930,8 +8930,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func TestPermissionPolicyTable(t *testing.T) {
@@ -9107,8 +9107,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // PermissionPolicy maps (a link's permission_in, kind) to a decision (v2
@@ -9385,8 +9385,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func sessionNames(r ipc.SessionsListResult) string {
@@ -9580,7 +9580,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // SharedChat is one agent chat that shared a session: its connection (the
@@ -9789,8 +9789,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // linkWorld backs the fake shared-session, discovery and link ports.
@@ -9988,8 +9988,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func TestShareBindsTheConnection(t *testing.T) {
@@ -10114,7 +10114,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 func TestListenWakesOnPendingItemsOnly(t *testing.T) {
@@ -10246,9 +10246,9 @@ package ipc
 import (
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Method names (ipc-v1). The gate for each is set where it is registered
@@ -10663,7 +10663,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Counts is what is pending for a shared session, as numbers only.
@@ -10808,7 +10808,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // ParseVisibility reads "private", "all-peers" or "peers:<alias>[,<alias>...]"
@@ -10958,7 +10958,7 @@ package api
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func (h *handlers) registerDiscovery(s *ipc.Server) {
@@ -10983,7 +10983,7 @@ package api
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func (h *handlers) registerLinks(s *ipc.Server) {
@@ -11172,8 +11172,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // handlers holds what every method group needs.
@@ -11248,7 +11248,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func (h *handlers) registerSession(s *ipc.Server) {
@@ -11285,7 +11285,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func (h *handlers) registerShared(s *ipc.Server) {
@@ -11381,10 +11381,10 @@ Replace the whole content of `internal/app/errors.go` with:
 package app
 
 import (
-	"github.com/cravv/cravv-connect/internal/auth"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/auth"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Wire kinds for daemon and auth errors that have no core sentinel.
@@ -11439,11 +11439,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/present"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // shared adapts the daemon's SessionService and AttentionService to api.SharedPort.
@@ -11863,8 +11863,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // fileSHA256 hashes a file by streaming it.
@@ -11948,13 +11948,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/keys"
-	"github.com/cravv/cravv-connect/internal/sealing"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/keys"
+	"github.com/cookwithcravv/cravv-connect/internal/sealing"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
 
 const wait = 20 * time.Second
@@ -12627,9 +12627,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // Large chats full of '<' (which wrapping escapes to "&lt;") arrive over
@@ -12704,8 +12704,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/relayserver"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/relayserver"
 )
 
 // gatedBackend blocks Enqueue while gate is set, until release is closed.
@@ -12774,8 +12774,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // The joiner finalizes first and sends at once, while the creator's human is
@@ -12840,9 +12840,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/relayserver"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/relayserver"
 )
 
 // recordingBackend keeps a copy of every frame queued and every blob chunk
@@ -13276,10 +13276,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 ```
 
@@ -13325,7 +13325,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func TestInboundTaskViewWrapsPeerText(t *testing.T) {
@@ -13493,7 +13493,7 @@ package app
 import (
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
 )
 
 func TestInboxViewCleansPeerSession(t *testing.T) {
@@ -13689,8 +13689,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // hookFiles is a FileSender that runs hook before each upload.
@@ -13826,8 +13826,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // A human decision re-checks the link: approving a task on a link that no
@@ -13955,10 +13955,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/keys"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/store/sqlite"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/keys"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store/sqlite"
 )
 
 // Fixtures shared by the Task 17-20 tests. The d2 prefix keeps them apart
@@ -14144,10 +14144,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/store/sqlite"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store/sqlite"
 )
 
 // d2Audit records audit events.
@@ -14289,12 +14289,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/auth"
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/sealing"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/auth"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/sealing"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
 
 // d2Mailbox is a scripted relay connection. Close ends it like a dropped socket.
@@ -15176,11 +15176,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/filecrypt"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/filecrypt"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
 
 // d2Blobs is an in-memory transport.BlobStore with fault injection.
@@ -15847,9 +15847,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // A declined notice that fails to reach the inbox is retried, and the
@@ -15924,8 +15924,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Human-only actions (spec 7.2, v2 spec 10) refuse unless the caller says a
@@ -16206,9 +16206,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/store/sqlite"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store/sqlite"
 )
 
 // inboxEnv is one machine with session "lead" linked to "trainer" on gpu-box.
@@ -16451,8 +16451,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func TestCheckPagesByBytes(t *testing.T) {
@@ -16653,8 +16653,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Control kinds are never confirmed with control.delivered, so once the relay
@@ -17034,7 +17034,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 func TestDecisionStrings(t *testing.T) {
@@ -17141,8 +17141,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // flakyInbox fails the next `fail` AddItem calls, like a busy disk.
@@ -17283,7 +17283,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 func TestSessionBaseName(t *testing.T) {
@@ -17398,8 +17398,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func TestStatusReportsCounts(t *testing.T) {
@@ -17486,9 +17486,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func TestTaskCreateSendsOnTheLink(t *testing.T) {
@@ -18839,8 +18839,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 ```
 
@@ -19447,9 +19447,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/present"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // DefaultInboxLimit is used when Check or Wait is called with limit <= 0.
@@ -20214,7 +20214,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Decision is what the receiving daemon does with an incoming item.
@@ -20306,8 +20306,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 ```
 
@@ -20430,8 +20430,8 @@ package daemon
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // DaemonStatus is what `status` reports. The API layer maps it to ipc.StatusResult.
@@ -20534,9 +20534,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // PeerResolver turns "alias" or "alias/session" into a peer and session name.
@@ -21400,8 +21400,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // VersionNotices tracks protocol mismatches for status: peers that still
@@ -21689,8 +21689,8 @@ package api
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func (h *handlers) registerChat(s *ipc.Server) {
@@ -21859,9 +21859,9 @@ package api
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func (h *handlers) registerTasks(s *ipc.Server) {
@@ -21979,10 +21979,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/present"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // PreviewRunes is how much of a pending task the approvals queue shows.
@@ -22224,7 +22224,7 @@ package mcpserver
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -22758,8 +22758,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 var sampleLinks = ipc.LinksResult{Links: []ipc.LinkView{
@@ -22911,7 +22911,7 @@ import (
 	"strconv"
 	"text/tabwriter"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/spf13/cobra"
 )
 
@@ -23201,8 +23201,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/mcpserver"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/mcpserver"
 )
 
 // mcpAgent is an MCP client (clientInfo "claude-code") talking to the real
@@ -23443,8 +23443,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 ```
@@ -23765,7 +23765,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 ```
@@ -23805,8 +23805,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -24028,8 +24028,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // fileSHA256 hashes a file by streaming it.
@@ -24113,13 +24113,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/keys"
-	"github.com/cravv/cravv-connect/internal/sealing"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/keys"
+	"github.com/cookwithcravv/cravv-connect/internal/sealing"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
 
 const wait = 20 * time.Second
@@ -24791,9 +24791,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // Large chats full of '<' (which wrapping escapes to "&lt;") arrive over
@@ -24868,8 +24868,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/relayserver"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/relayserver"
 )
 
 // gatedBackend blocks Enqueue while gate is set, until release is closed.
@@ -24933,8 +24933,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func sessionNames(r ipc.SessionsListResult) string {
@@ -25134,8 +25134,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/mcpserver"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/mcpserver"
 )
 
 // mcpAgent is an MCP client (clientInfo "claude-code") talking to the real
@@ -25367,8 +25367,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // The joiner finalizes first and sends at once, while the creator's human is
@@ -25433,9 +25433,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/relayserver"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/relayserver"
 )
 
 // recordingBackend keeps a copy of every frame queued and every blob chunk
@@ -25755,12 +25755,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/auth"
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/auth"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 ```
 
@@ -26179,7 +26179,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 ```
 
@@ -26405,7 +26405,7 @@ package api
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 ```
 
@@ -26437,7 +26437,7 @@ package api
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 ```
 
@@ -26532,7 +26532,7 @@ package audit
 import (
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 ```
 
@@ -26578,7 +26578,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/spf13/cobra"
 )
 ```

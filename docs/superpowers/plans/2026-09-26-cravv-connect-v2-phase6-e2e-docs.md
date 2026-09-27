@@ -128,7 +128,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/fakeagent"
+	"github.com/cookwithcravv/cravv-connect/internal/fakeagent"
 )
 
 // TestMain lets this test binary run as the fake claude of managed runs
@@ -155,9 +155,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/cli"
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/fakeagent"
+	"github.com/cookwithcravv/cravv-connect/internal/cli"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/fakeagent"
 )
 
 // envAsCLI makes this test binary run as the cravv-connect command line, so
@@ -257,8 +257,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // shareChat shares an MCP chat and returns the listener command it got.
@@ -669,7 +669,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // TestAcceptance_4_ExistingOrNew pins criterion 4, "Existing or new": "A
@@ -981,17 +981,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/auth"
-	"github.com/cravv/cravv-connect/internal/cli"
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/install"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/relayproto"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/store/sqlite"
-	"github.com/cravv/cravv-connect/internal/transport/relayclient"
+	"github.com/cookwithcravv/cravv-connect/internal/auth"
+	"github.com/cookwithcravv/cravv-connect/internal/cli"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/install"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store/sqlite"
+	"github.com/cookwithcravv/cravv-connect/internal/transport/relayclient"
 )
 
 // installedBinary is where the fresh machines' cravv-connect is installed
@@ -1437,9 +1437,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/relayserver"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/relayserver"
 )
 
 // offerFolder returns a folder an offer may name (absolute, symlinks
@@ -1771,8 +1771,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // scenarioChat is one of the four chats of the scenario.
@@ -1993,9 +1993,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/api"
-	"github.com/cravv/cravv-connect/internal/app"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/api"
+	"github.com/cookwithcravv/cravv-connect/internal/app"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // ipcDoc is the local API's specification.
@@ -4769,7 +4769,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/cravv/cravv-connect/internal/cli"
+	"github.com/cookwithcravv/cravv-connect/internal/cli"
 )
 
 // readmeCLIReference returns the rows of the README's CLI reference table.

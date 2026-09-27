@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/keys"
-	"github.com/cravv/cravv-connect/internal/relayserver"
-	"github.com/cravv/cravv-connect/internal/transport"
-	"github.com/cravv/cravv-connect/internal/transport/relayclient"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/keys"
+	"github.com/cookwithcravv/cravv-connect/internal/relayserver"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/transport/relayclient"
 )
 
 const admin = "admin-secret"

@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/fakeagent"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/fakeagent"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // hostEnv is a machine that runs one managed session for peer gpu-box

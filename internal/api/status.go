@@ -3,8 +3,8 @@ package api
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // Audit read limits.

@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 const fileCols = `file_id, direction, peer, msg_id, blob_id, name, size, chunks, sha256, key,

@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // EnvRunToken is the environment variable that carries a managed run's

@@ -16,12 +16,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/filecrypt"
-	"github.com/cravv/cravv-connect/internal/pathguard"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/filecrypt"
+	"github.com/cookwithcravv/cravv-connect/internal/pathguard"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
 
 const (

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
 )
 
 // hostile is peer-chosen text that tries to break out of the page, hide

@@ -3,7 +3,7 @@ package mcpserver
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

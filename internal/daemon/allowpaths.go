@@ -9,10 +9,10 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/pathguard"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/pathguard"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // AllowPaths holds the extra folders a human allowed for send_file

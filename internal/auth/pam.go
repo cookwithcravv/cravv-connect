@@ -8,7 +8,7 @@ import (
 
 	"github.com/msteinert/pam/v2"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // pamVerifier authenticates through PAM (OpenPAM on macOS, Linux-PAM on Linux).

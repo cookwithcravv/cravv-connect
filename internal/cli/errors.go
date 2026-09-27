@@ -3,9 +3,9 @@ package cli
 import (
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/app"
-	"github.com/cravv/cravv-connect/internal/auth"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/app"
+	"github.com/cookwithcravv/cravv-connect/internal/auth"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // friendlyErrors replaces daemon error text with advice for the human, keyed

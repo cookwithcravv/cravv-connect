@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
 )
 
 func TestPeerTextUnwrapsAndCleans(t *testing.T) {

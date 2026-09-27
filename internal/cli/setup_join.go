@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/joincode"
-	"github.com/cravv/cravv-connect/internal/relayaddr"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/joincode"
+	"github.com/cookwithcravv/cravv-connect/internal/relayaddr"
 )
 
 // setupJoinCode parses the code given to `setup --join` and applies the relay

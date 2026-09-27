@@ -3,11 +3,11 @@ package daemon
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/keys"
-	"github.com/cravv/cravv-connect/internal/sealing"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/keys"
+	"github.com/cookwithcravv/cravv-connect/internal/sealing"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
 
 // Narrow interfaces so each service depends only on what it uses (ISP).

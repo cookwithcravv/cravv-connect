@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/present"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Counts is what is pending for a shared session, as numbers plus local

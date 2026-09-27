@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Decision is what the receiving daemon does with an incoming item.

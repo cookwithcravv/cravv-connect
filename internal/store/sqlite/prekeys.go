@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func (d *DB) PutPrekey(ctx context.Context, p store.PrekeyRecord) error {

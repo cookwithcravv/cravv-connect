@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Verifier checks a username/password pair against the OS.

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/joincode"
-	"github.com/cravv/cravv-connect/internal/relayaddr"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/joincode"
+	"github.com/cookwithcravv/cravv-connect/internal/relayaddr"
 	"github.com/spf13/cobra"
 )
 

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func TestInboundTaskViewWrapsPeerText(t *testing.T) {

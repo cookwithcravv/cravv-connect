@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // Large chats full of '<' (which wrapping escapes to "&lt;") arrive over

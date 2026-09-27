@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func hookDaemon(t *testing.T, res ipc.HookCountsResult, got *ipc.HookCountsParams) *fakeDaemon {

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Guard rate-limits password checks: after core.LockoutFailures consecutive

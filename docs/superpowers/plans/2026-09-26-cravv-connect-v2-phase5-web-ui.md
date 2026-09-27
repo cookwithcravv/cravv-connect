@@ -161,7 +161,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 func newPipeServer() *Server {
@@ -391,8 +391,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func TestPeerActivityLastSeen(t *testing.T) {
@@ -515,8 +515,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 ```
 
@@ -632,8 +632,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 type fUI struct{ calls int }
@@ -768,13 +768,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/api"
-	"github.com/cravv/cravv-connect/internal/auth"
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/api"
+	"github.com/cookwithcravv/cravv-connect/internal/auth"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // uiDaemon serves a real daemon with the UI methods over in-process pipes.
@@ -875,7 +875,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // UIPort starts the local web UI and returns a URL with a one-time launch
@@ -982,10 +982,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/api"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/api"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // UIPorts adapts the daemon to the web UI methods. ui starts the web server
@@ -1144,8 +1144,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // fakeDaemon is a real ipc.Server with scripted handlers. UI sessions reach
@@ -1386,7 +1386,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func statusDaemon(t *testing.T) *fakeDaemon {
@@ -1658,7 +1658,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
 )
 
 func TestPeerTextUnwrapsAndCleans(t *testing.T) {
@@ -1746,7 +1746,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Limits of the UI server.
@@ -1948,7 +1948,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // maxFormBytes caps a form body.
@@ -2260,7 +2260,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Flash kinds.
@@ -2335,7 +2335,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // Page is one navigation entry and its GET view.
@@ -2452,8 +2452,8 @@ import (
 	"path"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // assets holds the templates and static files; no build step, no external
@@ -2592,7 +2592,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/cravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
 )
 
 // cleanLine removes what could hide or reorder text on the page: control
@@ -2640,7 +2640,7 @@ package webui
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // addStatus is the Status page: machine status and the kill switch.
@@ -2913,9 +2913,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func devicesDaemon(t *testing.T) *fakeDaemon {
@@ -3052,7 +3052,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // addDevices is the Devices page: paired machines, pause, resume, unpair
@@ -3173,7 +3173,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // ActivityLimit is how many audit events the Activity page shows.
@@ -3396,8 +3396,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
 )
 
 // hostile is peer-chosen text that tries to break out of the page, hide
@@ -3535,8 +3535,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func approvalsDaemon(t *testing.T) *fakeDaemon {
@@ -3631,8 +3631,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // permissions are the link levels, lowest first.
@@ -3706,8 +3706,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // addSessions is the Sessions page: local shared sessions, their links, and
@@ -3824,8 +3824,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // addApprovals is the Approvals page: link requests waiting for this side
@@ -4123,7 +4123,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // fakeBrowser replaces openBrowser for one test.
@@ -4196,13 +4196,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/api"
-	"github.com/cravv/cravv-connect/internal/auth"
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/api"
+	"github.com/cookwithcravv/cravv-connect/internal/auth"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // uiDaemon serves a real daemon with the UI methods over in-process pipes.
@@ -4355,7 +4355,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // UIBrowser is a browser session on a node's web UI: it keeps the session
@@ -4548,11 +4548,11 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/api"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/webui"
+	"github.com/cookwithcravv/cravv-connect/internal/api"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/webui"
 )
 
 // UIPorts adapts the daemon to the web UI methods. ui starts the web server
@@ -4654,8 +4654,8 @@ import (
 	"os/exec"
 	"runtime"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/webui"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/webui"
 	"github.com/spf13/cobra"
 )
 

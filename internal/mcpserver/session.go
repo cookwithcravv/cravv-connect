@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // Caller is what tools use to reach the daemon.

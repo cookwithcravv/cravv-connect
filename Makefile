@@ -6,7 +6,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 all: vet test build
 
 build:
-	$(GO) build -ldflags "-X github.com/cravv/cravv-connect/internal/cli.Version=$(VERSION)" -o bin/cravv-connect ./cmd/cravv-connect
+	$(GO) build -ldflags "-X github.com/cookwithcravv/cravv-connect/internal/cli.Version=$(VERSION)" -o bin/cravv-connect ./cmd/cravv-connect
 	CGO_ENABLED=0 $(GO) build -o bin/cravv-relay ./cmd/cravv-relay
 	CGO_ENABLED=0 $(GO) build -o bin/cravv-conformance ./cmd/cravv-conformance
 

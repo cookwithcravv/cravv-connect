@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/bindcode"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/keys"
-	"github.com/cravv/cravv-connect/internal/pake"
-	"github.com/cravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/bindcode"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/keys"
+	"github.com/cookwithcravv/cravv-connect/internal/pake"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
 
 // memRooms is an in-memory transport.Rooms with relay-v1 room rules: the creator needs the

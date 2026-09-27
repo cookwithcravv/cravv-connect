@@ -8,7 +8,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // SendStatus is the relay's verdict on one send. Values equal relayproto Status* strings.

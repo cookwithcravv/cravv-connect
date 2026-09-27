@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // ParseVisibility reads "private", "all-peers" or "peers:<alias>[,<alias>...]"

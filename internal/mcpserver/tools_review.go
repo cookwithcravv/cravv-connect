@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

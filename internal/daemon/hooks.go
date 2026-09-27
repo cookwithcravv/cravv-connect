@@ -6,9 +6,9 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/present"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // MaxStopBlocks is how many times in a row the Stop hook keeps a chat

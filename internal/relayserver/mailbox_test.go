@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
 )
 
 func TestHandshakeRejections(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/keys"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/keys"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Handler processes one opened, verified, deduplicated envelope from a paired peer.

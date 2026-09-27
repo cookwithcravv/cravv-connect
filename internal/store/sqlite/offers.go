@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 const offerCols = `id, peer, label, folder, real_folder, agent, permission, run_mode, max_concurrent,

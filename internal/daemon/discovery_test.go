@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 func discoveryPair(t *testing.T) (*v2Net, *v2Node, *v2Node) {

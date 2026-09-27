@@ -60,22 +60,24 @@ glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later); on an
 older or a musl system such as Alpine, install from source.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/cravv/cravv-connect/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/cookwithcravv/cravv-connect/main/scripts/install.sh | sh
 ```
 
 This downloads the latest release, checks it against the release's
 `SHA256SUMS`, and installs `cravv-connect` and `cravv-relay` to
 `~/.local/bin` (it tells you if that folder is not on your `PATH`). No Go
 toolchain is needed. Use `sh -s -- --system` to install to `/usr/local/bin`
-instead, and `CRAVV_VERSION=v1.2.0` to pick a release. The repository URL is a
-placeholder until the project is published.
+instead, and `CRAVV_VERSION=v1.2.0` to pick a release.
+While the repository is private, the one-liner and the release downloads need
+GitHub access (for example `gh auth login`, then download the release with
+`gh release download`); install from source otherwise.
 
 Every release archive also has a signed build provenance attestation from the
 release workflow. To check that an archive you downloaded was built there, use
 the [GitHub CLI](https://cli.github.com/):
 
 ```sh
-gh attestation verify cravv-connect_1.2.0_linux_amd64.tar.gz --repo cravv/cravv-connect
+gh attestation verify cravv-connect_1.2.0_linux_amd64.tar.gz --repo cookwithcravv/cravv-connect
 ```
 
 ### Install from source

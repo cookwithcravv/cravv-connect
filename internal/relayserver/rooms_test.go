@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
 )
 
 func (tr *testRelay) createRoom(t *testing.T) (nameplate, token string) {

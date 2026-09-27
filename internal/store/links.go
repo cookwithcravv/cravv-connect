@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // LinkDirection says which side asked for the link.

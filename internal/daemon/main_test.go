@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/fakeagent"
+	"github.com/cookwithcravv/cravv-connect/internal/fakeagent"
 )
 
 // TestMain lets this test binary run as the fake agent (the SessionHost

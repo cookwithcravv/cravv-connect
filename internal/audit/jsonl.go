@@ -9,7 +9,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // FileLogger appends one JSON object per line to a 0600 file.

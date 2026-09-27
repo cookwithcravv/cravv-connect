@@ -49,7 +49,7 @@ jobs:
           version="${TAG#v}"
           name="cravv-connect_${version}_${GOOS}_${GOARCH}"
           mkdir -p "dist/$name"
-          CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X github.com/cravv/cravv-connect/internal/cli.Version=${TAG}" \
+          CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X github.com/cookwithcravv/cravv-connect/internal/cli.Version=${TAG}" \
             -o "dist/$name/cravv-connect" ./cmd/cravv-connect
           CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/$name/cravv-relay" ./cmd/cravv-relay
           CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/$name/cravv-conformance" ./cmd/cravv-conformance

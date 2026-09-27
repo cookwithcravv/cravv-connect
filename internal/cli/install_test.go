@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/install"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/install"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 type fakeInstaller struct {

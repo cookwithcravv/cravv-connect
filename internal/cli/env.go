@@ -10,12 +10,12 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/cravv/cravv-connect/internal/app"
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/install"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/store/sqlite"
+	"github.com/cookwithcravv/cravv-connect/internal/app"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/install"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store/sqlite"
 )
 
 // Caller is the daemon connection the commands use (satisfied by *ipc.Client).

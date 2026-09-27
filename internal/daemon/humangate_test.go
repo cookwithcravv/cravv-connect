@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Human-only actions (spec 7.2, v2 spec 10) refuse unless the caller says a

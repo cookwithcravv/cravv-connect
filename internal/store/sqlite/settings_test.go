@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func TestSettings(t *testing.T) {

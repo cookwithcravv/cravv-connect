@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // v2 Phase 3: managed sessions (offers, runs, open and close).

@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func (h *handlers) registerPairing(s *ipc.Server) {

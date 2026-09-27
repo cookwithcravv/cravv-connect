@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // PermissionPolicy maps (a link's permission_in, kind) to a decision (v2

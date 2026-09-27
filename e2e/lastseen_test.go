@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/cli"
+	"github.com/cookwithcravv/cravv-connect/internal/cli"
 )
 
 // A paired machine's view carries when it was last heard from, and link traffic

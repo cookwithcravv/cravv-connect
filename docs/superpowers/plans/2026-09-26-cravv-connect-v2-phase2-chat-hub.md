@@ -322,23 +322,23 @@ go test ./e2e/ ./internal/api/ ./internal/daemon/ -count=1
 Expected output, package order may differ:
 
 ```text
-# github.com/cravv/cravv-connect/internal/api [github.com/cravv/cravv-connect/internal/api.test]
+# github.com/cookwithcravv/cravv-connect/internal/api [github.com/cookwithcravv/cravv-connect/internal/api.test]
 internal/api/fakes_test.go:47:86: cannot use fLinks{…} (value of struct type fLinks) as LinkPort value in struct literal: fLinks does not implement LinkPort (wrong type for method Decide)
 		have Decide(context.Context, string, int64, bool, string, bool) (ipc.LinkView, error)
 		want Decide(context.Context, int64, bool, string, bool) (ipc.LinkView, error)
 internal/api/ui_test.go:41:58: cannot use fLinks{…} (value of struct type fLinks) as LinkPort value in struct literal: fLinks does not implement LinkPort (wrong type for method Decide)
 		have Decide(context.Context, string, int64, bool, string, bool) (ipc.LinkView, error)
 		want Decide(context.Context, int64, bool, string, bool) (ipc.LinkView, error)
-# github.com/cravv/cravv-connect/internal/daemon [github.com/cravv/cravv-connect/internal/daemon.test]
+# github.com/cookwithcravv/cravv-connect/internal/daemon [github.com/cookwithcravv/cravv-connect/internal/daemon.test]
 internal/daemon/links_test.go:535:23: b.links.DecideFor undefined (type *LinkService has no field or method DecideFor)
 internal/daemon/links_test.go:541:23: b.links.DecideFor undefined (type *LinkService has no field or method DecideFor)
 internal/daemon/links_test.go:549:23: b.links.DecideFor undefined (type *LinkService has no field or method DecideFor)
 --- FAIL: TestLinkDecideIsScoped (...)
     links_test.go:228: got success, want error kind "not_shared"
 FAIL
-FAIL	github.com/cravv/cravv-connect/e2e
-FAIL	github.com/cravv/cravv-connect/internal/api [build failed]
-FAIL	github.com/cravv/cravv-connect/internal/daemon [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/e2e
+FAIL	github.com/cookwithcravv/cravv-connect/internal/api [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/daemon [build failed]
 FAIL
 ```
 
@@ -464,10 +464,10 @@ go test ./internal/api/ ./internal/app/ ./internal/daemon/ ./e2e/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/api
-ok  	github.com/cravv/cravv-connect/internal/app
-ok  	github.com/cravv/cravv-connect/internal/daemon
-ok  	github.com/cravv/cravv-connect/e2e
+ok  	github.com/cookwithcravv/cravv-connect/internal/api
+ok  	github.com/cookwithcravv/cravv-connect/internal/app
+ok  	github.com/cookwithcravv/cravv-connect/internal/daemon
+ok  	github.com/cookwithcravv/cravv-connect/e2e
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -478,7 +478,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -587,10 +587,10 @@ index 5ea1d46..af0e00b 100644
  	"testing"
  	"time"
  
- 	"github.com/cravv/cravv-connect/internal/core"
-+	"github.com/cravv/cravv-connect/internal/present"
-+	"github.com/cravv/cravv-connect/internal/store"
-+	"github.com/cravv/cravv-connect/internal/store/sqlite"
+ 	"github.com/cookwithcravv/cravv-connect/internal/core"
++	"github.com/cookwithcravv/cravv-connect/internal/present"
++	"github.com/cookwithcravv/cravv-connect/internal/store"
++	"github.com/cookwithcravv/cravv-connect/internal/store/sqlite"
  )
  
 +// attentionOn builds an AttentionService over one node's store and inbox.
@@ -973,7 +973,7 @@ go test ./internal/daemon/ ./internal/present/ ./internal/store/sqlite/ -count=1
 Expected output (first 25 lines), package order may differ:
 
 ```text
-# github.com/cravv/cravv-connect/internal/present [github.com/cravv/cravv-connect/internal/present.test]
+# github.com/cookwithcravv/cravv-connect/internal/present [github.com/cookwithcravv/cravv-connect/internal/present.test]
 internal/present/pending_test.go:11:10: undefined: Pending
 internal/present/pending_test.go:15:21: undefined: Pending
 internal/present/pending_test.go:15:65: undefined: PendingMessage
@@ -985,12 +985,12 @@ internal/present/pending_test.go:20:39: undefined: PendingTaskUpdate
 internal/present/pending_test.go:22:42: undefined: Pending
 internal/present/pending_test.go:23:40: undefined: PendingRequest
 internal/present/pending_test.go:23:40: too many errors
-# github.com/cravv/cravv-connect/internal/store/sqlite [github.com/cravv/cravv-connect/internal/store/sqlite.test]
+# github.com/cookwithcravv/cravv-connect/internal/store/sqlite [github.com/cookwithcravv/cravv-connect/internal/store/sqlite.test]
 internal/store/sqlite/inbox_test.go:174:17: db.SessionUnreadGroups undefined (type *DB has no field or method SessionUnreadGroups)
 internal/store/sqlite/inbox_test.go:178:18: undefined: store.UnreadGroup
 internal/store/sqlite/inbox_test.go:186:18: db.SessionUnreadGroups undefined (type *DB has no field or method SessionUnreadGroups)
 internal/store/sqlite/inbox_test.go:189:18: db.SessionUnreadGroups undefined (type *DB has no field or method SessionUnreadGroups)
-# github.com/cravv/cravv-connect/internal/daemon [github.com/cravv/cravv-connect/internal/daemon.test]
+# github.com/cookwithcravv/cravv-connect/internal/daemon [github.com/cookwithcravv/cravv-connect/internal/daemon.test]
 internal/daemon/attention_test.go:19:29: undefined: AttentionDeps
 internal/daemon/attention_test.go:19:29: not enough arguments in call to NewAttentionService
 	have (unknown type)
@@ -1046,9 +1046,9 @@ index 6199728..b08a9b4 100644
 +	"errors"
  	"time"
  
-+	"github.com/cravv/cravv-connect/internal/core"
-+	"github.com/cravv/cravv-connect/internal/present"
- 	"github.com/cravv/cravv-connect/internal/store"
++	"github.com/cookwithcravv/cravv-connect/internal/core"
++	"github.com/cookwithcravv/cravv-connect/internal/present"
+ 	"github.com/cookwithcravv/cravv-connect/internal/store"
  )
  
 -// Counts is what is pending for a shared session, as numbers only.
@@ -1605,11 +1605,11 @@ go test ./internal/store/... ./internal/present/ ./internal/daemon/ ./internal/a
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/store
-ok  	github.com/cravv/cravv-connect/internal/store/sqlite
-ok  	github.com/cravv/cravv-connect/internal/present
-ok  	github.com/cravv/cravv-connect/internal/daemon
-ok  	github.com/cravv/cravv-connect/internal/app
+ok  	github.com/cookwithcravv/cravv-connect/internal/store
+ok  	github.com/cookwithcravv/cravv-connect/internal/store/sqlite
+ok  	github.com/cookwithcravv/cravv-connect/internal/present
+ok  	github.com/cookwithcravv/cravv-connect/internal/daemon
+ok  	github.com/cookwithcravv/cravv-connect/internal/app
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -1620,7 +1620,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -1680,9 +1680,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/cli"
-	"github.com/cravv/cravv-connect/internal/config"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/cli"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // CLIRun is one finished cravv-connect command run against a node.
@@ -1808,8 +1808,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 const testWake = "wake-token-abc"
@@ -1949,7 +1949,7 @@ go test ./e2e/ ./internal/cli/ -count=1
 Expected output, package order may differ:
 
 ```text
-# github.com/cravv/cravv-connect/internal/cli [github.com/cravv/cravv-connect/internal/cli.test]
+# github.com/cookwithcravv/cravv-connect/internal/cli [github.com/cookwithcravv/cravv-connect/internal/cli.test]
 internal/cli/listen_test.go:47:75: undefined: listenClosedLine
 internal/cli/listen_test.go:50:80: undefined: listenInvalidLine
 internal/cli/listen_test.go:107:16: undefined: listenBackoffMin
@@ -1965,8 +1965,8 @@ internal/cli/listen_test.go:110:21: too many errors
     listener_test.go:78: listener exited early (nothing sent yet): {Code:1 Stdout: Stderr:error: unknown command "listen" for "cravv-connect"
         }
 FAIL
-FAIL	github.com/cravv/cravv-connect/e2e
-FAIL	github.com/cravv/cravv-connect/internal/cli [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/e2e
+FAIL	github.com/cookwithcravv/cravv-connect/internal/cli [build failed]
 FAIL
 ```
 
@@ -1987,9 +1987,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
 	"github.com/spf13/cobra"
 )
 
@@ -2161,8 +2161,8 @@ go test ./internal/cli/ ./e2e/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/cli
-ok  	github.com/cravv/cravv-connect/e2e
+ok  	github.com/cookwithcravv/cravv-connect/internal/cli
+ok  	github.com/cookwithcravv/cravv-connect/e2e
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -2173,7 +2173,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -2255,7 +2255,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // titleDesktop records notification titles and texts.
@@ -2374,8 +2374,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // reviewOn builds a ReviewService for node v's links (no tasks).
@@ -2546,7 +2546,7 @@ go test ./internal/daemon/ -count=1
 Expected output:
 
 ```text
-# github.com/cravv/cravv-connect/internal/daemon [github.com/cravv/cravv-connect/internal/daemon.test]
+# github.com/cookwithcravv/cravv-connect/internal/daemon [github.com/cookwithcravv/cravv-connect/internal/daemon.test]
 internal/daemon/review_test.go:16:49: undefined: ReviewService
 internal/daemon/codes_test.go:44:7: undefined: NewConfirmCodes
 internal/daemon/codes_test.go:55:53: undefined: ErrBadCode
@@ -2558,7 +2558,7 @@ internal/daemon/codes_test.go:84:12: undefined: CodeMaxWrong
 internal/daemon/codes_test.go:85:56: undefined: ErrBadCode
 internal/daemon/codes_test.go:89:55: undefined: ErrCodeLocked
 internal/daemon/codes_test.go:89:55: too many errors
-FAIL	github.com/cravv/cravv-connect/internal/daemon [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/daemon [build failed]
 FAIL
 ```
 
@@ -2578,7 +2578,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Confirmation codes (v2 spec 7.2): for clients that cannot show an
@@ -2781,8 +2781,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Review limits (v2 spec 7.2).
@@ -3084,7 +3084,7 @@ go test ./internal/daemon/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/daemon
+ok  	github.com/cookwithcravv/cravv-connect/internal/daemon
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -3095,7 +3095,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -3282,7 +3282,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // v2 spec 7.2 over IPC: the chat's connection lists its pending decisions,
@@ -3451,8 +3451,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // Decisions in chat act only for the session shared on the connection.
@@ -3501,7 +3501,7 @@ go test ./e2e/ ./internal/api/ -count=1
 Expected output (first 25 lines), package order may differ:
 
 ```text
-# github.com/cravv/cravv-connect/internal/api [github.com/cravv/cravv-connect/internal/api.test]
+# github.com/cookwithcravv/cravv-connect/internal/api [github.com/cookwithcravv/cravv-connect/internal/api.test]
 internal/api/fakes_links_test.go:146:67: undefined: ipc.ReviewItemView
 internal/api/fakes_links_test.go:148:15: undefined: ipc.ReviewItemView
 internal/api/fakes_links_test.go:151:68: undefined: ipc.ReviewDecideParams
@@ -3513,7 +3513,7 @@ internal/api/api_test.go:145:7: undefined: ipc.MethodReviewCode
 internal/api/fakes_test.go:47:100: unknown field Review in struct literal of type Ports
 internal/api/review_test.go:16:33: undefined: ipc.MethodReviewList
 internal/api/review_test.go:16:33: too many errors
-# github.com/cravv/cravv-connect/e2e [github.com/cravv/cravv-connect/e2e.test]
+# github.com/cookwithcravv/cravv-connect/e2e [github.com/cookwithcravv/cravv-connect/e2e.test]
 e2e/review_test.go:24:25: undefined: ipc.MethodReviewList
 e2e/review_test.go:25:15: undefined: ipc.ReviewListResult
 e2e/review_test.go:35:15: undefined: ipc.ReviewListResult
@@ -3525,7 +3525,7 @@ e2e/review_test.go:46:25: undefined: ipc.MethodReviewCode
 e2e/review_test.go:46:47: undefined: ipc.ReviewItemParams
 e2e/review_test.go:61:37: undefined: ipc.MethodReviewDecide
 e2e/review_test.go:61:37: too many errors
-FAIL	github.com/cravv/cravv-connect/e2e [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/e2e [build failed]
 ```
 
 - [ ] **Step 3: Implement**
@@ -3592,7 +3592,7 @@ package api
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // Decisions in chat act only for the session shared on the connection
@@ -3685,10 +3685,10 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
 )
 
 // review adapts the daemon's ReviewService to api.ReviewPort.
@@ -3871,9 +3871,9 @@ go test ./internal/api/ ./internal/app/ ./e2e/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/api
-ok  	github.com/cravv/cravv-connect/internal/app
-ok  	github.com/cravv/cravv-connect/e2e
+ok  	github.com/cookwithcravv/cravv-connect/internal/api
+ok  	github.com/cookwithcravv/cravv-connect/internal/app
+ok  	github.com/cookwithcravv/cravv-connect/e2e
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -3884,7 +3884,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -3962,7 +3962,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // ShareAs is Share for an agent chat whose own ID (Claude Code's session
@@ -4041,10 +4041,10 @@ index 38cd1a7..1518e96 100644
 +++ b/internal/api/api_test.go
 @@ -13,7 +13,6 @@ import (
  
- 	"github.com/cravv/cravv-connect/internal/core"
- 	"github.com/cravv/cravv-connect/internal/ipc"
--	"github.com/cravv/cravv-connect/internal/present"
- 	"github.com/cravv/cravv-connect/internal/store"
+ 	"github.com/cookwithcravv/cravv-connect/internal/core"
+ 	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+-	"github.com/cookwithcravv/cravv-connect/internal/present"
+ 	"github.com/cookwithcravv/cravv-connect/internal/store"
  )
  
 @@ -437,19 +436,35 @@ func TestFilesAndControl(t *testing.T) {
@@ -4141,7 +4141,7 @@ index d936e8d..92819bd 100644
 --- a/internal/cli/hook_test.go
 +++ b/internal/cli/hook_test.go
 @@ -7,12 +7,10 @@ import (
- 	"github.com/cravv/cravv-connect/internal/ipc"
+ 	"github.com/cookwithcravv/cravv-connect/internal/ipc"
  )
  
 -func hookDaemon(t *testing.T, res ipc.HookCountsResult, gotCwd *string) *fakeDaemon {
@@ -4267,9 +4267,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
-	"github.com/cravv/cravv-connect/internal/store/sqlite"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store/sqlite"
 )
 
 // hookEnv is one machine with two chats sharing sessions from one folder.
@@ -4523,11 +4523,11 @@ go test ./e2e/ ./internal/api/ ./internal/cli/ ./internal/daemon/ ./internal/mcp
 Expected output (first 25 lines), package order may differ:
 
 ```text
-# github.com/cravv/cravv-connect/internal/mcpserver [github.com/cravv/cravv-connect/internal/mcpserver.test]
+# github.com/cookwithcravv/cravv-connect/internal/mcpserver [github.com/cookwithcravv/cravv-connect/internal/mcpserver.test]
 internal/mcpserver/mcpserver_test.go:93:3: unknown field AgentSession in struct literal of type Options
 internal/mcpserver/mcpserver_test.go:289:27: p.AgentSession undefined (type ipc.SessionShareParams has no field or method AgentSession)
 internal/mcpserver/mcpserver_test.go:298:27: p.AgentSession undefined (type ipc.SessionReattachParams has no field or method AgentSession)
-# github.com/cravv/cravv-connect/internal/api [github.com/cravv/cravv-connect/internal/api.test]
+# github.com/cookwithcravv/cravv-connect/internal/api [github.com/cookwithcravv/cravv-connect/internal/api.test]
 internal/api/api_test.go:442:47: unknown field SessionID in struct literal of type ipc.HookCountsParams
 internal/api/api_test.go:442:68: unknown field Event in struct literal of type ipc.HookCountsParams
 internal/api/api_test.go:442:83: unknown field StopHookActive in struct literal of type ipc.HookCountsParams
@@ -4537,11 +4537,11 @@ internal/api/fakes_test.go:49:27: cannot use fHook{…} (value of struct type fH
 internal/api/fakes_test.go:308:52: q.SessionID undefined (type ipc.HookCountsParams has no field or method SessionID)
 internal/api/fakes_test.go:308:65: q.Event undefined (type ipc.HookCountsParams has no field or method Event)
 internal/api/fakes_test.go:308:74: q.StopHookActive undefined (type ipc.HookCountsParams has no field or method StopHookActive)
-# github.com/cravv/cravv-connect/e2e [github.com/cravv/cravv-connect/e2e.test]
+# github.com/cookwithcravv/cravv-connect/e2e [github.com/cookwithcravv/cravv-connect/e2e.test]
 e2e/hooks_test.go:18:123: unknown field AgentSession in struct literal of type ipc.SessionShareParams
-FAIL	github.com/cravv/cravv-connect/e2e [build failed]
-FAIL	github.com/cravv/cravv-connect/internal/api [build failed]
-# github.com/cravv/cravv-connect/internal/cli [github.com/cravv/cravv-connect/internal/cli.test]
+FAIL	github.com/cookwithcravv/cravv-connect/e2e [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/api [build failed]
+# github.com/cookwithcravv/cravv-connect/internal/cli [github.com/cookwithcravv/cravv-connect/internal/cli.test]
 internal/cli/hook_test.go:23:62: unknown field Block in struct literal of type ipc.HookCountsResult
 internal/cli/hook_test.go:23:75: unknown field Reason in struct literal of type ipc.HookCountsResult
 internal/cli/hook_test.go:33:36: unknown field SessionID in struct literal of type ipc.HookCountsParams
@@ -4563,8 +4563,8 @@ index 98caa7f..11779ed 100644
 @@ -4,23 +4,14 @@ import (
  	"context"
  
- 	"github.com/cravv/cravv-connect/internal/ipc"
--	"github.com/cravv/cravv-connect/internal/present"
+ 	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+-	"github.com/cookwithcravv/cravv-connect/internal/present"
  )
  
  func (h *handlers) registerHook(s *ipc.Server) {
@@ -4766,7 +4766,7 @@ index 1ba976e..afbbf19 100644
 +	"os"
  	"path/filepath"
  
- 	"github.com/cravv/cravv-connect/internal/ipc"
+ 	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 @@ -33,8 +34,9 @@ func newMCPCmd(env *Env) *cobra.Command {
  					}
  					return ipc.DialContext(ctx, p.Socket)
@@ -4819,7 +4819,7 @@ index b08a9b4..86d7c45 100644
 +	"sync"
  	"time"
  
- 	"github.com/cravv/cravv-connect/internal/core"
+ 	"github.com/cookwithcravv/cravv-connect/internal/core"
 @@ -57,10 +58,33 @@ type AttentionDeps struct {
  
  // AttentionService tells a listener that something is pending for its
@@ -4906,9 +4906,9 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/present"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // MaxStopBlocks is how many times in a row the Stop hook keeps a chat
@@ -5364,12 +5364,12 @@ go test ./internal/daemon/ ./internal/api/ ./internal/app/ ./internal/cli/ ./int
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/daemon
-ok  	github.com/cravv/cravv-connect/internal/api
-ok  	github.com/cravv/cravv-connect/internal/app
-ok  	github.com/cravv/cravv-connect/internal/cli
-ok  	github.com/cravv/cravv-connect/internal/mcpserver
-ok  	github.com/cravv/cravv-connect/e2e
+ok  	github.com/cookwithcravv/cravv-connect/internal/daemon
+ok  	github.com/cookwithcravv/cravv-connect/internal/api
+ok  	github.com/cookwithcravv/cravv-connect/internal/app
+ok  	github.com/cookwithcravv/cravv-connect/internal/cli
+ok  	github.com/cookwithcravv/cravv-connect/internal/mcpserver
+ok  	github.com/cookwithcravv/cravv-connect/e2e
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -5380,7 +5380,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -5780,16 +5780,16 @@ go test ./internal/api/ ./internal/cli/ ./internal/core/ ./internal/mcpserver/ .
 Expected output (first 25 lines), package order may differ:
 
 ```text
-# github.com/cravv/cravv-connect/internal/core [github.com/cravv/cravv-connect/internal/core.test]
+# github.com/cookwithcravv/cravv-connect/internal/core [github.com/cookwithcravv/cravv-connect/internal/core.test]
 internal/core/limits_test.go:44:19: undefined: MaxWaitLong
-# github.com/cravv/cravv-connect/internal/mcpserver [github.com/cravv/cravv-connect/internal/mcpserver.test]
+# github.com/cookwithcravv/cravv-connect/internal/mcpserver [github.com/cookwithcravv/cravv-connect/internal/mcpserver.test]
 internal/mcpserver/mcpserver_test.go:500:55: unknown field WakeDir in struct literal of type Options
 internal/mcpserver/mcpserver_test.go:500:69: unknown field ListenerProgram in struct literal of type Options
 internal/mcpserver/mcpserver_test.go:503:139: out.Next undefined (type shareOut has no field or method Next)
 internal/mcpserver/mcpserver_test.go:503:147: undefined: ListenerNext
 internal/mcpserver/mcpserver_test.go:507:36: out.Listener undefined (type shareOut has no field or method Listener)
 internal/mcpserver/mcpserver_test.go:509:31: out.Listener undefined (type shareOut has no field or method Listener)
-# github.com/cravv/cravv-connect/internal/cli [github.com/cravv/cravv-connect/internal/cli.test]
+# github.com/cookwithcravv/cravv-connect/internal/cli [github.com/cookwithcravv/cravv-connect/internal/cli.test]
 internal/cli/mcp_test.go:44:12: undefined: listenerProgram
 internal/cli/mcp_test.go:47:12: undefined: listenerProgram
 internal/cli/mcp_test.go:50:12: undefined: listenerProgram
@@ -5799,10 +5799,10 @@ internal/cli/mcp_test.go:53:12: undefined: listenerProgram
     api_test.go:233: WaitTimeout(3600) = 50s, want 10m0s
     api_test.go:243: wait 50s items []
 FAIL
-FAIL	github.com/cravv/cravv-connect/internal/api
-FAIL	github.com/cravv/cravv-connect/internal/cli [build failed]
-FAIL	github.com/cravv/cravv-connect/internal/core [build failed]
-FAIL	github.com/cravv/cravv-connect/internal/mcpserver [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/api
+FAIL	github.com/cookwithcravv/cravv-connect/internal/cli [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/core [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/mcpserver [build failed]
 --- FAIL: TestInstructionsCoverTheRules (...)
     instructions_test.go:29: Instructions missing "listener"
 ```
@@ -5852,7 +5852,7 @@ index afbbf19..3e1e40c 100644
 +	"os/exec"
  	"path/filepath"
  
- 	"github.com/cravv/cravv-connect/internal/ipc"
+ 	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 @@ -26,6 +27,10 @@ func newMCPCmd(env *Env) *cobra.Command {
  			if err != nil {
  				return err
@@ -6122,7 +6122,7 @@ index 36ec846..48c39db 100644
  	"context"
 -	"fmt"
  
- 	"github.com/cravv/cravv-connect/internal/ipc"
+ 	"github.com/cookwithcravv/cravv-connect/internal/ipc"
  	"github.com/modelcontextprotocol/go-sdk/mcp"
  )
  
@@ -6648,12 +6648,12 @@ go test ./internal/core/ ./internal/api/ ./internal/daemon/ ./internal/present/ 
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/core
-ok  	github.com/cravv/cravv-connect/internal/api
-ok  	github.com/cravv/cravv-connect/internal/daemon
-ok  	github.com/cravv/cravv-connect/internal/present
-ok  	github.com/cravv/cravv-connect/internal/mcpserver
-ok  	github.com/cravv/cravv-connect/internal/cli
+ok  	github.com/cookwithcravv/cravv-connect/internal/core
+ok  	github.com/cookwithcravv/cravv-connect/internal/api
+ok  	github.com/cookwithcravv/cravv-connect/internal/daemon
+ok  	github.com/cookwithcravv/cravv-connect/internal/present
+ok  	github.com/cookwithcravv/cravv-connect/internal/mcpserver
+ok  	github.com/cookwithcravv/cravv-connect/internal/cli
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -6664,7 +6664,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -6780,7 +6780,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -7131,7 +7131,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -7431,7 +7431,7 @@ go test ./internal/mcpserver/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/mcpserver
+ok  	github.com/cookwithcravv/cravv-connect/internal/mcpserver
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -7442,7 +7442,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -7689,7 +7689,7 @@ go test ./internal/cli/ ./internal/install/ -count=1
 Expected output, package order may differ:
 
 ```text
-# github.com/cravv/cravv-connect/internal/install [github.com/cravv/cravv-connect/internal/install.test]
+# github.com/cookwithcravv/cravv-connect/internal/install [github.com/cookwithcravv/cravv-connect/internal/install.test]
 internal/install/install_test.go:476:51: undefined: claudeAllowedTools
 internal/install/install_test.go:479:14: c.InstallWith undefined (type *Claude has no field or method InstallWith)
 internal/install/install_test.go:479:35: undefined: Options
@@ -7699,11 +7699,11 @@ internal/install/install_test.go:519:13: undefined: isOurAllowRule
 internal/install/install_test.go:535:32: undefined: CravvSkill
 internal/install/install_test.go:539:24: undefined: CravvSkill
 internal/install/install_test.go:543:26: undefined: CravvSkill
-# github.com/cravv/cravv-connect/internal/cli [github.com/cravv/cravv-connect/internal/cli.test]
+# github.com/cookwithcravv/cravv-connect/internal/cli [github.com/cookwithcravv/cravv-connect/internal/cli.test]
 internal/cli/install_test.go:35:17: undefined: install.Options
 internal/cli/install_test.go:38:81: undefined: install.Options
-FAIL	github.com/cravv/cravv-connect/internal/cli [build failed]
-FAIL	github.com/cravv/cravv-connect/internal/install [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/cli [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/install [build failed]
 FAIL
 ```
 
@@ -8072,8 +8072,8 @@ go test ./internal/install/ ./internal/cli/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/install
-ok  	github.com/cravv/cravv-connect/internal/cli
+ok  	github.com/cookwithcravv/cravv-connect/internal/install
+ok  	github.com/cookwithcravv/cravv-connect/internal/cli
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -8084,7 +8084,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -8141,8 +8141,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/mcpserver"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/mcpserver"
 )
 
 // Human answers elicitation forms in the test's place. Each form is
@@ -8410,7 +8410,7 @@ go test ./e2e/ -count=1
 Expected output:
 
 ```text
-ok  	github.com/cravv/cravv-connect/e2e
+ok  	github.com/cookwithcravv/cravv-connect/e2e
 ```
 
 - [ ] **Step 3: Verify the whole module**
@@ -8421,7 +8421,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 4: Commit**
 
@@ -8525,11 +8525,11 @@ Expected output, package order may differ:
 --- FAIL: TestReviewPendingWithoutForms (...)
     review_test.go:234: headless: "link-3 (a link request asking tasks-ask from gpu-box/trainer): this machine cannot show a form or a notification. The human decides in a terminal: cravv-connect link accept 3 (or cravv-connect link reject 3).\ntask-T1 (a task on link 2 from gpu-box/trainer): this machine cannot show a form or a notification. The human decides in a terminal: cravv-connect approvals."
 FAIL
-FAIL	github.com/cravv/cravv-connect/internal/mcpserver
+FAIL	github.com/cookwithcravv/cravv-connect/internal/mcpserver
 --- FAIL: TestInstructionsCoverTheRules (...)
     instructions_test.go:29: Instructions missing "web UI (cravv-connect ui)"
 FAIL
-FAIL	github.com/cravv/cravv-connect/internal/present
+FAIL	github.com/cookwithcravv/cravv-connect/internal/present
 FAIL
 ```
 
@@ -8635,8 +8635,8 @@ go test ./internal/mcpserver/ ./internal/present/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/mcpserver
-ok  	github.com/cravv/cravv-connect/internal/present
+ok  	github.com/cookwithcravv/cravv-connect/internal/mcpserver
+ok  	github.com/cookwithcravv/cravv-connect/internal/present
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -8647,7 +8647,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 

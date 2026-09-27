@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/cravv/cravv-connect/internal/cli"
+	"github.com/cookwithcravv/cravv-connect/internal/cli"
 )
 
 // readmeCLIReference returns the rows of the README's CLI reference table.

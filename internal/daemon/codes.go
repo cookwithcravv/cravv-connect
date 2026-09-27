@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Confirmation codes (v2 spec 7.2): for clients that cannot show an

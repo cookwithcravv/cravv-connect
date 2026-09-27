@@ -5,7 +5,7 @@ package audit
 import (
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Event is one audit log line. It never carries message bodies or secrets;

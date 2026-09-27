@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func testFile(id string, dir store.TaskDirection, peer core.MachineID, st store.FileState, size int64, created time.Time) store.FileRecord {

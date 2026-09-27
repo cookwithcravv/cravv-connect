@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Authority is how a human decision reached the daemon (v2 spec section 10).

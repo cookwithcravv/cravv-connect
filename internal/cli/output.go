@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/cravv/cravv-connect/internal/present"
+	"github.com/cookwithcravv/cravv-connect/internal/present"
 )
 
 // terminalSafe makes one line of text that may come from a peer safe to

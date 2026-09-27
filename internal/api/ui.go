@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // UIPort starts the local web UI and returns a URL with a one-time launch

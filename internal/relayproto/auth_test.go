@@ -8,7 +8,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/keys"
+	"github.com/cookwithcravv/cravv-connect/internal/keys"
 )
 
 func TestAuthMessageExactBytes(t *testing.T) {

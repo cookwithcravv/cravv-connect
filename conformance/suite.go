@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/transport"
-	"github.com/cravv/cravv-connect/internal/transport/relayclient"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/transport/relayclient"
 )
 
 // Target is the relay under test.

@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
 )
 
 func TestInboxViewCleansPeerSession(t *testing.T) {

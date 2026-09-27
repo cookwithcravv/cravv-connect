@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/childenv"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/fakeagent"
+	"github.com/cookwithcravv/cravv-connect/internal/childenv"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/fakeagent"
 )
 
 // TestClaudeContainment runs the real claude with the exact flags of a

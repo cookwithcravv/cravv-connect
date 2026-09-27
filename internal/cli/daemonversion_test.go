@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // versionedDaemon is a fake daemon whose status reports a version that a

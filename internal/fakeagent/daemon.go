@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // Environment of the modes that talk to the daemon.

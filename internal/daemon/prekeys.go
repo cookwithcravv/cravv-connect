@@ -6,9 +6,9 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/keys"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/keys"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // PrekeyManager owns our X25519 prekeys: creation, weekly rotation with broadcast, and purge.

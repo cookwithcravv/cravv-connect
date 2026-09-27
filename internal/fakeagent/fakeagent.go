@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/childenv"
+	"github.com/cookwithcravv/cravv-connect/internal/childenv"
 )
 
 // Environment the fake agent reads (the daemon passes its own environment

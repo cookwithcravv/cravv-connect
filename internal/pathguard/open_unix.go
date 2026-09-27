@@ -7,7 +7,7 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // afterCheckHook, when set by tests, runs between Check and the open so a

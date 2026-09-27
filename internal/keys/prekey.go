@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // ErrBadPrekeySignature is returned when a signed prekey does not verify.

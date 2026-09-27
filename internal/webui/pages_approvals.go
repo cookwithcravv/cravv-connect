@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // addApprovals is the Approvals page: link requests waiting for this side

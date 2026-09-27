@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/childenv"
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/childenv"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // TestClaudeSmoke runs the real claude twice with the flags a read-only

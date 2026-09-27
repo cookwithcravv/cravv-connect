@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
 )
 
 func TestDaemonRunLogFile(t *testing.T) {

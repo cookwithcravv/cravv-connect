@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // rateLimiterPrune is how many keys a RateLimiter holds before it drops

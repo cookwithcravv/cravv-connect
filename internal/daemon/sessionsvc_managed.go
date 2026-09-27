@@ -3,8 +3,8 @@ package daemon
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // CreateManaged creates an open managed session (v2 spec 6.2) in folder.

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // SharedSession is a session an agent chat shared (v2 spec 3.2). It is

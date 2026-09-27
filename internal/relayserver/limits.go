@@ -3,8 +3,8 @@ package relayserver
 import (
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
 )
 
 // Limits bounds what one relay accepts. Zero fields are replaced by DefaultLimits values.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // v2 spec 7.2 over IPC: the chat's connection lists its pending decisions,

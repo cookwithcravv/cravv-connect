@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // TestAcceptance_4_ExistingOrNew pins criterion 4, "Existing or new": "A

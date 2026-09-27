@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // settingsFailStore fails GetSetting while fail is set.

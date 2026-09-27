@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/fakeagent"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/fakeagent"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // managedPair is a Mac and a GPU box, paired, where the GPU box offers the

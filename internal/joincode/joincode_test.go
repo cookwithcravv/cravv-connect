@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/bindcode"
+	"github.com/cookwithcravv/cravv-connect/internal/bindcode"
 )
 
 var bind = bindcode.Code{Nameplate: "7K3F", Secret: "9QXMTR2A"}

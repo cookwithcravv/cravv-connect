@@ -262,12 +262,12 @@ func TestInstallSystemUsesSudo(t *testing.T) {
 }
 
 // Without CRAVV_BASE_URL the script asks GitHub for CRAVV_REPO's latest
-// release (default cravv/cravv-connect). A fake curl records the request.
+// release (default cookwithcravv/cravv-connect). A fake curl records the request.
 func TestInstallDefaultRepository(t *testing.T) {
 	fake := t.TempDir()
 	log := filepath.Join(fake, "curl.log")
 	os.WriteFile(filepath.Join(fake, "curl"), []byte("#!/bin/sh\necho \"$*\" >> "+log+"\nexit 22\n"), 0o755)
-	for repo, want := range map[string]string{"": "https://github.com/cravv/cravv-connect/releases/latest", "acme/cc": "https://github.com/acme/cc/releases/latest"} {
+	for repo, want := range map[string]string{"": "https://github.com/cookwithcravv/cravv-connect/releases/latest", "acme/cc": "https://github.com/acme/cc/releases/latest"} {
 		os.Remove(log)
 		cmd := exec.Command("sh", "install.sh")
 		cmd.Env = []string{"HOME=" + t.TempDir(), "PATH=" + fake + ":" + os.Getenv("PATH")}
@@ -328,7 +328,7 @@ func TestInstallRefusesPlainHTTP(t *testing.T) {
 			"http://127.0.0.1@example.com/releases",
 			"ftp://example.com/releases",
 			"HTTP://example.com/releases",
-			"github.com/cravv/cravv-connect/releases",
+			"github.com/cookwithcravv/cravv-connect/releases",
 		} {
 			cmd := exec.Command(sh, "install.sh")
 			cmd.Env = []string{"HOME=" + t.TempDir(), "PATH=" + fake + ":" + os.Getenv("PATH"), "CRAVV_BASE_URL=" + base}

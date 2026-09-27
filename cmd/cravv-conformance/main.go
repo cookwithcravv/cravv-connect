@@ -14,9 +14,9 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/cravv/cravv-connect/conformance"
-	"github.com/cravv/cravv-connect/internal/keys"
-	"github.com/cravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/conformance"
+	"github.com/cookwithcravv/cravv-connect/internal/keys"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
 
 type options struct {

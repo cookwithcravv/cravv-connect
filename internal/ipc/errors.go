@@ -4,7 +4,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Errors that exist only at the IPC layer.

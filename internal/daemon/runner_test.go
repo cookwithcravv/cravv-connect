@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/fakeagent"
+	"github.com/cookwithcravv/cravv-connect/internal/fakeagent"
 )
 
 // fakeAgent returns the command that runs this test binary as the fake

@@ -1,8 +1,8 @@
 #!/bin/sh
 # Install cravv-connect and cravv-relay from a GitHub release.
 #
-#   curl -fsSL https://raw.githubusercontent.com/cravv/cravv-connect/main/scripts/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/cravv/cravv-connect/main/scripts/install.sh | sh -s -- --system
+#   curl -fsSL https://raw.githubusercontent.com/cookwithcravv/cravv-connect/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/cookwithcravv/cravv-connect/main/scripts/install.sh | sh -s -- --system
 #
 # Installs to ~/.local/bin, or /usr/local/bin with --system (using sudo when
 # needed). The archive is checked against the release's SHA256SUMS before
@@ -10,15 +10,13 @@
 #
 # Environment:
 #   CRAVV_VERSION   release tag to install, for example v1.2.0 (default: the latest release)
-#   CRAVV_REPO      GitHub repository, owner/name (default: cravv/cravv-connect)
+#   CRAVV_REPO      GitHub repository, owner/name (default: cookwithcravv/cravv-connect)
 #   CRAVV_BASE_URL  release URL, default https://github.com/$CRAVV_REPO/releases
 #                   (it serves <base>/latest and <base>/download/<tag>/<file>);
 #                   https only, or plain http on http://127.0.0.1 or http://localhost
 set -eu
 
-# The default repository is a placeholder: update it (here and in the URLs
-# above) once the real repository exists.
-repo="${CRAVV_REPO:-cravv/cravv-connect}"
+repo="${CRAVV_REPO:-cookwithcravv/cravv-connect}"
 base="${CRAVV_BASE_URL:-https://github.com/$repo/releases}"
 bindir="$HOME/.local/bin"
 system=0
@@ -29,7 +27,7 @@ die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 usage() {
 	say "usage: install.sh [--system]"
 	say "  --system  install to /usr/local/bin instead of ~/.local/bin"
-	say "Environment: CRAVV_VERSION (default: latest), CRAVV_REPO (default: cravv/cravv-connect), CRAVV_BASE_URL"
+	say "Environment: CRAVV_VERSION (default: latest), CRAVV_REPO (default: cookwithcravv/cravv-connect), CRAVV_BASE_URL"
 }
 
 while [ $# -gt 0 ]; do

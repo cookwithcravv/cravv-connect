@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // flakyConn fails every call but session.register with ipc.ErrClosed while

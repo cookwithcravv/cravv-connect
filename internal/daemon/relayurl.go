@@ -1,6 +1,6 @@
 package daemon
 
-import "github.com/cravv/cravv-connect/internal/relayaddr"
+import "github.com/cookwithcravv/cravv-connect/internal/relayaddr"
 
 // validRelayURL accepts a relay URL learned from a peer (pairing payload or
 // control.relay_moved). The rule is relayaddr.Check, shared with

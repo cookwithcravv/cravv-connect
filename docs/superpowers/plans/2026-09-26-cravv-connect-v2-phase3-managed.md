@@ -210,8 +210,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func offerFixture(id string, peer core.MachineID, label string) store.Offer {
@@ -355,14 +355,14 @@ go test ./internal/core/ ./internal/store/sqlite/ -count=1
 Expected output, package order may differ:
 
 ```text
-# github.com/cravv/cravv-connect/internal/core [github.com/cravv/cravv-connect/internal/core.test]
+# github.com/cookwithcravv/cravv-connect/internal/core [github.com/cookwithcravv/cravv-connect/internal/core.test]
 internal/core/offer_test.go:7:13: undefined: ParseRunMode
 internal/core/offer_test.go:13:16: undefined: ParseRunMode
 internal/core/offer_test.go:21:7: undefined: ValidOfferLabel
 internal/core/offer_test.go:26:6: undefined: ValidOfferLabel
 internal/core/offer_test.go:30:5: undefined: MaxOfferLabel
-FAIL	github.com/cravv/cravv-connect/internal/core [build failed]
-# github.com/cravv/cravv-connect/internal/store/sqlite [github.com/cravv/cravv-connect/internal/store/sqlite.test]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/core [build failed]
+# github.com/cookwithcravv/cravv-connect/internal/store/sqlite [github.com/cookwithcravv/cravv-connect/internal/store/sqlite.test]
 internal/store/sqlite/offers_test.go:14:71: undefined: store.Offer
 internal/store/sqlite/offers_test.go:15:15: undefined: store.Offer
 internal/store/sqlite/offers_test.go:17:66: undefined: core.RunEditInFolder
@@ -374,7 +374,7 @@ internal/store/sqlite/offers_test.go:42:15: db.PutOffer undefined (type *DB has 
 internal/store/sqlite/offers_test.go:42:59: undefined: store.ErrOfferLabelTaken
 internal/store/sqlite/offers_test.go:45:34: undefined: core.RunShell
 internal/store/sqlite/offers_test.go:45:34: too many errors
-FAIL	github.com/cravv/cravv-connect/internal/store/sqlite [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/store/sqlite [build failed]
 FAIL
 ```
 
@@ -470,7 +470,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // Offer is a managed-session rule the owner made for one paired machine
@@ -617,8 +617,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 const offerCols = `id, peer, label, folder, real_folder, agent, permission, run_mode, max_concurrent,
@@ -807,9 +807,9 @@ go test ./internal/core/ ./internal/store/ ./internal/store/sqlite/ -race -count
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/core
-ok  	github.com/cravv/cravv-connect/internal/store
-ok  	github.com/cravv/cravv-connect/internal/store/sqlite
+ok  	github.com/cookwithcravv/cravv-connect/internal/core
+ok  	github.com/cookwithcravv/cravv-connect/internal/store
+ok  	github.com/cookwithcravv/cravv-connect/internal/store/sqlite
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -820,7 +820,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -888,8 +888,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // offerPeers resolves aliases from a store (the PeerService's Resolve without its other deps).
@@ -1112,7 +1112,7 @@ go test ./internal/daemon/ -count=1
 Expected output:
 
 ```text
-# github.com/cravv/cravv-connect/internal/daemon [github.com/cravv/cravv-connect/internal/daemon.test]
+# github.com/cookwithcravv/cravv-connect/internal/daemon [github.com/cookwithcravv/cravv-connect/internal/daemon.test]
 internal/daemon/offers_test.go:29:31: undefined: FolderRules
 internal/daemon/offers_test.go:42:9: undefined: FolderRules
 internal/daemon/offers_test.go:51:34: undefined: OfferService
@@ -1124,7 +1124,7 @@ internal/daemon/offers_test.go:137:8: undefined: OfferInput
 internal/daemon/offers_test.go:158:20: undefined: OfferInput
 internal/daemon/offers_test.go:171:63: undefined: ErrBadOffer
 internal/daemon/offers_test.go:171:63: too many errors
-FAIL	github.com/cravv/cravv-connect/internal/daemon [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/daemon [build failed]
 FAIL
 ```
 
@@ -1145,9 +1145,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Audit event types for offer rules.
@@ -1471,7 +1471,7 @@ go test ./internal/daemon/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/daemon
+ok  	github.com/cookwithcravv/cravv-connect/internal/daemon
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -1482,7 +1482,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -1560,8 +1560,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // v2Offers is a node that offers managed sessions: its offer rules, its
@@ -1832,7 +1832,7 @@ go test ./internal/daemon/ -count=1
 Expected output:
 
 ```text
-# github.com/cravv/cravv-connect/internal/daemon [github.com/cravv/cravv-connect/internal/daemon.test]
+# github.com/cookwithcravv/cravv-connect/internal/daemon [github.com/cookwithcravv/cravv-connect/internal/daemon.test]
 internal/daemon/links_offer_test.go:20:10: undefined: SessionHost
 internal/daemon/links_offer_test.go:31:10: undefined: NewSessionHost
 internal/daemon/links_offer_test.go:31:25: undefined: HostDeps
@@ -1844,7 +1844,7 @@ internal/daemon/links_offer_test.go:245:16: undefined: cleanListedOffer
 internal/daemon/links_offer_test.go:255:19: shared.CreateManaged undefined (type *SessionService has no field or method CreateManaged)
 internal/daemon/links_offer_test.go:269:22: shared.CreateManaged undefined (type *SessionService has no field or method CreateManaged)
 internal/daemon/links_offer_test.go:269:22: too many errors
-FAIL	github.com/cravv/cravv-connect/internal/daemon [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/daemon [build failed]
 FAIL
 ```
 
@@ -1919,8 +1919,8 @@ package daemon
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // OfferLister lists the offers made to a paired machine. Implemented by *OfferService.
@@ -1974,9 +1974,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Audit event types for managed sessions.
@@ -2255,9 +2255,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // ManagedStarter creates a managed session for a link request to an offer,
@@ -2417,8 +2417,8 @@ package daemon
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // CreateManaged creates an open managed session (v2 spec 6.2) in folder.
@@ -2489,8 +2489,8 @@ import (
 	"context"
 	"os"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // assembleManaged builds the offer rules and the SessionHost (they outlive
@@ -2535,7 +2535,7 @@ go test ./internal/daemon/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/daemon
+ok  	github.com/cookwithcravv/cravv-connect/internal/daemon
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -2546,7 +2546,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -2607,7 +2607,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 func TestClaudeCommandPerRunMode(t *testing.T) {
@@ -2707,7 +2707,7 @@ go test ./internal/daemon/ -count=1
 Expected output:
 
 ```text
-# github.com/cravv/cravv-connect/internal/daemon [github.com/cravv/cravv-connect/internal/daemon.test]
+# github.com/cookwithcravv/cravv-connect/internal/daemon [github.com/cookwithcravv/cravv-connect/internal/daemon.test]
 internal/daemon/agent_test.go:41:11: undefined: RunSpec
 internal/daemon/agent_test.go:42:10: undefined: ClaudeAdapter
 internal/daemon/agent_test.go:56:13: undefined: ClaudeAdapter
@@ -2719,7 +2719,7 @@ internal/daemon/agent_test.go:86:11: undefined: ClaudeAdapter
 internal/daemon/agent_test.go:86:47: undefined: AgentResult
 internal/daemon/agent_test.go:89:11: undefined: ClaudeAdapter
 internal/daemon/agent_test.go:89:11: too many errors
-FAIL	github.com/cravv/cravv-connect/internal/daemon [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/daemon [build failed]
 FAIL
 ```
 
@@ -2734,7 +2734,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // EnvRunToken is the environment variable that carries a managed run's
@@ -2903,7 +2903,7 @@ go test ./internal/daemon/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/daemon
+ok  	github.com/cookwithcravv/cravv-connect/internal/daemon
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -2914,7 +2914,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -2973,7 +2973,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/fakeagent"
+	"github.com/cookwithcravv/cravv-connect/internal/fakeagent"
 )
 
 // TestMain lets this test binary run as the fake agent (the SessionHost
@@ -3001,7 +3001,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/fakeagent"
+	"github.com/cookwithcravv/cravv-connect/internal/fakeagent"
 )
 
 // fakeAgent returns the command that runs this test binary as the fake
@@ -3283,7 +3283,7 @@ go test ./internal/daemon/ -count=1
 Expected output:
 
 ```text
-# github.com/cravv/cravv-connect/internal/daemon [github.com/cravv/cravv-connect/internal/daemon.test]
+# github.com/cookwithcravv/cravv-connect/internal/daemon [github.com/cookwithcravv/cravv-connect/internal/daemon.test]
 internal/daemon/runner_test.go:60:9: undefined: ExecRunner
 internal/daemon/runner_test.go:73:8: undefined: ExecRunner
 internal/daemon/runner_test.go:78:13: undefined: ExecRunner
@@ -3291,7 +3291,7 @@ internal/daemon/runner_test.go:86:9: undefined: ExecRunner
 internal/daemon/runner_test.go:107:8: undefined: ExecRunner
 internal/daemon/runner_test.go:116:11: undefined: capBuffer
 internal/daemon/runner_test.go:117:11: undefined: capBuffer
-FAIL	github.com/cravv/cravv-connect/internal/daemon [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/daemon [build failed]
 FAIL
 ```
 
@@ -3470,7 +3470,7 @@ go test ./internal/daemon/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/daemon
+ok  	github.com/cookwithcravv/cravv-connect/internal/daemon
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -3481,7 +3481,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -3565,9 +3565,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/fakeagent"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/fakeagent"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // hostEnv is a machine that runs one managed session for peer gpu-box
@@ -4053,7 +4053,7 @@ go test ./internal/daemon/ -count=1
 Expected output:
 
 ```text
-# github.com/cravv/cravv-connect/internal/daemon [github.com/cravv/cravv-connect/internal/daemon.test]
+# github.com/cookwithcravv/cravv-connect/internal/daemon [github.com/cookwithcravv/cravv-connect/internal/daemon.test]
 internal/daemon/host_run_test.go:54:54: unknown field Inbox in struct literal of type HostDeps
 internal/daemon/host_run_test.go:54:70: unknown field Links in struct literal of type HostDeps
 internal/daemon/host_run_test.go:54:83: unknown field Peers in struct literal of type HostDeps
@@ -4065,7 +4065,7 @@ internal/daemon/host_run_test.go:58:3: unknown field Runner in struct literal of
 internal/daemon/host_run_test.go:61:3: unknown field RunDir in struct literal of type HostDeps
 internal/daemon/host_run_test.go:61:52: unknown field Self in struct literal of type HostDeps
 internal/daemon/host_run_test.go:61:52: too many errors
-FAIL	github.com/cravv/cravv-connect/internal/daemon [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/daemon [build failed]
 FAIL
 ```
 
@@ -4293,9 +4293,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // EvManagedOpen is audited when a human opens a managed session.
@@ -4446,9 +4446,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/audit"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/audit"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // hostTick is how often the host looks for queued items even when no inbox
@@ -5000,8 +5000,8 @@ package daemon
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 // Failure reasons of tasks a managed session did not finish.
@@ -5072,8 +5072,8 @@ index 9c07156..a6f798c 100644
 +	"path/filepath"
 +	"time"
  
- 	"github.com/cravv/cravv-connect/internal/audit"
- 	"github.com/cravv/cravv-connect/internal/store"
+ 	"github.com/cookwithcravv/cravv-connect/internal/audit"
+ 	"github.com/cookwithcravv/cravv-connect/internal/store"
 @@ -12,11 +16,39 @@ import (
  // ResetIdentity, like the shared sessions).
  func (d *Daemon) assembleManaged(db store.Store, lg audit.Logger) {
@@ -5127,7 +5127,7 @@ go test ./internal/daemon/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/daemon
+ok  	github.com/cookwithcravv/cravv-connect/internal/daemon
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -5138,7 +5138,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -5209,8 +5209,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // fManagedPorts records what the managed-session methods asked for.
@@ -5466,7 +5466,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 func ok(context.Context, *ConnState, json.RawMessage) (any, error) { return Empty{}, nil }
@@ -5548,7 +5548,7 @@ go test ./internal/api/ ./internal/ipc/ -count=1
 Expected output, package order may differ:
 
 ```text
-# github.com/cravv/cravv-connect/internal/ipc [github.com/cravv/cravv-connect/internal/ipc.test]
+# github.com/cookwithcravv/cravv-connect/internal/ipc [github.com/cookwithcravv/cravv-connect/internal/ipc.test]
 internal/ipc/run_test.go:18:13: undefined: MethodSessionRunBind
 internal/ipc/run_test.go:20:6: cs.SetRunBound undefined (type *ConnState has no field or method SetRunBound)
 internal/ipc/run_test.go:24:104: undefined: MethodOffersSet
@@ -5557,7 +5557,7 @@ internal/ipc/run_test.go:36:96: undefined: MethodSessionRunBind
 internal/ipc/run_test.go:41:130: undefined: MethodOffersSet
 internal/ipc/run_test.go:57:6: cs.OnClose undefined (type *ConnState has no field or method OnClose)
 internal/ipc/run_test.go:58:6: cs.OnClose undefined (type *ConnState has no field or method OnClose)
-# github.com/cravv/cravv-connect/internal/api [github.com/cravv/cravv-connect/internal/api.test]
+# github.com/cookwithcravv/cravv-connect/internal/api [github.com/cookwithcravv/cravv-connect/internal/api.test]
 internal/api/managed_test.go:28:72: undefined: ipc.OfferView
 internal/api/managed_test.go:30:15: undefined: ipc.OfferView
 internal/api/managed_test.go:33:54: undefined: ipc.OfferSetParams
@@ -5569,8 +5569,8 @@ internal/api/managed_test.go:52:15: undefined: ipc.ManagedView
 internal/api/managed_test.go:55:61: undefined: ipc.ManagedOpenResult
 internal/api/managed_test.go:57:14: undefined: ipc.ManagedOpenResult
 internal/api/managed_test.go:57:14: too many errors
-FAIL	github.com/cravv/cravv-connect/internal/api [build failed]
-FAIL	github.com/cravv/cravv-connect/internal/ipc [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/api [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/ipc [build failed]
 FAIL
 ```
 
@@ -5584,7 +5584,7 @@ package api
 import (
 	"context"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // OfferPort edits the managed-session offer rules. Set and Remove take
@@ -5767,11 +5767,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/api"
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/api"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 func init() {
@@ -6000,7 +6000,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // v2 Phase 3: managed sessions (offers, runs, open and close).
@@ -6170,9 +6170,9 @@ go test ./internal/ipc/ ./internal/api/ ./internal/app/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/ipc
-ok  	github.com/cravv/cravv-connect/internal/api
-ok  	github.com/cravv/cravv-connect/internal/app
+ok  	github.com/cookwithcravv/cravv-connect/internal/ipc
+ok  	github.com/cookwithcravv/cravv-connect/internal/api
+ok  	github.com/cookwithcravv/cravv-connect/internal/app
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -6183,7 +6183,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -6237,7 +6237,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // A server started by a managed run binds every connection with its run
@@ -6318,10 +6318,10 @@ go test ./internal/mcpserver/ -count=1
 Expected output:
 
 ```text
-# github.com/cravv/cravv-connect/internal/mcpserver [github.com/cravv/cravv-connect/internal/mcpserver.test]
+# github.com/cookwithcravv/cravv-connect/internal/mcpserver [github.com/cookwithcravv/cravv-connect/internal/mcpserver.test]
 internal/mcpserver/run_test.go:34:52: unknown field RunToken in struct literal of type Options
 internal/mcpserver/run_test.go:75:52: unknown field RunToken in struct literal of type Options
-FAIL	github.com/cravv/cravv-connect/internal/mcpserver [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/mcpserver [build failed]
 FAIL
 ```
 
@@ -6339,9 +6339,9 @@ index 3e1e40c..c458555 100644
  	"os/exec"
  	"path/filepath"
  
-+	"github.com/cravv/cravv-connect/internal/daemon"
- 	"github.com/cravv/cravv-connect/internal/ipc"
- 	"github.com/cravv/cravv-connect/internal/mcpserver"
++	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+ 	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+ 	"github.com/cookwithcravv/cravv-connect/internal/mcpserver"
  	"github.com/spf13/cobra"
 @@ -44,6 +45,7 @@ func newMCPCmd(env *Env) *cobra.Command {
  				AgentSession:    agentSessionFromEnv(os.Getenv),
@@ -6471,8 +6471,8 @@ go test ./internal/mcpserver/ ./internal/cli/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/mcpserver
-ok  	github.com/cravv/cravv-connect/internal/cli
+ok  	github.com/cookwithcravv/cravv-connect/internal/mcpserver
+ok  	github.com/cookwithcravv/cravv-connect/internal/cli
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -6483,7 +6483,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -6539,8 +6539,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func TestOffersList(t *testing.T) {
@@ -6706,13 +6706,13 @@ go test ./internal/cli/ -count=1
 Expected output:
 
 ```text
-# github.com/cravv/cravv-connect/internal/cli [github.com/cravv/cravv-connect/internal/cli.test]
+# github.com/cookwithcravv/cravv-connect/internal/cli [github.com/cookwithcravv/cravv-connect/internal/cli.test]
 internal/cli/managed_test.go:59:33: undefined: shellWarning
 internal/cli/managed_test.go:121:9: undefined: runInteractive
 internal/cli/managed_test.go:122:21: undefined: runInteractive
 internal/cli/managed_test.go:123:2: undefined: runInteractive
 internal/cli/managed_test.go:144:2: undefined: runInteractive
-FAIL	github.com/cravv/cravv-connect/internal/cli [build failed]
+FAIL	github.com/cookwithcravv/cravv-connect/internal/cli [build failed]
 FAIL
 ```
 
@@ -6764,7 +6764,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/spf13/cobra"
 )
 
@@ -6945,7 +6945,7 @@ import (
 	"os/exec"
 	"text/tabwriter"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/spf13/cobra"
 )
 
@@ -7053,7 +7053,7 @@ go test ./internal/cli/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/cli
+ok  	github.com/cookwithcravv/cravv-connect/internal/cli
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -7064,7 +7064,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -7117,7 +7117,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 func managedDaemon(t *testing.T) *fakeDaemon {
@@ -7323,8 +7323,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // addManaged is the Managed page: managed sessions other machines started
@@ -7473,7 +7473,7 @@ go test ./internal/webui/ -race -count=1
 Expected output (timings omitted):
 
 ```text
-ok  	github.com/cravv/cravv-connect/internal/webui
+ok  	github.com/cookwithcravv/cravv-connect/internal/webui
 ```
 
 - [ ] **Step 5: Verify the whole module**
@@ -7484,7 +7484,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 6: Commit**
 
@@ -7533,7 +7533,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/fakeagent"
+	"github.com/cookwithcravv/cravv-connect/internal/fakeagent"
 )
 
 // TestMain lets this test binary run as the fake claude of managed runs
@@ -7559,9 +7559,9 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/daemon"
-	"github.com/cravv/cravv-connect/internal/fakeagent"
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/daemon"
+	"github.com/cookwithcravv/cravv-connect/internal/fakeagent"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // managedPair is a Mac and a GPU box, paired, where the GPU box offers the
@@ -7771,7 +7771,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
 )
 
 // TestClaudeSmoke runs the real claude twice with the flags a read-only
@@ -7822,7 +7822,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 )
 
 // Environment of the modes that talk to the daemon.
@@ -7918,8 +7918,8 @@ go test ./e2e/ ./internal/daemon/ -count=1
 Expected output, package order may differ:
 
 ```text
-ok  	github.com/cravv/cravv-connect/e2e
-ok  	github.com/cravv/cravv-connect/internal/daemon
+ok  	github.com/cookwithcravv/cravv-connect/e2e
+ok  	github.com/cookwithcravv/cravv-connect/internal/daemon
 ```
 
 - [ ] **Step 3: Verify the whole module**
@@ -7930,7 +7930,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
+Expected: `gofmt` and `go vet` print nothing; `go test` prints `ok` for every package (and `?   	github.com/cookwithcravv/cravv-connect/cmd/cravv-connect	[no test files]`), with no `FAIL`.
 
 - [ ] **Step 4: Commit**
 

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
 )
 
 // do sends a request signed by k for the relay's origin at the relay clock's time (plus skew).

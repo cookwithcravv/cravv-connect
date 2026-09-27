@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/ipc"
-	"github.com/cravv/cravv-connect/internal/logfile"
+	"github.com/cookwithcravv/cravv-connect/internal/ipc"
+	"github.com/cookwithcravv/cravv-connect/internal/logfile"
 	"github.com/spf13/cobra"
 )
 

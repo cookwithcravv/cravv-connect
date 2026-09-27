@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/config"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -19,7 +19,7 @@ import (
 func buildBinary(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "cravv-connect")
-	out, err := exec.Command("go", "build", "-o", bin, "github.com/cravv/cravv-connect/cmd/cravv-connect").CombinedOutput()
+	out, err := exec.Command("go", "build", "-o", bin, "github.com/cookwithcravv/cravv-connect/cmd/cravv-connect").CombinedOutput()
 	if err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}

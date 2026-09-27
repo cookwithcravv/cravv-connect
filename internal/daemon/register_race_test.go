@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/transport"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
 
 // gatedRelay holds dials without credentials until release is closed, then

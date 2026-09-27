@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/cravv/cravv-connect/internal/core"
-	"github.com/cravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/store"
 )
 
 const outboxCols = `id, to_machine, envelope, status, attempts, next_attempt, created_at`

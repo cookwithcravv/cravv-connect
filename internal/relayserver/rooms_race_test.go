@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cravv/cravv-connect/internal/relayproto"
+	"github.com/cookwithcravv/cravv-connect/internal/relayproto"
 )
 
 // A joiner that claimed the join just as the room was burned must be refused
