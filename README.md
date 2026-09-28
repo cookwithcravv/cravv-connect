@@ -68,9 +68,6 @@ This downloads the latest release, checks it against the release's
 `~/.local/bin` (it tells you if that folder is not on your `PATH`). No Go
 toolchain is needed. Use `sh -s -- --system` to install to `/usr/local/bin`
 instead, and `CRAVV_VERSION=v1.2.0` to pick a release.
-While the repository is private, the one-liner and the release downloads need
-GitHub access (for example `gh auth login`, then download the release with
-`gh release download`); install from source otherwise.
 
 Every release archive also has a signed build provenance attestation from the
 release workflow. To check that an archive you downloaded was built there, use
@@ -103,13 +100,32 @@ check, so the binary the daemon runs is the one that needs cgo.
 
 ## Quick start
 
+**Joining someone who already uses cravv-connect?** You do not need a relay
+of your own. Install Claude Code first, then install cravv-connect (above),
+ask them to run `cravv-connect pair` and send you the join code it prints
+(it works once, for 10 minutes), and run:
+
+```sh
+cravv-connect setup --join 'cravv-join:...'
+```
+
+On a Linux machine you reach over SSH, also run `loginctl enable-linger $USER`
+so the daemon keeps running after you log out. Then restart Claude Code and
+type `/cravv` in a chat (step 3 below).
+
+**Starting fresh?** Deploy a relay once ([relay-cf/README.md](relay-cf/README.md),
+about 10 minutes on a free Cloudflare account), then follow the steps below.
+Install Claude Code (and Codex, if you use it) before `setup`, so it can add
+cravv-connect to them; if you install one later, run
+`cravv-connect install claude` (or `codex`).
+
 ### 1. Set up the first machine
 
 ```sh
-cravv-connect setup
+cravv-connect setup --relay https://cravv-relay.<subdomain>.workers.dev --relay-token - < ~/.cravv-relay-admin-token
 ```
 
-The wizard walks through:
+(or plain `cravv-connect setup` to be asked for everything). The wizard walks through:
 
 1. **Relay.** Enter your relay URL (for real use, deploy the Cloudflare relay
    once: [relay-cf/README.md](relay-cf/README.md)), or press Enter to start a
@@ -163,6 +179,9 @@ every peer). Then it sets the machine up, joins (your login password), asks
 for a local name for the other machine, and offers the agents. Both machines
 are now paired: each can see the sessions the other shares with it and ask
 for links, and nothing else.
+
+On Linux machines you reach over SSH, run `loginctl enable-linger $USER` once,
+so the daemon (a systemd user service) keeps running after you log out.
 
 A join code works once and expires in 10 minutes. To pair two machines that
 are already set up, run `cravv-connect pair` on one and

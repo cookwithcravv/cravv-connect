@@ -35,40 +35,55 @@ npm run dev         # wrangler dev on http://127.0.0.1:8787
 
 ## Deploy
 
-First enable R2 for the account in the Cloudflare dashboard (R2 Object
-Storage, then accept the plan; the free tier is enough). Until R2 is enabled,
-`wrangler r2 bucket create` fails.
+You need Node.js (for `npx`) and a Cloudflare account; the free plan is enough.
+Do these once in the Cloudflare dashboard first:
+
+1. **Enable R2:** R2 Object Storage, then accept the plan (the free tier is
+   enough). Until R2 is enabled, `wrangler r2 bucket create` fails.
+2. **Create your workers.dev subdomain:** open Compute (Workers), then
+   Workers & Pages. Opening it the first time creates the subdomain (you can
+   rename it there). Until it exists, `wrangler deploy` fails with
+   "You need a workers.dev subdomain" (code 10063). The relay's URL will be
+   `https://cravv-relay.<subdomain>.workers.dev`. Renaming the subdomain later
+   changes that URL, and a new name can take a few minutes before it answers
+   over HTTPS; machines already set up must then move to the new URL
+   (`cravv-connect setup --reset --relay <new url>`, and pair again).
+
+Then, from a clone of this repository:
 
 ```sh
 cd relay-cf
 npm ci
-npx wrangler login
+npx wrangler login                        # opens a browser to authorize wrangler
 npx wrangler r2 bucket create cravv-relay-blobs
 npx wrangler r2 bucket lifecycle add cravv-relay-blobs expire-blobs blobs/ --expire-days 15
-npx wrangler secret put ADMIN_TOKEN      # paste a long random value, e.g. from: openssl rand -hex 32
-npx wrangler deploy
+
+# The admin token: generate it into a private file and hand it to Cloudflare
+# on stdin, so it never appears on screen or in your shell history.
+(umask 077; openssl rand -hex 32 > ~/.cravv-relay-admin-token)
+npx wrangler secret put ADMIN_TOKEN < ~/.cravv-relay-admin-token
+
+npx wrangler deploy --var PUBLIC_ORIGIN:https://cravv-relay.<subdomain>.workers.dev
+curl https://cravv-relay.<subdomain>.workers.dev/v1/health   # {"ok":true,"version":1}
 ```
 
 The lifecycle rule is a backstop: `BlobMeta` deletes chunks on `DELETE` and at the 7 day TTL,
 so R2 only keeps an object past 15 days if that cleanup failed. Check it with
 `npx wrangler r2 bucket lifecycle list cravv-relay-blobs`.
 
-`wrangler deploy` prints the Worker URL (for example `https://cravv-relay.<account>.workers.dev`).
-Pin that URL as the relay origin that clients sign during auth, then deploy again:
+`PUBLIC_ORIGIN` pins the relay origin that clients sign during auth (you can also put
+`[vars] PUBLIC_ORIGIN = "..."` in `wrangler.toml`). Without it the relay falls back to the origin of
+each request URL. Pass it again on every later `wrangler deploy`, or it is dropped.
+
+Set up the first machine on the relay (see the main README):
 
 ```sh
-npx wrangler deploy --var PUBLIC_ORIGIN:https://cravv-relay.<account>.workers.dev
+cravv-connect setup --relay https://cravv-relay.<subdomain>.workers.dev --relay-token - < ~/.cravv-relay-admin-token
 ```
 
-(or add `[vars] PUBLIC_ORIGIN = "..."` to `wrangler.toml`). Without it the relay falls back to the
-origin of each request URL. Use that URL as the relay for the first machine:
-
-```sh
-cravv-connect init --relay https://cravv-relay.<account>.workers.dev --relay-token <ADMIN_TOKEN>
-```
-
-Every other machine joins with an invite that arrives inside the encrypted pairing exchange, so the
-admin token is needed only once.
+Every other machine joins with `cravv-connect setup --join <code>`: its invite arrives inside the
+encrypted pairing exchange, so the admin token is needed only once. Keep the token file private;
+it lets anyone register new machines on your relay.
 
 ## Conformance against wrangler dev
 
