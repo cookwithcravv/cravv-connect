@@ -66,7 +66,10 @@ exact limits behind each claim. Protocol details are in
   relay sees only the 4-character nameplate, the 40-bit secret is the SPAKE2
   password, a room allows exactly one joiner and lives 10 minutes, and a wrong
   code fails key confirmation and burns the room. An attacker gets one online
-  guess per code. `setup --join` shows the relay in a join code and asks
+  guess per code. Each side signs the exchange with its identity key, so
+  even someone who has the code cannot pass off another machine's identity
+  as its own (a peer on 0.2.1 or older cannot sign and is refused: update
+  both machines). `setup --join` shows the relay in a join code and asks
   before using it. Relays also cap abuse: at most 20 unused invites per
   member, 2 GiB of live blobs per member and 50 GiB per relay, a 10000-frame
   or 50 MB queue per mailbox, and per-mailbox and per-IP rate limits (the Go

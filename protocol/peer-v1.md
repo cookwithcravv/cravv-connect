@@ -714,13 +714,30 @@ ends the exchange with "pairing failed", and closing the room burns it.
      "prekey": {"id": "...", "pub": "...", "created_at": 1790000000000, "sig": "..."},
      "relay_url": "https://relay.example.com",
      "name": "prith-mbp",
-     "invite": "only from A: the single-use relay invite"
+     "invite": "only from A: the single-use relay invite",
+     "bind_sig": "base64 of the 64-byte Ed25519 signature by ik over the binding transcript"
    }
    ```
 
+   The binding transcript proves the sender holds `ik` in this very
+   exchange, so a machine that knows the code cannot present another
+   machine's identity key and prekey as its own (an unknown key share). For
+   the sender on side S (`A` or `B`) and the other side O it is the bytes
+
+   ```
+   "cravv-connect/pair-v1/bind\n" || S || O || HKDF-SHA256(ikm = K, salt = none, info = "cravv-connect/pair-v1/bind", 32 bytes)
+   ```
+
+   where `\n` is the byte 0x0a and S and O are the single bytes `A` or `B`.
+
 4. **Validation.** The received IK is 32 bytes, is not this machine's own IK,
-   the prekey signature verifies against it, and `relay_url` is an `https` URL
+   `bind_sig` verifies against it over the transcript for the peer's side
+   (A checks S = `B`, O = `A`; B checks S = `A`, O = `B`), the prekey
+   signature verifies against it, and `relay_url` is an `https` URL
    (plain `http` only for localhost, private network addresses (RFC 1918, unique local IPv6, 100.64.0.0/10) and single-label `.local` names).
+   A payload without `bind_sig` comes from cravv-connect 0.2.1 or older: it
+   is refused, and the human is told to update cravv-connect on both
+   machines and pair again.
 5. **Ack.** Each side sends the sealed constant `cravv-connect/pair-v1/ok`
    (same key and AAD, nonce last byte `2` for A, `3` for B) and checks the
    peer's. A payload tampered with in either direction therefore fails on both

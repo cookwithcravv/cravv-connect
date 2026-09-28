@@ -32,3 +32,19 @@ func CheckConfirm(key []byte, side Side, tag []byte) bool {
 
 // SessionKey is the 32-byte AEAD key for the pairing payload exchange.
 func SessionKey(key []byte) []byte { return derive(key, "cravv-connect/pair-v1/aead") }
+
+// bindDomain separates the identity-key binding signature from every other
+// use of the identity key.
+const bindDomain = "cravv-connect/pair-v1/bind\n"
+
+// BindTranscript is what the machine on side signer signs with its identity
+// key to prove it holds that key in this exchange: the domain, the signer's
+// side byte, the other side's byte, and HKDF(key, "cravv-connect/pair-v1/bind").
+// Both side bytes are in it, so a signature cannot be reflected back to its
+// maker, and the derived key ties it to this one PAKE session.
+func BindTranscript(key []byte, signer Side) []byte {
+	msg := make([]byte, 0, len(bindDomain)+2+32)
+	msg = append(msg, bindDomain...)
+	msg = append(msg, sideByte(signer), sideByte(signer.Other()))
+	return append(msg, derive(key, "cravv-connect/pair-v1/bind")...)
+}
