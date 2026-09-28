@@ -30,7 +30,8 @@ import {
   type SendStatus,
 } from "./protocol";
 import { Meta, Queue } from "./queue";
-import { REGISTRY_NAME } from "./registry";
+import { REGISTRY_NAME, type InviteResult } from "./registry";
+import { describeError, retryOnce } from "./rpc";
 
 export type BlobReservation = "ok" | "quota" | "count";
 
@@ -163,7 +164,7 @@ export class Mailbox extends DurableObject<Env> {
           return await this.onReady(ws, a, f);
       }
     } catch (err) {
-      console.error("mailbox: request failed", err);
+      console.error(`mailbox: ${a.stage} stage failed:`, describeError(err));
       failSocket(ws, Code.INTERNAL, "internal error");
     }
   }
@@ -234,7 +235,12 @@ export class Mailbox extends DurableObject<Env> {
       failSocket(ws, Code.BAD_REQUEST, "register needs a rid");
       return;
     }
-    const ok = await this.registry().register(a.mailboxId, str(f.admin_token), str(f.invite));
+    const adminToken = str(f.admin_token);
+    const invite = str(f.invite);
+    const ok = await retryOnce(
+      () => this.registry(),
+      (r) => r.register(a.mailboxId, adminToken, invite),
+    );
     if (!ok) {
       // relay-v1 3.4 step 5: the refusal is final, so answer and then close.
       ws.send(resFrame(rid, { status: Status.ERROR, code: Code.FORBIDDEN }));
@@ -295,7 +301,18 @@ export class Mailbox extends DurableObject<Env> {
       ws.send(resFrame(rid, { status: Status.ERROR, code: Code.BAD_REQUEST }));
       return;
     }
-    await op(ws, a, f, rid);
+    try {
+      await op(ws, a, f, rid);
+    } catch (err) {
+      // One failed request (for example a call to another object) must not end the
+      // connection: acks and deliveries keep flowing and the client retries this request.
+      console.error(`mailbox: ${f.t} failed:`, describeError(err));
+      try {
+        ws.send(resFrame(rid, { status: Status.ERROR, code: Code.INTERNAL }));
+      } catch {
+        // socket already gone
+      }
+    }
   }
 
   private async opAllow(ws: WebSocket, f: Frame, rid: string, allow: boolean): Promise<void> {
@@ -311,7 +328,10 @@ export class Mailbox extends DurableObject<Env> {
   }
 
   private async opInvite(ws: WebSocket, a: Attachment, rid: string): Promise<void> {
-    const r = await this.registry().createInvite(a.mailboxId);
+    const r = await retryOnce(
+      () => this.registry(),
+      async (reg): Promise<InviteResult> => reg.createInvite(a.mailboxId),
+    );
     if (!r.ok) {
       ws.send(resFrame(rid, { status: Status.ERROR, code: r.code }));
       return;
@@ -323,7 +343,11 @@ export class Mailbox extends DurableObject<Env> {
     for (let i = 0; i < ROOM_CREATE_ATTEMPTS; i++) {
       const nameplate = randomNameplate();
       const token = randomToken();
-      const created = await this.env.ROOM.getByName(nameplate).init(await sha256Hex(token));
+      const tokenHash = await sha256Hex(token);
+      const created = await retryOnce(
+        () => this.env.ROOM.getByName(nameplate),
+        (room) => room.init(tokenHash),
+      );
       if (created) {
         ws.send(resFrame(rid, { status: Status.OK, nameplate, creator_token: token }));
         return;
@@ -361,7 +385,11 @@ export class Mailbox extends DurableObject<Env> {
     } else if (to === a.mailboxId) {
       status = await this.enqueue(a.ik, a.mailboxId, id, b64encode(frame), frame.length);
     } else {
-      status = await this.env.MAILBOX.getByName(to).enqueue(a.ik, a.mailboxId, id, b64encode(frame), frame.length);
+      const data = b64encode(frame);
+      status = await retryOnce(
+        () => this.env.MAILBOX.getByName(to),
+        (mb) => mb.enqueue(a.ik, a.mailboxId, id, data, frame.length),
+      );
     }
     ws.send(resFrame(rid, { status }));
   }

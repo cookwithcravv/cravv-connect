@@ -1,6 +1,7 @@
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { authMessage, b64encode } from "../src/crypto";
+import { retryOnce } from "../src/rpc";
 import { ADMIN_TOKEN, Conn, frameB64, handshake, Identity, member, type Msg, testEnv } from "./helpers";
 
 async function pair(): Promise<{ a: Identity; b: Identity; ca: Conn; cb: Conn }> {
@@ -393,14 +394,93 @@ describe("request handling", () => {
 });
 
 describe("internal errors", () => {
-  it("sends a fixed internal error message, never exception details", async () => {
+  it("answers a failed request with res error internal and keeps the connection", async () => {
     const id = await Identity.create();
     const c = await member(id);
     await runInDurableObject(testEnv.MAILBOX.getByName(id.mailboxId), (_inst, state) => {
       state.storage.sql.exec("DROP TABLE allow");
     });
-    c.send({ t: "allow", rid: "x", ik: id.ikB64 });
-    expect(await c.next()).toEqual({ t: "error", code: "internal", message: "internal error" });
-    await c.waitClosed();
+    expect(await c.request({ t: "allow", ik: id.ikB64 })).toEqual({ t: "res", rid: expect.any(String), status: "error", code: "internal" });
+    expect(c.closed).toBe(false);
+    expect((await c.request({ t: "invite_request" })).status).toBe("ok");
+    c.close();
+  });
+
+  it("a send whose enqueue throws in the recipient gets res error internal; acks and deliveries go on", async () => {
+    const { a, b, ca, cb } = await pair();
+    const x = await Identity.create();
+    const cx = await member(x);
+    expect((await ca.request({ t: "allow", ik: x.ikB64 })).status).toBe("ok");
+    // Break b's queue so its enqueue throws on the cross-object call from a.
+    await runInDurableObject(testEnv.MAILBOX.getByName(b.mailboxId), (_inst, state) => {
+      state.storage.sql.exec("DROP TABLE queue");
+      state.storage.sql.exec("CREATE TABLE queue (broken INTEGER)");
+    });
+    const failed = await ca.request({ t: "send", to: b.mailboxId, id: "lost", frame: frameB64("x") });
+    expect(failed).toMatchObject({ t: "res", status: "error", code: "internal" });
+    expect(ca.closed).toBe(false);
+
+    const skipped: Msg[] = [];
+    expect((await cx.request({ t: "send", to: a.mailboxId, id: "after", frame: frameB64("after") })).status).toBe("queued");
+    const d = await ca.next();
+    expect(d).toMatchObject({ t: "deliver", from: x.ikB64, id: "after" });
+    ca.send({ t: "ack", seq: d.seq });
+    expect((await ca.request({ t: "invite_request" }, skipped)).status).toBe("ok");
+    expect(skipped).toEqual([]);
+    const left = await runInDurableObject(testEnv.MAILBOX.getByName(a.mailboxId), (_inst, state) =>
+      state.storage.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM queue").one().n,
+    );
+    expect(left).toBe(0);
+    ca.close();
+    cb.close();
+    cx.close();
+  });
+});
+
+describe("retryOnce", () => {
+  const retryable = Object.assign(new Error("Network connection lost."), { retryable: true });
+
+  it("retries a retryable error once on a fresh stub", async () => {
+    const stubs: number[] = [];
+    let n = 0;
+    const out = await retryOnce(
+      () => ++n,
+      async (s) => {
+        stubs.push(s);
+        if (s === 1) throw retryable;
+        return "ok";
+      },
+    );
+    expect(out).toBe("ok");
+    expect(stubs).toEqual([1, 2]);
+  });
+
+  it("gives up after the second attempt", async () => {
+    let calls = 0;
+    await expect(
+      retryOnce(
+        () => 0,
+        async () => {
+          calls++;
+          throw retryable;
+        },
+      ),
+    ).rejects.toBe(retryable);
+    expect(calls).toBe(2);
+  });
+
+  it("does not retry other errors", async () => {
+    let calls = 0;
+    const plain = Object.assign(new Error("boom"), { retryable: false });
+    await expect(
+      retryOnce(
+        () => 0,
+        async () => {
+          calls++;
+          throw plain;
+        },
+      ),
+    ).rejects.toBe(plain);
+    expect(calls).toBe(1);
   });
 });
