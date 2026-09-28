@@ -2,3 +2,4 @@ bin/
 relay-cf/node_modules
 relay-cf/.wrangler
 *.db
+dist/

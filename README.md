@@ -56,8 +56,10 @@ the CLI. The relay is either the Cloudflare Worker in
 ## Install
 
 On macOS or Linux (arm64 or amd64). The Linux binaries need
-glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later); on an
-older or a musl system such as Alpine, install from source.
+glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later) and the
+PAM library `libpam.so.0`, which every mainstream distribution has (minimal
+container images may not: `apt install libpam0g`); on an older or a musl
+system such as Alpine, install from source.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cookwithcravv/cravv-connect/main/scripts/install.sh | sh
@@ -67,14 +69,14 @@ This downloads the latest release, checks it against the release's
 `SHA256SUMS`, and installs `cravv-connect` and `cravv-relay` to
 `~/.local/bin` (it tells you if that folder is not on your `PATH`). No Go
 toolchain is needed. Use `sh -s -- --system` to install to `/usr/local/bin`
-instead, and `CRAVV_VERSION=v1.2.0` to pick a release.
+instead, and `CRAVV_VERSION=v0.2.2` to pick a release.
 
 Every release archive also has a signed build provenance attestation from the
 release workflow. To check that an archive you downloaded was built there, use
 the [GitHub CLI](https://cli.github.com/):
 
 ```sh
-gh attestation verify cravv-connect_1.2.0_linux_amd64.tar.gz --repo cookwithcravv/cravv-connect
+gh attestation verify cravv-connect_0.2.2_linux_amd64.tar.gz --repo cookwithcravv/cravv-connect
 ```
 
 ### Install from source
@@ -384,7 +386,7 @@ any local process can run the CLI's.
 | `version` | Print the version |
 | `init --relay <url> [--relay-token <t>] [--name <n>] [--force]` | Write `config.toml`; store the admin token for the first machine. The relay URL must be an origin, `scheme://host[:port]`, with no path. `--force` with a different relay clears this machine's relay registration so it registers again there; peers are not told, so re-pair with them |
 | `daemon run [--log-file <path>]` | Run the daemon in the foreground. Logs JSON to stderr, or with `--log-file` to that file, rotated at 10 MiB with 3 old files kept |
-| `daemon start` / `daemon stop` / `daemon status` | Control the daemon. `start` also restarts a running daemon of another version (after an upgrade replaced the binary), and says so: "Restarted the daemon (was v1.2.0, now v2.0.0)"; `setup` does the same. `stop` asks the daemon over its socket to shut down and waits up to 10 seconds for it to exit; it never signals a process that does not answer on the socket |
+| `daemon start` / `daemon stop` / `daemon status` | Control the daemon. `start` also restarts a running daemon of another version (after an upgrade replaced the binary), and says so: "Restarted the daemon (was v0.2.1, now v0.2.2)"; `setup` does the same. `stop` asks the daemon over its socket to shut down and waits up to 10 seconds for it to exit; it never signals a process that does not answer on the socket |
 | `daemon install` / `daemon uninstall` | Run the daemon at login (launchd or systemd user unit) |
 | `status [--json]` | Relay connection, peers, shared sessions, queues, pending approvals, errors |
 | `pair [--no-qr]` | Show a join code (with a QR code) and pair (password) |
@@ -563,6 +565,18 @@ rewrites it), `TestREADMEDocumentsEveryCommand` checks that this CLI
 reference names every command and flag, and `TestDocsHaveNoEmDashes`
 keeps em dashes out of every Markdown file.
 
+## Security
+
+Please report security problems privately through a
+[GitHub security advisory](https://github.com/cookwithcravv/cravv-connect/security/advisories/new),
+not in a public issue. See [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and send changes,
+and [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
+
 ## License
 
-Not yet licensed for redistribution. Open sourcing is planned.
+MIT, see [LICENSE](LICENSE). The release archives also carry
+`THIRD_PARTY_LICENSES`, the licenses of the Go modules built into the binaries.

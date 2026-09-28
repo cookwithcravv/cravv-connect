@@ -59,7 +59,7 @@ jobs:
             -o "dist/$name/cravv-connect" ./cmd/cravv-connect
           CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/$name/cravv-relay" ./cmd/cravv-relay
           CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "dist/$name/cravv-conformance" ./cmd/cravv-conformance
-          cp README.md "dist/$name/"
+          cp README.md LICENSE THIRD_PARTY_LICENSES "dist/$name/"
           "dist/$name/cravv-connect" version | grep -F "cravv-connect ${TAG} (${GOOS}/${GOARCH})"
           if [ "$GOOS" = linux ]; then
             # The README promises glibc 2.35: fail if a newer symbol slipped in.

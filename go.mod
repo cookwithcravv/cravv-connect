@@ -2,6 +2,8 @@ module github.com/cookwithcravv/cravv-connect
 
 go 1.26.0
 
+toolchain go1.26.8
+
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/modelcontextprotocol/go-sdk v1.8.0

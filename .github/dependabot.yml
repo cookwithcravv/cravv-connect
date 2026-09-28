@@ -1,0 +1,17 @@
+# Weekly update PRs for Go modules, the relay's npm dev dependencies and the
+# pinned GitHub Actions. Security updates also need Dependabot alerts turned on
+# in the repository settings.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /relay-cf
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

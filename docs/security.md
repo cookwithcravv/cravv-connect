@@ -653,11 +653,35 @@ pairing payload. The e2e test `TestAcceptance_8_SecurityHolds` records
 everything a relay stores during pairing, discovery, a link request, chat,
 a task and a close, and checks that none of these appear.
 
+Whoever hosts the relay sees the same as its operator. With the Cloudflare
+relay that is Cloudflare too: it terminates TLS, runs the Durable Objects and
+stores the queues and blobs, so everything in the list above is visible to
+it, and with Workers Logs on (as `relay-cf/wrangler.toml` ships) it keeps the
+relay's error logs and per-request metadata (such as the URL, which carries
+the public identity key, and the network details Cloudflare attaches) for its
+log retention period. Everyone who
+uses cravv-connect runs their own relay, so this is your own Cloudflare
+account; turn the logs off with `enabled = false` under `[observability]` if
+you do not want them.
+
+## Verifying a release
+
+Each release on GitHub has a `SHA256SUMS` file, and `scripts/install.sh`
+refuses an archive that does not match it. Each archive also has a signed
+build provenance attestation from the release workflow, which you can check
+with `gh attestation verify <archive> --repo cookwithcravv/cravv-connect`.
+The install script itself is fetched from the `main` branch over HTTPS and
+is not signed: if you do not want to trust that, download the archive and
+`SHA256SUMS` from the release page, verify them yourself, or build from
+source. Release binaries are built with the Go toolchain pinned in `go.mod`,
+and CI runs `govulncheck` on every change.
+
 ## Reporting a vulnerability
 
-Please report security problems privately: open a private security advisory
-on the project's repository, or contact its maintainers directly. Do not open
-a public issue for an unfixed vulnerability. Include the version or commit,
+Please report security problems privately through a GitHub security advisory
+(https://github.com/cookwithcravv/cravv-connect/security/advisories/new); see
+[SECURITY.md](../SECURITY.md). Do not open a public issue for an unfixed
+vulnerability. Include the version or commit,
 your platform, and steps to reproduce. For a relay deployment you operate,
 also rotate the relay admin token (`wrangler secret put ADMIN_TOKEN` for the
 Cloudflare relay, or restart `cravv-relay` with a new

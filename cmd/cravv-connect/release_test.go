@@ -40,6 +40,8 @@ func TestReleaseWorkflowShape(t *testing.T) {
 		`version="${TAG#v}"`,
 		`sha256sum *.tar.gz > SHA256SUMS`,
 		`tags: ["v*"]`,
+		// MIT for our code, and the notices our dependencies' licenses ask for.
+		`cp README.md LICENSE THIRD_PARTY_LICENSES "dist/$name/"`,
 	} {
 		if !strings.Contains(wf, want) {
 			t.Errorf("release.yml lacks %s", want)

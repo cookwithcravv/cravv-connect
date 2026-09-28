@@ -9,11 +9,12 @@
 # anything is installed.
 #
 # Environment:
-#   CRAVV_VERSION   release tag to install, for example v1.2.0 (default: the latest release)
+#   CRAVV_VERSION   release tag to install, for example v0.2.2 (default: the latest release)
 #   CRAVV_REPO      GitHub repository, owner/name (default: cookwithcravv/cravv-connect)
 #   CRAVV_BASE_URL  release URL, default https://github.com/$CRAVV_REPO/releases
 #                   (it serves <base>/latest and <base>/download/<tag>/<file>);
 #                   https only, or plain http on http://127.0.0.1 or http://localhost
+#   CRAVV_SYSTEM_DIR  where --system installs (default: /usr/local/bin)
 set -eu
 
 repo="${CRAVV_REPO:-cookwithcravv/cravv-connect}"
