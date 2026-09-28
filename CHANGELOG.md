@@ -54,6 +54,9 @@ change behaviour or wire formats, and the notes say so.
 - When the relay says a peer no longer allows this machine, its links now
   close and its tasks end, as when the peer says it paused you. `peers` and
   the web UI show such a peer as "paused or unpaired you".
+- A peer that was offline for more than a week (longer than the relay
+  keeps a prekey announcement) is sent this machine's current prekey again
+  as soon as it sends anything sealed to an older one.
 
 ## v0.2.1 (2026-09-28)
 

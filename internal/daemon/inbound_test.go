@@ -452,6 +452,53 @@ func TestInboundStalePrekeyReplyRateLimited(t *testing.T) {
 	}
 }
 
+// A peer that seals to a prekey this machine has replaced (it was offline
+// longer than the relay kept the control.prekey announcing the new one) is
+// told the current prekey again, at most once per peer per
+// core.PrekeyReannounceEvery; the frame is still handled.
+func TestInboundReannouncesThePrekeyToAPeerSealingToAnOldOne(t *testing.T) {
+	ctx := context.Background()
+	f := newInboundFixture(t)
+	old := f.myPK
+	f.clock.Advance(core.PrekeyRotation + time.Minute)
+	if rotated, err := f.prekeys.RotateIfDue(ctx); err != nil || !rotated {
+		t.Fatalf("rotate: %v %v", rotated, err)
+	}
+	cur, err := f.prekeys.Current(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.sender = &recordingSender{}
+	f.in.sender = f.sender
+	var ds []transport.Delivery
+	for i := range 3 {
+		id, raw := f.frameFrom(t, f.gpu, f.clock.Now(), old)
+		ds = append(ds, transport.Delivery{Seq: uint64(i + 1), From: f.gpu.id.Public(), ID: id, Frame: raw})
+	}
+	f.run(t, ds...)
+	if n := len(f.handledIDs()); n != 3 {
+		t.Fatalf("handled %d of 3 frames sealed to the old prekey", n)
+	}
+	sent := f.sender.ofKind(core.KindControlPrekey)
+	if len(sent) != 1 || sent[0].To != f.gpu.rec.MachineID {
+		t.Fatalf("control.prekey sent = %+v, want one to gpu-box", sent)
+	}
+	var b core.PrekeyBody
+	if err := json.Unmarshal(sent[0].Body, &b); err != nil || b.Prekey.ID != cur.ID {
+		t.Fatalf("announced %+v (%v), want %s", b, err, cur.ID)
+	}
+	// Frames to the current prekey never trigger it; a later old one does,
+	// once the interval has passed.
+	id, raw := f.frameFrom(t, f.gpu, f.clock.Now(), cur)
+	f.run(t, transport.Delivery{Seq: 10, From: f.gpu.id.Public(), ID: id, Frame: raw})
+	f.clock.Advance(core.PrekeyReannounceEvery)
+	id, raw = f.frameFrom(t, f.gpu, f.clock.Now(), old)
+	f.run(t, transport.Delivery{Seq: 11, From: f.gpu.id.Public(), ID: id, Frame: raw})
+	if n := len(f.sender.ofKind(core.KindControlPrekey)); n != 2 {
+		t.Fatalf("control.prekey sent %d times, want 2", n)
+	}
+}
+
 func TestInboundControlKindsGetNoReceipt(t *testing.T) {
 	f := newInboundFixture(t)
 	var got []core.Kind

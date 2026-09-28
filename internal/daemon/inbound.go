@@ -53,6 +53,7 @@ type Inbound struct {
 	killed   func() bool
 	logger   *slog.Logger
 	stale    *RateLimiter // control.stale_prekey replies per peer
+	announce *RateLimiter // control.prekey re-announcements per peer
 
 	corrupt atomic.Int64 // unparseable or unverifiable frames, bad IDs and timestamps
 	unknown atomic.Int64 // frames from machines that are not paired
@@ -75,8 +76,9 @@ func NewInbound(id *keys.Identity, peers store.PeerStore, dedup store.DedupStore
 	return &Inbound{
 		identity: id, peers: peers, dedup: dedup, prekeys: prekeys, registry: registry,
 		sender: sender, clock: clock, killed: killed, logger: logger,
-		stale:   NewRateLimiter(clock, core.StalePrekeyRepliesPerMinute, time.Minute),
-		receipt: make(map[core.MachineID][]string),
+		stale:    NewRateLimiter(clock, core.StalePrekeyRepliesPerMinute, time.Minute),
+		announce: NewRateLimiter(clock, 1, core.PrekeyReannounceEvery),
+		receipt:  make(map[core.MachineID][]string),
 	}
 }
 
@@ -170,6 +172,7 @@ func (in *Inbound) process(ctx context.Context, d transport.Delivery) error {
 		in.drop(&in.corrupt, "unverifiable frame", d, err)
 		return nil
 	}
+	in.reannouncePrekey(ctx, peer, frame.Header.PKID)
 	if !core.ValidID(env.ID) {
 		in.drop(&in.corrupt, "message id is not a core ID", d, nil)
 		return nil
@@ -259,6 +262,23 @@ func (in *Inbound) checkTime(id string, ts time.Time) error {
 		return fmt.Errorf("message %s is %s in the future", id, ts.Sub(now).Round(time.Second))
 	}
 	return nil
+}
+
+// reannouncePrekey sends the peer this machine's current prekey when the
+// frame it sent was sealed to an older one (still kept, so the frame
+// opened): the peer missed the control.prekey that announced the current
+// one, most likely because it was offline longer than the relay kept it.
+// At most once per peer per core.PrekeyReannounceEvery.
+func (in *Inbound) reannouncePrekey(ctx context.Context, peer store.Peer, pkID string) {
+	cur, err := in.prekeys.Current(ctx)
+	if err != nil || cur.ID == pkID || !in.announce.Allow(string(peer.MachineID)) {
+		return
+	}
+	if _, err := in.sender.SendEnvelope(ctx, peer.MachineID, core.KindControlPrekey, "", core.PrekeyBody{Prekey: cur.Wire()}); err != nil {
+		in.logger.Warn("re-announce prekey failed", "peer", peer.Alias, "err", err)
+		return
+	}
+	in.logger.Info("peer sealed to an old prekey; sent it the current one", "peer", peer.Alias)
 }
 
 // replyStalePrekey tells the sender which prekey to use, at most once per (peer, message ID):

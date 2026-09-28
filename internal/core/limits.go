@@ -50,6 +50,10 @@ const (
 	// control.stale_prekey replies per peer per minute. A sender reseals each
 	// named message; one it is not told about is resent after RelayTTL.
 	StalePrekeyRepliesPerMinute = 10
+	// A peer that seals to a replaced prekey of this machine missed the
+	// control.prekey (it was offline longer than RelayTTL): it is sent the
+	// current one again, at most once per peer per this interval.
+	PrekeyReannounceEvery = 10 * time.Minute
 
 	// Inbound volume per link, enforced by the receiver on chat and
 	// task.update: a token bucket (InboundItemsPerMinute, up to

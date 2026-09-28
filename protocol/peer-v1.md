@@ -660,6 +660,11 @@ checked to be inside `files/`.
   one superseded, and sends `control.prekey` to each peer it has not paused.
 - The same pass deletes private prekeys superseded more than 21 days ago. That
   covers the relay's 7-day queue plus 14 days of a sender retrying.
+- A peer that seals to a `pk_id` the receiver still has but has replaced
+  missed the `control.prekey` (a control item leaves the outbox once the
+  relay queued it, and the relay keeps it only 7 days). The receiver handles
+  the frame and sends that peer `control.prekey` with its current prekey
+  again, at most once per peer every 10 minutes.
 - A peer that missed the rotation (it was paused, or it was offline long
   enough for the old key to be purged) seals to a `pk_id` the receiver no
   longer has. The round trip:
