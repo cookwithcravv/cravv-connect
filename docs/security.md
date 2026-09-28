@@ -579,9 +579,12 @@ a new identity without reconnecting under the old one first.
     base64 seed) in the default keychain, normally the login keychain,
     written through `security(1)`. The seed is passed to `security` as an
     argument, so another process of the same user could see it in the process
-    list for a moment. If the Keychain refuses the write, the seed goes to the
-    fallback below; if the Keychain cannot be read and there is no fallback
-    copy, the daemon refuses to start instead of creating a new identity.
+    list for a moment. If the Keychain refuses the write, any older item is
+    removed and the seed goes to the fallback below (a seed in the fallback
+    wins over a Keychain item); if the older item cannot be removed, the
+    write fails, so a reset never comes back as the old identity. If the
+    Keychain cannot be read and there is no fallback copy, the daemon
+    refuses to start instead of creating a new identity.
     Every `security` call has a 10 second limit: a locked Keychain can wait
     for an unlock dialog a background daemon never shows, and a timeout
     stops the start with an error (and never writes the fallback).

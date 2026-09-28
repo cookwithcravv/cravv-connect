@@ -15,6 +15,7 @@ type fakeKeychain struct {
 	broken  bool // every call fails with a non-"not found" status
 	calls   []string
 	addFail bool
+	delFail bool // delete-generic-password fails with a non-"not found" status
 }
 
 func (f *fakeKeychain) run(_ context.Context, args ...string) ([]byte, int, error) {
@@ -39,6 +40,9 @@ func (f *fakeKeychain) run(_ context.Context, args ...string) ([]byte, int, erro
 		}
 		return nil, 0, nil
 	case "delete-generic-password":
+		if f.delFail {
+			return nil, 1, errors.New("denied")
+		}
 		if f.item == "" {
 			return nil, keychainNotFound, errors.New("not found")
 		}
@@ -120,5 +124,53 @@ func TestKeychainTimeout(t *testing.T) {
 	}
 	if d := NewKeychainIdentityStore(nil).timeout; d != 10*time.Second {
 		t.Fatalf("default timeout %v", d)
+	}
+}
+
+// A reset whose Keychain write fails must never come back as the old
+// identity: the old item is removed before the seed goes to the fallback,
+// and when it cannot be removed the Save fails.
+func TestKeychainResetNeverRevertsToOldIdentity(t *testing.T) {
+	ctx := context.Background()
+	oldSeed, newSeed := []byte("old-seed"), []byte("new-seed")
+	old := base64.StdEncoding.EncodeToString(oldSeed)
+
+	kc := &fakeKeychain{item: old, addFail: true}
+	fb := SettingsIdentityStore{Settings: d2Store(t)}
+	ks := &KeychainIdentityStore{Fallback: fb, run: kc.run}
+	if err := ks.Save(ctx, newSeed); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if kc.item != "" {
+		t.Fatal("the old Keychain item survived a Save that fell back")
+	}
+	if seed, found, err := ks.Load(ctx); err != nil || !found || string(seed) != string(newSeed) {
+		t.Fatalf("Load after fallback = %q %v %v, want the new seed", seed, found, err)
+	}
+
+	// The old item can be neither replaced nor removed: Save fails loudly.
+	stuck := &fakeKeychain{item: old, addFail: true, delFail: true}
+	sfb := SettingsIdentityStore{Settings: d2Store(t)}
+	ss := &KeychainIdentityStore{Fallback: sfb, run: stuck.run}
+	if err := ss.Save(ctx, newSeed); err == nil || !strings.Contains(err.Error(), "older identity") {
+		t.Fatalf("Save with a stuck old item err = %v", err)
+	}
+	if _, found, _ := sfb.Load(ctx); found {
+		t.Fatal("Save wrote the fallback while the old Keychain item stayed")
+	}
+
+	// State left by an older version: both hold a seed. The fallback is the
+	// newer one (a successful Keychain write clears it), and the stale item goes.
+	both := &fakeKeychain{item: old}
+	bfb := SettingsIdentityStore{Settings: d2Store(t)}
+	if err := bfb.Save(ctx, newSeed); err != nil {
+		t.Fatal(err)
+	}
+	bs := &KeychainIdentityStore{Fallback: bfb, run: both.run}
+	if seed, found, err := bs.Load(ctx); err != nil || !found || string(seed) != string(newSeed) {
+		t.Fatalf("Load with both = %q %v %v, want the fallback seed", seed, found, err)
+	}
+	if both.item != "" {
+		t.Fatal("the stale Keychain item was not removed")
 	}
 }

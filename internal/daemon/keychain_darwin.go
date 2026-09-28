@@ -80,21 +80,29 @@ func DefaultIdentityStore(settings store.SettingsStore) IdentityStore {
 	return NewKeychainIdentityStore(SettingsIdentityStore{Settings: settings})
 }
 
-// Load reads the Keychain item, then the fallback. A Keychain failure other
-// than "not found" with nothing in the fallback is an error, never a silent
-// new identity.
+// Load reads the fallback, then the Keychain item. A seed in the fallback
+// wins: a successful Keychain write clears the fallback, so when both hold a
+// seed the fallback is the newer one, and the stale Keychain item is removed
+// (best effort). A Keychain failure other than "not found" with nothing in
+// the fallback is an error, never a silent new identity.
 func (k *KeychainIdentityStore) Load(ctx context.Context) ([]byte, bool, error) {
 	out, code, err := k.call(ctx, "find-generic-password", "-s", keychainService, "-a", keychainAccount, "-w")
+	seed, found, ferr := k.Fallback.Load(ctx)
+	if ferr != nil {
+		return nil, false, ferr
+	}
+	if found {
+		if err == nil {
+			_ = k.deleteItem(ctx)
+		}
+		return seed, true, nil
+	}
 	if err == nil {
 		seed, derr := base64.StdEncoding.DecodeString(strings.TrimSpace(string(out)))
 		if derr != nil {
 			return nil, false, fmt.Errorf("keychain identity: %w", derr)
 		}
 		return seed, true, nil
-	}
-	seed, found, ferr := k.Fallback.Load(ctx)
-	if ferr != nil || found {
-		return seed, found, ferr
 	}
 	if errors.Is(err, ErrKeychainTimeout) {
 		return nil, false, err
@@ -106,22 +114,36 @@ func (k *KeychainIdentityStore) Load(ctx context.Context) ([]byte, bool, error) 
 }
 
 // Save writes the Keychain item (updating it if present). If the Keychain
-// refuses, the seed goes to the fallback instead; if it times out, Save fails.
+// refuses, the older item is removed and the seed goes to the fallback
+// instead; if the older item cannot be removed, or the Keychain times out,
+// Save fails rather than leave an older identity that could come back.
 func (k *KeychainIdentityStore) Save(ctx context.Context, seed []byte) error {
 	b64 := base64.StdEncoding.EncodeToString(seed)
 	if _, _, err := k.call(ctx, "add-generic-password", "-s", keychainService, "-a", keychainAccount, "-w", b64, "-U"); err != nil {
 		if errors.Is(err, ErrKeychainTimeout) {
 			return err // the Keychain may hold an older seed: do not split the identity
 		}
+		if derr := k.deleteItem(ctx); derr != nil {
+			return fmt.Errorf("the login Keychain refused the new identity (%v) and still holds an older identity "+
+				"that could not be removed; unlock the login keychain and try again: %w", err, derr)
+		}
 		return k.Fallback.Save(ctx, seed)
 	}
 	return k.Fallback.Delete(ctx)
 }
 
-// Delete removes the Keychain item and the fallback copy.
-func (k *KeychainIdentityStore) Delete(ctx context.Context) error {
+// deleteItem removes the Keychain item; an item that is not there is not an error.
+func (k *KeychainIdentityStore) deleteItem(ctx context.Context) error {
 	if _, code, err := k.call(ctx, "delete-generic-password", "-s", keychainService, "-a", keychainAccount); err != nil && code != keychainNotFound {
 		return fmt.Errorf("keychain delete: %w", err)
+	}
+	return nil
+}
+
+// Delete removes the Keychain item and the fallback copy.
+func (k *KeychainIdentityStore) Delete(ctx context.Context) error {
+	if err := k.deleteItem(ctx); err != nil {
+		return err
 	}
 	return k.Fallback.Delete(ctx)
 }
