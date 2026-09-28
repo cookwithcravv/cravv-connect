@@ -2,7 +2,7 @@ import { handleBlobs } from "./blobs";
 import { b64encode, decodeIK, mailboxIdOf } from "./crypto";
 import type { Env } from "./env";
 import { rateLimitsEnabled } from "./limits";
-import { isUpgrade, jsonError, notUpgrade, rejectSocket } from "./http";
+import { isUpgrade, jsonError, misconfiguredOrigin, notUpgrade, rejectSocket } from "./http";
 import { Code, NAMEPLATE_RE, ROUTE_IK_HEADER, ROUTE_MAILBOX_HEADER } from "./protocol";
 
 export { BlobMeta } from "./blobmeta";
@@ -40,6 +40,8 @@ async function pair(request: Request, env: Env, nameplate: string): Promise<Resp
 
 // Routes one request. Unexpected exceptions are turned into a fixed 500 by the caller.
 async function route(request: Request, env: Env): Promise<Response> {
+  const misconfigured = misconfiguredOrigin(env);
+  if (misconfigured) return misconfigured;
   const url = new URL(request.url);
   const path = url.pathname;
   if (path === "/v1/health") return Response.json({ ok: true, version: 1 });
