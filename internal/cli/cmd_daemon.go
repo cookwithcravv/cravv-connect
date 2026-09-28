@@ -27,8 +27,13 @@ func init() {
 	RegisterDaemon(newDaemonStatusCmd)
 }
 
-// startWait is how long `daemon start` waits for the socket to answer.
-var startWait = 5 * time.Second
+// startWait is how long `daemon start` waits for the socket to answer. A
+// daemon started through launchd right after a stop can take several
+// seconds (the store opens, the PAM self-test may run).
+var startWait = 15 * time.Second
+
+// stderrTailLines is how much of the daemon's stderr log a failed start shows.
+const stderrTailLines = 10
 
 func newDaemonCmd(env *Env) *cobra.Command {
 	cmd := &cobra.Command{Use: "daemon", Short: "Run or control the background daemon"}
@@ -140,7 +145,26 @@ func startDaemon(ctx context.Context, env *Env) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	paths, _ := env.Paths()
-	return fmt.Errorf("daemon did not start within %s; see %s and %s", startWait, paths.Log, paths.StderrLog())
+	return fmt.Errorf("daemon did not start within %s; see %s and %s%s", startWait, paths.Log, paths.StderrLog(),
+		stderrTail(paths.StderrLog()))
+}
+
+// stderrTail returns the last lines of the daemon's stderr log, indented
+// under a heading, or "" when there is nothing to show.
+func stderrTail(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return ""
+	}
+	lines = lines[max(0, len(lines)-stderrTailLines):]
+	for i, l := range lines {
+		lines[i] = "  " + terminalSafe(l)
+	}
+	return "\nLast lines of " + path + ":\n" + strings.Join(lines, "\n")
 }
 
 // daemonStatus returns the running daemon's status; ok is false when no
@@ -219,17 +243,19 @@ func stopDaemon(ctx context.Context, env *Env) error {
 // installed, then over its socket if a daemon still answers there (one
 // started by hand). It reports whether anything was stopped.
 func stopDaemonReport(ctx context.Context, env *Env) (bool, error) {
+	paths, err := env.Paths()
+	if err != nil {
+		return false, err
+	}
 	if env.Service != nil && env.Service.Installed() {
 		if err := env.Service.Stop(ctx); err != nil {
 			return false, err
 		}
 		if !daemonUp(ctx, env) {
-			return true, nil
+			// The socket is gone; wait for the process too, so a start right
+			// after never races the old daemon.
+			return true, waitGone(ctx, func() bool { return pidGone(paths.PIDFile()) })
 		}
-	}
-	paths, err := env.Paths()
-	if err != nil {
-		return false, err
 	}
 	// Only a daemon that answers on the socket is stopped: a pid file
 	// alone may name an unrelated process that reused the pid.
@@ -278,6 +304,20 @@ func waitGone(ctx context.Context, gone func() bool) error {
 		}
 	}
 	return nil
+}
+
+// pidGone reports whether the process named in pid file pf has exited (a
+// missing or unreadable file counts as gone).
+func pidGone(pf string) bool {
+	b, err := os.ReadFile(pf)
+	if err != nil {
+		return true
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || pid <= 0 {
+		return true
+	}
+	return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 }
 
 // stopByPID sends SIGTERM to the pid in pf and waits for the process to exit.

@@ -38,6 +38,12 @@ change behaviour or wire formats, and the notes say so.
 - A relay request that never gets an answer fails after 30 seconds and
   the connection is replaced, instead of holding up every outgoing message;
   `kill` no longer waits behind such a request.
+- `cravv-connect daemon stop && cravv-connect daemon start` no longer fails
+  now and then with "daemon did not start within 5s": stop waits until
+  launchd has unloaded the job and the old process has exited, start loads
+  the job again rather than kickstarting one that is going away, and start
+  waits up to 15 seconds and shows the end of the daemon's stderr log when
+  it gives up. On Linux, start clears a unit's failed state first.
 
 ## v0.2.1 (2026-09-28)
 

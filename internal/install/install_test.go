@@ -9,17 +9,27 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeRunner struct {
-	cmds     []string
-	fail     map[string]bool // command prefix -> fail
-	failNext map[string]int  // command prefix -> fail this many more times
+	cmds      []string
+	fail      map[string]bool // command prefix -> fail
+	failNext  map[string]int  // command prefix -> fail this many more times
+	failAfter map[string]int  // command prefix -> succeed this many more times, then fail
 }
 
 func (r *fakeRunner) Run(_ context.Context, name string, args ...string) (string, error) {
 	cmd := strings.Join(append([]string{name}, args...), " ")
 	r.cmds = append(r.cmds, cmd)
+	for p, n := range r.failAfter {
+		if strings.HasPrefix(cmd, p) {
+			if n == 0 {
+				return "", errors.New("failed: " + cmd)
+			}
+			r.failAfter[p] = n - 1
+		}
+	}
 	for p, n := range r.failNext {
 		if n > 0 && strings.HasPrefix(cmd, p) {
 			r.failNext[p] = n - 1
@@ -305,8 +315,9 @@ func TestRegistryAndDetect(t *testing.T) {
 
 func TestLaunchd(t *testing.T) {
 	home := t.TempDir()
-	r := &fakeRunner{}
-	l := &Launchd{Cfg: ServiceConfig{Home: home, CravvHome: home + "/.cravv-connect", LogPath: home + "/.cravv-connect/daemon.log"}, Run: r, UID: 501}
+	r := &fakeRunner{fail: map[string]bool{"launchctl print": true}} // not loaded
+	l := &Launchd{Cfg: ServiceConfig{Home: home, CravvHome: home + "/.cravv-connect", LogPath: home + "/.cravv-connect/daemon.log"}, Run: r, UID: 501,
+		Poll: time.Millisecond}
 	if l.Installed() {
 		t.Fatal("installed before install")
 	}
@@ -318,20 +329,46 @@ func TestLaunchd(t *testing.T) {
 		!strings.Contains(string(plist), "<string>"+home+"/.cravv-connect</string>") {
 		t.Fatalf("%v\n%s", err, plist)
 	}
+	plistPath := filepath.Join(home, "Library", "LaunchAgents", "dev.cravv.connect.plist")
 	want := []string{
 		"launchctl bootout gui/501/dev.cravv.connect",
-		"launchctl bootstrap gui/501 " + filepath.Join(home, "Library", "LaunchAgents", "dev.cravv.connect.plist"),
+		"launchctl print gui/501/dev.cravv.connect",
+		"launchctl bootstrap gui/501 " + plistPath,
 	}
 	if !slices.Equal(r.cmds, want) {
 		t.Fatalf("%v", r.cmds)
 	}
-	r.cmds, r.fail = nil, map[string]bool{"launchctl kickstart": true}
-	if err := l.Start(bg); err != nil || len(r.cmds) != 2 || !strings.HasPrefix(r.cmds[1], "launchctl bootstrap") {
-		t.Fatalf("start fallback: %v %v", err, r.cmds)
+	// Not loaded: Start bootstraps (never a kickstart of a job that is gone).
+	r.cmds = nil
+	if err := l.Start(bg); err != nil || !slices.Equal(r.cmds, []string{"launchctl print gui/501/dev.cravv.connect", "launchctl bootstrap gui/501 " + plistPath}) {
+		t.Fatalf("start when unloaded: %v %v", err, r.cmds)
 	}
+	// Still loaded (the daemon exited on its own): Start kickstarts.
 	r.cmds, r.fail = nil, nil
-	if err := l.Stop(bg); err != nil || r.cmds[0] != "launchctl bootout gui/501/dev.cravv.connect" {
+	if err := l.Start(bg); err != nil || !slices.Equal(r.cmds, []string{"launchctl print gui/501/dev.cravv.connect", "launchctl kickstart gui/501/dev.cravv.connect"}) {
+		t.Fatalf("start when loaded: %v %v", err, r.cmds)
+	}
+	// Stop returns only once launchd has removed the job: bootout returns
+	// before that, and a start in between would find the old job.
+	r.cmds, r.failAfter = nil, map[string]int{"launchctl print": 3}
+	if err := l.Stop(bg); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"launchctl bootout gui/501/dev.cravv.connect", "launchctl print gui/501/dev.cravv.connect",
+		"launchctl print gui/501/dev.cravv.connect", "launchctl print gui/501/dev.cravv.connect",
+		"launchctl print gui/501/dev.cravv.connect"}; !slices.Equal(r.cmds, want) {
 		t.Fatalf("stop %v", r.cmds)
+	}
+	// A job launchd never unloads is an error, after the bound.
+	l.UnloadWait = 20 * time.Millisecond
+	r.cmds, r.failAfter = nil, nil
+	if err := l.Stop(bg); err == nil || !strings.Contains(err.Error(), "did not unload") {
+		t.Fatalf("stop that never unloads: %v", err)
+	}
+	// A job that is not loaded is already stopped.
+	r.fail = map[string]bool{"launchctl bootout": true, "launchctl print": true}
+	if err := l.Stop(bg); err != nil {
+		t.Fatalf("stop when not loaded: %v", err)
 	}
 	if err := l.Uninstall(bg); err != nil || l.Installed() {
 		t.Fatalf("uninstall %v", err)
@@ -356,6 +393,16 @@ func TestSystemd(t *testing.T) {
 	}
 	if !strings.Contains(s.Unit("/opt/my tools/cravv-connect"), `ExecStart="/opt/my tools/cravv-connect" daemon run --log-file`) {
 		t.Fatal(s.Unit("/opt/my tools/cravv-connect"))
+	}
+	// A unit that crashed too often is refused by the start rate limit
+	// until reset-failed; stop waits for the job itself.
+	r.cmds, r.fail = nil, map[string]bool{"systemctl --user reset-failed": true}
+	if err := s.Start(bg); err != nil || !slices.Equal(r.cmds, []string{"systemctl --user reset-failed cravv-connect.service", "systemctl --user start cravv-connect.service"}) {
+		t.Fatalf("start %v %v", err, r.cmds)
+	}
+	r.cmds, r.fail = nil, nil
+	if err := s.Stop(bg); err != nil || !slices.Equal(r.cmds, []string{"systemctl --user stop cravv-connect.service"}) {
+		t.Fatalf("stop %v %v", err, r.cmds)
 	}
 	r.cmds = nil
 	if err := s.Uninstall(bg); err != nil || s.Installed() {
