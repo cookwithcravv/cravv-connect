@@ -43,5 +43,12 @@ func (h *handlers) allowPath(ctx context.Context, cs *ipc.ConnState, p ipc.Allow
 }
 
 func (h *handlers) resetIdentity(ctx context.Context, cs *ipc.ConnState, _ ipc.Empty) (any, error) {
-	return nil, h.p.Control.ResetIdentity(ctx, cs.Unlocked())
+	untold, err := h.p.Control.ResetIdentity(ctx, cs.Unlocked())
+	if err != nil {
+		return nil, err
+	}
+	if untold == nil {
+		untold = []string{}
+	}
+	return ipc.ResetIdentityResult{Untold: untold}, nil
 }

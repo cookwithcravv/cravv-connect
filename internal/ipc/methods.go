@@ -190,6 +190,12 @@ type AllowPathParams struct {
 	Path string `json:"path"`
 }
 
+// ResetIdentityResult names the peers (by alias) that were not told this
+// machine unpaired them; their humans must unpair it themselves.
+type ResetIdentityResult struct {
+	Untold []string `json:"untold"`
+}
+
 type AuditReadParams struct {
 	Limit int `json:"limit"`
 }

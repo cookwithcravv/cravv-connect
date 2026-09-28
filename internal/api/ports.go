@@ -130,7 +130,8 @@ type ControlPort interface {
 	Kill(ctx context.Context) error
 	Resume(ctx context.Context, unlocked bool) error
 	AddAllowPath(ctx context.Context, dir string, unlocked bool) error
-	ResetIdentity(ctx context.Context, unlocked bool) error
+	// ResetIdentity returns the aliases of the peers that were not told.
+	ResetIdentity(ctx context.Context, unlocked bool) (untold []string, err error)
 }
 
 // LifecyclePort stops the daemon process. Shutdown returns at once; the

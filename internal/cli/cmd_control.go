@@ -90,7 +90,7 @@ func newResetIdentityCmd(env *Env) *cobra.Command {
 					return err
 				}
 				short := shortID(st.MachineID)
-				fmt.Fprintln(env.Stdout, "This replaces this machine's identity key. Every peer must be paired again.")
+				fmt.Fprintln(env.Stdout, "This replaces this machine's identity key. Every peer is unpaired and must be paired again.")
 				ans, err := env.Prompt.Line(fmt.Sprintf("To confirm, type this machine's short ID (%s)", short), "")
 				if err != nil {
 					return err
@@ -101,10 +101,16 @@ func newResetIdentityCmd(env *Env) *cobra.Command {
 				if err := unlock(ctx, env, c); err != nil {
 					return err
 				}
-				if err := c.Call(ctx, ipc.MethodResetIdentity, nil, nil); err != nil {
+				var res ipc.ResetIdentityResult
+				if err := c.Call(ctx, ipc.MethodResetIdentity, nil, &res); err != nil {
 					return err
 				}
 				fmt.Fprintln(env.Stdout, "Identity reset. Pair with your peers again using `cravv-connect pair`.")
+				if len(res.Untold) > 0 {
+					fmt.Fprintf(env.Stdout, "These peers could not be told (this machine was offline or killed): %s.\n"+
+						"They still list the old machine: on each of them, run `cravv-connect unpair <alias>` for this machine.\n",
+						strings.Join(res.Untold, ", "))
+				}
 				return nil
 			})
 		},

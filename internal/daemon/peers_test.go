@@ -192,6 +192,34 @@ func TestPeerUnpair(t *testing.T) {
 	}
 }
 
+// UnpairAll (before an identity reset) tells every peer, denies it and
+// deletes it, and names the peers the notice did not reach.
+func TestPeerUnpairAll(t *testing.T) {
+	f := newPeerFixture(t)
+	ctx := context.Background()
+	laptop := newTestPeer(t, "laptop")
+	mustPut(t, f.peers, laptop.rec)
+	f.out.directFail = map[core.MachineID]bool{laptop.rec.MachineID: true}
+	untold, err := f.svc.UnpairAll(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(untold, []string{"laptop"}) {
+		t.Fatalf("untold = %v, want [laptop]", untold)
+	}
+	for _, p := range []testPeer{f.gpu, laptop} {
+		if !f.mb.isDenied(p.rec.IK) {
+			t.Errorf("%s not denied", p.rec.Alias)
+		}
+		if _, err := f.peers.GetPeer(ctx, p.rec.MachineID); !errors.Is(err, core.ErrNotFound) {
+			t.Errorf("%s still stored: %v", p.rec.Alias, err)
+		}
+	}
+	if len(f.out.direct) != 1 || f.out.direct[0].Kind != core.KindControlUnpaired || f.out.direct[0].To != f.gpu.rec.MachineID {
+		t.Fatalf("direct = %+v, want one control.unpaired to gpu-box", f.out.direct)
+	}
+}
+
 func TestPeerUnpairOfflineDeniesOnNextConnect(t *testing.T) {
 	f := newPeerFixture(t)
 	ctx := context.Background()

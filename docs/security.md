@@ -608,9 +608,13 @@ a new identity without reconnecting under the old one first.
   automatically). The relay admin token given to `init --relay-token` (or
   typed into `setup`) is kept in `store.db` until the first successful
   registration.
-- `cravv-connect reset-identity` (also while killed) turns the kill
-  switch on (or leaves it on), deletes every peer, prekey and queued outgoing
-  message, and replaces the identity. The new identity has no relay mailbox:
+- `cravv-connect reset-identity` (also while killed) first unpairs every
+  peer: it sends each one `control.unpaired` directly (best effort) and
+  denies it on the old mailbox. It then turns the kill switch on (or leaves
+  it on), deletes every peer, prekey and queued outgoing message, and
+  replaces the identity. A peer the notice could not reach (this machine
+  was offline or already killed) is named in the output and still lists the
+  old machine until its human runs `cravv-connect unpair` there. The new identity has no relay mailbox:
   it registers again with an admin token or with the invite received the
   next time you join a pairing. Every peer has to pair again; run
   `cravv-connect resume` when ready.

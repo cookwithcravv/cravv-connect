@@ -268,12 +268,12 @@ func (f fControl) AddAllowPath(_ context.Context, d string, unlocked bool) error
 	f.record("allow " + d)
 	return nil
 }
-func (f fControl) ResetIdentity(_ context.Context, unlocked bool) error {
+func (f fControl) ResetIdentity(_ context.Context, unlocked bool) ([]string, error) {
 	if !unlocked {
-		return core.ErrAuthRequired
+		return nil, core.ErrAuthRequired
 	}
 	f.record("reset")
-	return nil
+	return []string{"gpu-box"}, nil
 }
 
 type fStatus struct{ *world }
