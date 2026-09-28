@@ -35,6 +35,9 @@ change behaviour or wire formats, and the notes say so.
   longer loses messages: they wait and go out once it has one, and status
   says how many are waiting. A link request that never left before it timed
   out is reported as "not sent: <alias> has no mailbox on the relay yet".
+- A relay request that never gets an answer fails after 30 seconds and
+  the connection is replaced, instead of holding up every outgoing message;
+  `kill` no longer waits behind such a request.
 
 ## v0.2.1 (2026-09-28)
 

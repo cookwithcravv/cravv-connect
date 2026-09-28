@@ -58,7 +58,7 @@ type Outbound struct {
 	logger    *slog.Logger
 	wake      chan struct{}
 
-	pass    sync.Mutex // serializes SendDue passes (the loop and Flush)
+	pass    chan struct{} // holds a token while a SendDue pass runs (the loop and the kill flush)
 	mu      sync.Mutex
 	recent  []string
 	waiting map[core.MachineID]*noMailbox // items the relay had no mailbox for, by peer
@@ -86,6 +86,7 @@ func NewOutbound(id *keys.Identity, peers store.PeerStore, outbox store.OutboxSt
 		identity: id, peers: peers, outbox: outbox, mailboxes: mailboxes,
 		clock: clock, stopped: stopped, logger: logger,
 		wake:    make(chan struct{}, 1),
+		pass:    make(chan struct{}, 1),
 		waiting: map[core.MachineID]*noMailbox{},
 	}
 }
@@ -206,8 +207,14 @@ func (o *Outbound) SendDue(ctx context.Context) error {
 	if o.stopped() {
 		return nil
 	}
-	o.pass.Lock()
-	defer o.pass.Unlock()
+	// Wait for a running pass only as long as ctx allows: the kill flush
+	// must not hang behind a pass stuck on a relay that does not answer.
+	select {
+	case o.pass <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-o.pass }()
 	mb, ok := o.mailboxes.Mailbox()
 	if !ok {
 		return nil

@@ -14,6 +14,10 @@ import (
 // ErrClosed is Mailbox.Err after Close.
 var ErrClosed = errors.New("relay: connection closed")
 
+// ErrRequestTimeout is a mailbox request the relay did not answer in time;
+// the connection is ended with it.
+var ErrRequestTimeout = errors.New("relay: no answer to a request in time")
+
 // ErrProtocol reports a frame the relay-v1 contract does not allow at that point.
 var ErrProtocol = errors.New("relay: protocol violation")
 

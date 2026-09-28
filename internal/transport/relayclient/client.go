@@ -20,6 +20,7 @@ type Client struct {
 	clock        core.Clock
 	pingInterval time.Duration
 	pingTimeout  time.Duration
+	reqTimeout   time.Duration
 }
 
 // Keepalive defaults: relay-v1 clients SHOULD ping every 30 seconds.
@@ -27,6 +28,11 @@ const (
 	DefaultPingInterval = 30 * time.Second
 	DefaultPingTimeout  = 15 * time.Second
 )
+
+// DefaultRequestTimeout bounds how long a mailbox request (send, allow,
+// deny, invite, room) waits for the relay's answer. A relay that does not
+// answer in time is treated as a dead connection.
+const DefaultRequestTimeout = 30 * time.Second
 
 // Option customizes a Client.
 type Option func(*Client)
@@ -40,6 +46,11 @@ func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h
 func WithKeepalive(interval, timeout time.Duration) Option {
 	return func(c *Client) { c.pingInterval, c.pingTimeout = interval, timeout }
 }
+
+// WithRequestTimeout sets how long a mailbox request waits for its answer
+// before it fails with ErrRequestTimeout and the connection is ended.
+// d <= 0 means no limit beyond the caller's context.
+func WithRequestTimeout(d time.Duration) Option { return func(c *Client) { c.reqTimeout = d } }
 
 // WithClock sets the clock used for request-signature timestamps.
 func WithClock(clk core.Clock) Option { return func(c *Client) { c.clock = clk } }
@@ -59,6 +70,7 @@ func New(relayURL string, opts ...Option) (*Client, error) {
 		clock:        core.SystemClock{},
 		pingInterval: DefaultPingInterval,
 		pingTimeout:  DefaultPingTimeout,
+		reqTimeout:   DefaultRequestTimeout,
 	}
 	for _, o := range opts {
 		o(c)
