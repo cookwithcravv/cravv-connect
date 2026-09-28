@@ -122,10 +122,17 @@ cravv-connect to them; if you install one later, run
 ### 1. Set up the first machine
 
 ```sh
+cravv-connect setup
+```
+
+With the Cloudflare relay you deployed, you can give the relay and its admin
+token up front (the token is read from the private file, not typed):
+
+```sh
 cravv-connect setup --relay https://cravv-relay.<subdomain>.workers.dev --relay-token - < ~/.cravv-relay-admin-token
 ```
 
-(or plain `cravv-connect setup` to be asked for everything). The wizard walks through:
+The wizard walks through:
 
 1. **Relay.** Enter your relay URL (for real use, deploy the Cloudflare relay
    once: [relay-cf/README.md](relay-cf/README.md)), or press Enter to start a
