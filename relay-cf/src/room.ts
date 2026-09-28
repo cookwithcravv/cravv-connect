@@ -4,6 +4,8 @@ import type { Env } from "./env";
 import { isUpgrade, notUpgrade, rejectSocket } from "./http";
 import { readLimits, type Limits } from "./limits";
 import { CLOSE_NORMAL, Code, failSocket, parseFrame, str, type ErrorCode } from "./protocol";
+import { describeError } from "./rpc";
+import { Schema } from "./schema";
 
 type Role = "creator" | "joiner";
 
@@ -13,43 +15,58 @@ type RoomRow = {
   joined: number;
 };
 
+const ROOM_DDL = [
+  `CREATE TABLE IF NOT EXISTS room (
+    k INTEGER PRIMARY KEY CHECK (k = 1),
+    token_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    joined INTEGER NOT NULL DEFAULT 0
+  )`,
+  `CREATE TABLE IF NOT EXISTS pending (
+    n INTEGER PRIMARY KEY AUTOINCREMENT,
+    data TEXT NOT NULL
+  )`,
+  // The creating member's mailbox id, told when the room burns so its room cap frees up.
+  // A table of its own so rooms created before it existed keep their row shape.
+  `CREATE TABLE IF NOT EXISTS owner (
+    k INTEGER PRIMARY KEY CHECK (k = 1),
+    mailbox_id TEXT NOT NULL
+  )`,
+];
+
 // Room is one Durable Object per pairing nameplate (relay-v1 section 5). It relays opaque PAKE
 // messages between exactly one creator (holding the creator token) and exactly one joiner,
 // then burns itself. Each socket is tagged with its role and with a generation tag (a prefix
 // of the room's token hash) so late close events from an old room never touch a new room
-// that reuses the nameplate.
+// that reuses the nameplate. Tables exist only while a room does: init creates them and a
+// burn deletes all storage, so joins on unknown nameplates store nothing.
 export class Room extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private readonly limits: Limits;
+  private readonly schema: Schema;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.limits = readLimits(env);
-    this.migrate();
+    this.schema = new Schema(this.sql, "room", ROOM_DDL);
   }
 
-  private migrate(): void {
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS room (
-      k INTEGER PRIMARY KEY CHECK (k = 1),
-      token_hash TEXT NOT NULL,
-      expires_at INTEGER NOT NULL,
-      joined INTEGER NOT NULL DEFAULT 0
-    )`);
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS pending (
-      n INTEGER PRIMARY KEY AUTOINCREMENT,
-      data TEXT NOT NULL
-    )`);
-  }
-
-  // RPC from the creating Mailbox DO. Returns false when the nameplate is already in use.
-  async init(tokenHash: string): Promise<boolean> {
+  // RPC from the creating Mailbox DO (owner is its mailbox id). Returns false when the
+  // nameplate is already in use.
+  async init(tokenHash: string, owner: string): Promise<boolean> {
     const now = Date.now();
     const cur = this.room();
     if (cur && cur.expires_at > now) return false;
-    if (cur) await this.burn();
+    if (cur) {
+      await this.burn();
+      // burn waits on the old owner's mailbox, so another init may have taken the nameplate.
+      if (this.room()) return false;
+    }
     const expiresAt = now + this.limits.roomTtlMs;
+    this.schema.ensure();
     this.sql.exec("INSERT INTO room (k, token_hash, expires_at, joined) VALUES (1, ?, ?, 0)", tokenHash, expiresAt);
+    this.sql.exec("INSERT OR REPLACE INTO owner (k, mailbox_id) VALUES (1, ?)", owner);
     await this.ctx.storage.setAlarm(expiresAt);
     return true;
   }
@@ -171,10 +188,20 @@ export class Room extends DurableObject<Env> {
     }
   }
 
+  // Deletes the room and all its storage, then frees the owner's room slot.
   private async burn(): Promise<void> {
+    const r = this.room();
+    const owner = r ? this.owner() : undefined;
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
-    this.migrate();
+    this.schema.dropped();
+    if (!r || !owner) return;
+    try {
+      await this.env.MAILBOX.getByName(owner).releaseRoom(r.token_hash);
+    } catch (err) {
+      // The slot still frees when the room's lifetime ends.
+      console.error("room: releasing the owner's room slot failed:", describeError(err));
+    }
   }
 
   private accept(role: Role, gen: string): { client: WebSocket; server: WebSocket } {
@@ -199,9 +226,18 @@ export class Room extends DurableObject<Env> {
   }
 
   private room(): RoomRow | undefined {
+    if (!this.schema.exists()) return undefined;
     return this.sql
       .exec<RoomRow>("SELECT token_hash, expires_at, joined FROM room WHERE k = 1")
       .toArray()[0];
+  }
+
+  // Undefined for rooms created before the owner was recorded.
+  private owner(): string | undefined {
+    const hasTable =
+      this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'owner'").toArray().length > 0;
+    if (!hasTable) return undefined;
+    return this.sql.exec<{ mailbox_id: string }>("SELECT mailbox_id FROM owner WHERE k = 1").toArray()[0]?.mailbox_id;
   }
 }
 

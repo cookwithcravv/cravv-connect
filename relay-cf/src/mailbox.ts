@@ -29,8 +29,10 @@ import {
   type Frame,
   type SendStatus,
 } from "./protocol";
-import { Meta, Queue } from "./queue";
-import { REGISTRY_NAME } from "./registry";
+import { META_DDL, Meta, QUEUE_DDL, Queue } from "./queue";
+import { REGISTRY_NAME, type InviteResult } from "./registry";
+import { describeError, retryOnce } from "./rpc";
+import { Schema } from "./schema";
 
 export type BlobReservation = "ok" | "quota" | "count";
 
@@ -55,13 +57,32 @@ const ROOM_CREATE_ATTEMPTS = 16;
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 const MAX_ID_CHARS = 128;
 
+const MAILBOX_DDL = [
+  META_DDL,
+  QUEUE_DDL,
+  "CREATE TABLE IF NOT EXISTS allow (mailbox_id TEXT PRIMARY KEY)",
+  `CREATE TABLE IF NOT EXISTS blob_usage (
+    blob_id TEXT PRIMARY KEY,
+    size INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  )`,
+  // Live pairing rooms this member created, keyed by the room's token hash.
+  `CREATE TABLE IF NOT EXISTS room_usage (
+    room TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+  )`,
+];
+
 // Mailbox is one SQLite-backed Durable Object per mailbox id. It owns the queue, the allow-list
-// (keyed by sender mailbox id), the seq counter, and this member's blob quota accounting, and
-// holds at most one live WebSocket (hibernation API).
+// (keyed by sender mailbox id), the seq counter, and this member's blob and room accounting,
+// and holds at most one live WebSocket (hibernation API). Its tables are created when the
+// mailbox registers (or on its first write, for objects created by older versions), so an
+// unregistered key stores nothing.
 export class Mailbox extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private readonly limits: Limits;
   private readonly ops: Record<string, Op>;
+  private readonly schema: Schema;
   private readonly meta: Meta;
   private readonly queue: Queue;
   private chain: Promise<void> = Promise.resolve();
@@ -74,19 +95,14 @@ export class Mailbox extends DurableObject<Env> {
     this.limits = readLimits(env);
     this.tokens = this.limits.requestBurst;
     this.refilledAt = Date.now();
+    this.schema = new Schema(this.sql, "meta", MAILBOX_DDL);
     this.meta = new Meta(this.sql);
     this.queue = new Queue(this.sql, this.meta, this.limits);
-    this.sql.exec("CREATE TABLE IF NOT EXISTS allow (mailbox_id TEXT PRIMARY KEY)");
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS blob_usage (
-      blob_id TEXT PRIMARY KEY,
-      size INTEGER NOT NULL,
-      expires_at INTEGER NOT NULL
-    )`);
     this.ops = {
       allow: (ws, _a, f, rid) => this.opAllow(ws, f, rid, true),
       deny: (ws, _a, f, rid) => this.opAllow(ws, f, rid, false),
       invite_request: (ws, a, _f, rid) => this.opInvite(ws, a, rid),
-      room_create: (ws, _a, _f, rid) => this.opRoomCreate(ws, rid),
+      room_create: (ws, a, _f, rid) => this.opRoomCreate(ws, a, rid),
       send: (ws, a, f, rid) => this.opSend(ws, a, f, rid),
       register: async (ws, _a, _f, rid) => ws.send(resFrame(rid, { status: Status.OK })),
     };
@@ -163,7 +179,7 @@ export class Mailbox extends DurableObject<Env> {
           return await this.onReady(ws, a, f);
       }
     } catch (err) {
-      console.error("mailbox: request failed", err);
+      console.error(`mailbox: ${a.stage} stage failed:`, describeError(err));
       failSocket(ws, Code.INTERNAL, "internal error");
     }
   }
@@ -234,7 +250,12 @@ export class Mailbox extends DurableObject<Env> {
       failSocket(ws, Code.BAD_REQUEST, "register needs a rid");
       return;
     }
-    const ok = await this.registry().register(a.mailboxId, str(f.admin_token), str(f.invite));
+    const adminToken = str(f.admin_token);
+    const invite = str(f.invite);
+    const ok = await retryOnce(
+      () => this.registry(),
+      (r) => r.register(a.mailboxId, adminToken, invite),
+    );
     if (!ok) {
       // relay-v1 3.4 step 5: the refusal is final, so answer and then close.
       ws.send(resFrame(rid, { status: Status.ERROR, code: Code.FORBIDDEN }));
@@ -245,6 +266,7 @@ export class Mailbox extends DurableObject<Env> {
       }
       return;
     }
+    this.schema.ensure();
     this.meta.set("registered", "1");
     ws.send(resFrame(rid, { status: Status.OK }));
     this.activate(ws, a);
@@ -262,6 +284,7 @@ export class Mailbox extends DurableObject<Env> {
 
   // Marks ws as the single live connection, closes older ones, and pushes the backlog.
   private activate(ws: WebSocket, a: Attachment): void {
+    this.schema.ensure();
     this.meta.set("live", a.connId);
     for (const other of this.ctx.getWebSockets()) {
       if (other === ws) continue;
@@ -295,7 +318,18 @@ export class Mailbox extends DurableObject<Env> {
       ws.send(resFrame(rid, { status: Status.ERROR, code: Code.BAD_REQUEST }));
       return;
     }
-    await op(ws, a, f, rid);
+    try {
+      await op(ws, a, f, rid);
+    } catch (err) {
+      // One failed request (for example a call to another object) must not end the
+      // connection: acks and deliveries keep flowing and the client retries this request.
+      console.error(`mailbox: ${f.t} failed:`, describeError(err));
+      try {
+        ws.send(resFrame(rid, { status: Status.ERROR, code: Code.INTERNAL }));
+      } catch {
+        // socket already gone
+      }
+    }
   }
 
   private async opAllow(ws: WebSocket, f: Frame, rid: string, allow: boolean): Promise<void> {
@@ -311,7 +345,10 @@ export class Mailbox extends DurableObject<Env> {
   }
 
   private async opInvite(ws: WebSocket, a: Attachment, rid: string): Promise<void> {
-    const r = await this.registry().createInvite(a.mailboxId);
+    const r = await retryOnce(
+      () => this.registry(),
+      async (reg): Promise<InviteResult> => reg.createInvite(a.mailboxId),
+    );
     if (!r.ok) {
       ws.send(resFrame(rid, { status: Status.ERROR, code: r.code }));
       return;
@@ -319,12 +356,31 @@ export class Mailbox extends DurableObject<Env> {
     ws.send(resFrame(rid, { status: Status.OK, invite: r.invite }));
   }
 
-  private async opRoomCreate(ws: WebSocket, rid: string): Promise<void> {
+  // Messages are handled one at a time, so the cap check and the insert cannot interleave
+  // with another room_create on this mailbox.
+  private async opRoomCreate(ws: WebSocket, a: Attachment, rid: string): Promise<void> {
+    const now = Date.now();
+    this.schema.ensure();
+    this.sql.exec("DELETE FROM room_usage WHERE expires_at <= ?", now);
+    const live = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM room_usage").one().n;
+    if (live >= this.limits.maxRoomsPerMember) {
+      ws.send(resFrame(rid, { status: Status.ERROR, code: Code.RATE_LIMITED }));
+      return;
+    }
     for (let i = 0; i < ROOM_CREATE_ATTEMPTS; i++) {
       const nameplate = randomNameplate();
       const token = randomToken();
-      const created = await this.env.ROOM.getByName(nameplate).init(await sha256Hex(token));
+      const tokenHash = await sha256Hex(token);
+      const created = await retryOnce(
+        () => this.env.ROOM.getByName(nameplate),
+        (room) => room.init(tokenHash, a.mailboxId),
+      );
       if (created) {
+        this.sql.exec(
+          "INSERT OR REPLACE INTO room_usage (room, expires_at) VALUES (?, ?)",
+          tokenHash,
+          now + this.limits.roomTtlMs,
+        );
         ws.send(resFrame(rid, { status: Status.OK, nameplate, creator_token: token }));
         return;
       }
@@ -361,7 +417,11 @@ export class Mailbox extends DurableObject<Env> {
     } else if (to === a.mailboxId) {
       status = await this.enqueue(a.ik, a.mailboxId, id, b64encode(frame), frame.length);
     } else {
-      status = await this.env.MAILBOX.getByName(to).enqueue(a.ik, a.mailboxId, id, b64encode(frame), frame.length);
+      const data = b64encode(frame);
+      status = await retryOnce(
+        () => this.env.MAILBOX.getByName(to),
+        (mb) => mb.enqueue(a.ik, a.mailboxId, id, data, frame.length),
+      );
     }
     ws.send(resFrame(rid, { status }));
   }
@@ -379,6 +439,7 @@ export class Mailbox extends DurableObject<Env> {
 
   async enqueue(fromIk: string, fromMailbox: string, id: string, frame: string, size: number): Promise<SendStatus> {
     if (!this.isRegistered()) return Status.UNKNOWN_MAILBOX;
+    this.schema.ensure();
     if (this.sql.exec("SELECT 1 FROM allow WHERE mailbox_id = ?", fromMailbox).toArray().length === 0) {
       return Status.NOT_ALLOWED;
     }
@@ -401,14 +462,15 @@ export class Mailbox extends DurableObject<Env> {
   // ---------- RPC: called by the blob handlers and BlobMeta ----------
 
   // The persisted registered flag. Blob requests check membership here, in the caller's own
-  // mailbox, instead of in the global Registry.
+  // mailbox, instead of in the global Registry. Read only, so asking stores nothing.
   isRegistered(): boolean {
-    return this.meta.get("registered") === "1";
+    return this.schema.exists() && this.meta.get("registered") === "1";
   }
 
   // Reserves a new blob against this member's quota (relay-v1 6.2) and live-blob cap.
-  // Expired reservations never count.
+  // Expired reservations never count. Callers check isRegistered first.
   reserveBlob(blobId: string, size: number, expiresAt: number): BlobReservation {
+    this.schema.ensure();
     this.sql.exec("DELETE FROM blob_usage WHERE expires_at <= ?", Date.now());
     const row = this.sql
       .exec<{ n: number; used: number }>("SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS used FROM blob_usage")
@@ -425,12 +487,25 @@ export class Mailbox extends DurableObject<Env> {
   }
 
   releaseBlob(blobId: string): void {
+    if (!this.schema.exists()) return;
+    this.schema.ensure();
     this.sql.exec("DELETE FROM blob_usage WHERE blob_id = ?", blobId);
+  }
+
+  // ---------- RPC: called by a Room DO when it burns ----------
+
+  // Frees the room's slot under the per-member cap. Expiry frees it too, so a missed call
+  // only delays that.
+  releaseRoom(room: string): void {
+    if (!this.schema.exists()) return;
+    this.schema.ensure();
+    this.sql.exec("DELETE FROM room_usage WHERE room = ?", room);
   }
 
   // ---------- TTL ----------
 
   async alarm(): Promise<void> {
+    if (!this.schema.exists()) return;
     const now = Date.now();
     this.queue.dropExpired(now);
     const oldest = this.queue.oldest();

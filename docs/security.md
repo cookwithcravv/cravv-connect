@@ -67,11 +67,12 @@ exact limits behind each claim. Protocol details are in
   password, a room allows exactly one joiner and lives 10 minutes, and a wrong
   code fails key confirmation and burns the room. An attacker gets one online
   guess per code. `setup --join` shows the relay in a join code and asks
-  before using it. Relays also cap abuse: at most 20 unused invites per
-  member, 2 GiB of live blobs per member and 50 GiB per relay, a 10000-frame
-  or 50 MB queue per mailbox, and per-mailbox and per-IP rate limits (the Go
-  reference relay also allows at most 8 open pairing rooms per member;
-  relay-cf allows at most 256 live blobs per member).
+  before using it. Relays also cap abuse: at most 20 unused invites and
+  8 open pairing rooms per member, 2 GiB of live blobs per member and 50 GiB
+  per relay, a 10000-frame or 50 MB queue per mailbox, and per-mailbox and
+  per-IP rate limits (relay-cf also allows at most 256 live blobs per
+  member). A key that is not a member, or a join on an unknown nameplate,
+  stores nothing on the relay.
 - **A paired machine that turns hostile.** It can only do what your
   sessions' links let it:
   - It sees only the sessions you made visible to it. A session it cannot

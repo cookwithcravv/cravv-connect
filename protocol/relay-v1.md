@@ -36,6 +36,10 @@ Go reference types for every message below live in `internal/relayproto`.
   proxy), because the origin is what stops a signature made for one relay from being
   replayed to another. A relay MAY use the request URL's origin when the platform itself
   routes by hostname (for example Cloudflare Workers), so the client cannot choose it.
+  A configured origin that is not in this form (for example one with a path, or a
+  scheme other than `http` or `https`) is a configuration error: the relay SHOULD refuse
+  to start, or answer every request with `500` and `code:"internal"`, rather than
+  normalize it silently.
 - **Time.** Relay timestamps are UNIX seconds.
 - **JSON.** Field names are `snake_case`. Receivers MUST ignore unknown fields.
 
@@ -231,9 +235,12 @@ request gets `res{status:"error", code:"rate_limited"}`. The reference relay all
 `nameplate` is 4 characters from the Crockford base32 alphabet
 `0123456789ABCDEFGHJKMNPQRSTVWXYZ`, unique among live rooms (an expired room's nameplate
 is free again). `creator_token` is an opaque secret of at least 128 random bits
-(reference relays use 32 lowercase hex characters). As relay policy, a relay MAY cap the
-number of live rooms one member owns; over the cap the request gets
-`res{status:"error", code:"rate_limited"}`. The reference relay allows 8.
+(reference relays use 32 lowercase hex characters).
+
+A member owns at most 8 live rooms. A room is live from its `room_create` until it is
+deleted (section 5) or its lifetime ends. A relay MUST accept a `room_create` from a
+member that owns fewer than 8 live rooms (other failures aside) and MUST answer one from a
+member that already owns 8 with `res{status:"error", code:"rate_limited"}`.
 
 **send.** Queue a frame for another mailbox.
 ```json
@@ -271,6 +278,16 @@ The server MUST remove every queued frame of this mailbox with `seq <= 42`. Acki
 `res{status:"error", code:"bad_request"}` and the connection stays open. An unknown `t`
 without `rid`, a known request type (other than `ack`) without `rid`, a binary message,
 or invalid JSON gets `error{bad_request}` and the connection closes.
+
+**Internal failures.** When the relay cannot complete a request that carries a `rid`
+because of a failure of its own (for example storage or an internal call that is briefly
+unavailable), it MUST answer that request with `res{status:"error", code:"internal"}`
+and keep the connection open, so deliveries and acks continue. This applies to every
+request type, `send` included. Clients treat it as "retry later": a frame whose `send`
+got `internal` stays in the client's outbox and is sent again with the same `id`. The
+relay MAY already have queued it, in which case the recipient sees it twice and
+deduplicates by `id` (section 3.5). A failure during the handshake still ends the
+connection with `error{internal}`.
 
 ### 3.7 Status values (`res.status`)
 
@@ -395,8 +412,9 @@ PUT
 (lines joined by `\n`, no trailing newline).
 
 The server MUST reject with `401` when a header is missing, the key or signature is
-malformed, the signature does not verify (including a signature made for another
-origin), or `ts` is more than 300 seconds away from the server clock. The signer MUST be
+malformed, `X-Cravv-TS` is not a decimal integer, the signature does not verify
+(including a signature made for another origin, method, path, or body), or `ts` is more
+than 300 seconds away from the server clock. The signer MUST be
 a registered mailbox; otherwise `403`.
 
 ### 6.2 Operations
@@ -477,7 +495,7 @@ with `code` from section 3.8.
 | Invite lifetime | 10 minutes, single use |
 | Outstanding invites per member | MAY cap; 20 in the reference relay |
 | Room lifetime | 10 minutes, one joiner |
-| Live rooms per member | MAY cap; 8 in the reference relay |
+| Live rooms per member | 8 |
 | Blob storage per member | at least 1 GiB; 2 GiB in the reference relay |
 | Blob storage, relay-wide | MAY cap; 50 GiB in the reference relay |
 | Room buffer before join | 16 messages |
@@ -496,6 +514,9 @@ with `code` from section 3.8.
 - Reuse a `seq`, reorder a mailbox's frames, or drop an unacked, unexpired frame.
 - Keep two live connections for one mailbox.
 - Let a second joiner into a room, or reuse a nameplate's room after it was burned.
+- Let one member own more than 8 live rooms.
+- Close a live connection because one request failed inside the relay (answer it with
+  `res{code:"internal"}` instead).
 - Serve a chunk to anyone but the recipient, or accept one from anyone but the uploader.
 - Inspect, alter, or log frame, message, or chunk contents.
 
@@ -507,7 +528,9 @@ with `code` from section 3.8.
 - Against a running relay (TTL cases are skipped because the relay's clock cannot be
   advanced):
   ```
-  go run ./cmd/cravv-conformance --relay http://127.0.0.1:8787 --admin-token <token>
+  CRAVV_CONFORMANCE_ADMIN_TOKEN=<token> go run ./cmd/cravv-conformance --relay http://127.0.0.1:8787
   ```
+  The token can also be piped in with `--admin-token -`. `--admin-token <token>` still
+  works but shows the token to other users in `ps` output.
   Add `--slow` (or set `CRAVV_CONFORMANCE_SLOW=1`) to also fill a mailbox to 10000 frames
   and to 50 MB.

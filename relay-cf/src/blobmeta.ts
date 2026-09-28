@@ -3,6 +3,7 @@ import type { Env } from "./env";
 import { b64decode, mailboxIdOf } from "./crypto";
 import { readLimits, type Limits } from "./limits";
 import { REGISTRY_NAME } from "./registry";
+import { Schema } from "./schema";
 
 export type BlobAction = "put" | "get" | "delete";
 
@@ -22,40 +23,44 @@ type BlobRow = {
   state: string; // "active" | "expired"
 };
 
+const BLOB_DDL = [
+  `CREATE TABLE IF NOT EXISTS blob (
+    k INTEGER PRIMARY KEY CHECK (k = 1),
+    blob_id TEXT NOT NULL,
+    uploader TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    chunks INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    state TEXT NOT NULL
+  )`,
+  "CREATE TABLE IF NOT EXISTS chunk (n INTEGER PRIMARY KEY, size INTEGER NOT NULL)",
+];
+
 export function chunkKey(blobId: string, n: number): string {
   return `blobs/${blobId}/${n}`;
 }
 
 // BlobMeta is one Durable Object per blob id. It stores who may touch the blob, enforces
 // expiry, and removes the R2 chunks on delete or when the TTL alarm fires. After expiry it
-// keeps a tombstone for one more TTL so late callers get 410 instead of 404.
+// keeps a tombstone for one more TTL so late callers get 410 instead of 404. Tables exist
+// only while a blob or its tombstone does: create makes them and the final delete removes
+// all storage, so lookups of unknown blob ids store nothing.
 export class BlobMeta extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private readonly limits: Limits;
+  private readonly schema: Schema;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.limits = readLimits(env);
-    this.migrate();
-  }
-
-  private migrate(): void {
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS blob (
-      k INTEGER PRIMARY KEY CHECK (k = 1),
-      blob_id TEXT NOT NULL,
-      uploader TEXT NOT NULL,
-      recipient TEXT NOT NULL,
-      size INTEGER NOT NULL,
-      chunks INTEGER NOT NULL,
-      expires_at INTEGER NOT NULL,
-      state TEXT NOT NULL
-    )`);
-    this.sql.exec("CREATE TABLE IF NOT EXISTS chunk (n INTEGER PRIMARY KEY, size INTEGER NOT NULL)");
+    this.schema = new Schema(this.sql, "blob", BLOB_DDL);
   }
 
   async create(blobId: string, uploader: string, recipient: string, size: number, chunks: number, expiresAt: number): Promise<boolean> {
     if (this.row()) return false;
+    this.schema.ensure();
     this.sql.exec(
       "INSERT INTO blob (k, blob_id, uploader, recipient, size, chunks, expires_at, state) VALUES (1, ?, ?, ?, ?, ?, ?, 'active')",
       blobId,
@@ -112,7 +117,7 @@ export class BlobMeta extends DurableObject<Env> {
     await this.removeChunks(r);
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
-    this.migrate();
+    this.schema.dropped();
   }
 
   async alarm(): Promise<void> {
@@ -127,7 +132,7 @@ export class BlobMeta extends DurableObject<Env> {
       return;
     }
     await this.ctx.storage.deleteAll();
-    this.migrate();
+    this.schema.dropped();
   }
 
   private async removeChunks(r: BlobRow): Promise<void> {
@@ -140,6 +145,7 @@ export class BlobMeta extends DurableObject<Env> {
   }
 
   private row(): BlobRow | undefined {
+    if (!this.schema.exists()) return undefined;
     return this.sql
       .exec<BlobRow>(
         "SELECT blob_id, uploader, recipient, size, chunks, expires_at, state FROM blob WHERE k = 1",

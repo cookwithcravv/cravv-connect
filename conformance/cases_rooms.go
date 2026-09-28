@@ -200,6 +200,35 @@ func roomCases() []testCase {
 				t.Fatalf("err = %v, want forbidden", err)
 			}
 		}},
+		{"rooms/live_rooms_capped_per_member", func(t *testing.T, s *suite) {
+			_, mb := s.member(t)
+			fillRooms(t, mb)
+			_, other := s.member(t)
+			if _, _, err := other.CreateRoom(ctxT(t)); err != nil {
+				t.Fatalf("the cap must be per member: %v", err)
+			}
+		}},
+		{"rooms/burned_room_frees_its_slot", func(t *testing.T, s *suite) {
+			_, mb := s.member(t)
+			rooms := fillRooms(t, mb)
+			creator, err := s.client.Rooms().Open(ctxT(t), rooms[0].nameplate, rooms[0].token)
+			if err != nil {
+				t.Fatal(err)
+			}
+			creator.Close()
+			// The relay burns the room asynchronously after the close; allow it a moment.
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				_, _, err := mb.CreateRoom(ctxT(t))
+				if err == nil {
+					return
+				}
+				if serverCode(err) != relayproto.CodeRateLimited || time.Now().After(deadline) {
+					t.Fatalf("room_create after a room burned: %v, want ok", err)
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+		}},
 		{"rooms/creator_leaving_burns_room", func(t *testing.T, s *suite) {
 			_, mb := s.member(t)
 			np, tok, err := mb.CreateRoom(ctxT(t))
@@ -228,4 +257,26 @@ func roomCases() []testCase {
 			}
 		}},
 	}
+}
+
+type createdRoom struct{ nameplate, token string }
+
+// maxRoomsPerMember is the live-room cap of relay-v1 3.6.
+const maxRoomsPerMember = 8
+
+// fillRooms creates maxRoomsPerMember rooms and checks that one more is rate_limited.
+func fillRooms(t *testing.T, mb transport.Mailbox) []createdRoom {
+	t.Helper()
+	var rooms []createdRoom
+	for i := range maxRoomsPerMember {
+		np, tok, err := mb.CreateRoom(ctxT(t))
+		if err != nil {
+			t.Fatalf("room %d: %v", i+1, err)
+		}
+		rooms = append(rooms, createdRoom{np, tok})
+	}
+	if _, _, err := mb.CreateRoom(ctxT(t)); serverCode(err) != relayproto.CodeRateLimited {
+		t.Fatalf("room %d: %v, want error rate_limited", maxRoomsPerMember+1, err)
+	}
+	return rooms
 }

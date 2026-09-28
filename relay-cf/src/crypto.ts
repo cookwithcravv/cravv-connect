@@ -134,18 +134,22 @@ export async function httpMessage(
 
 const DEFAULT_PORTS: Record<string, string> = { "http:": "80", "https:": "443" };
 
-// Normalizes an origin the way clients do (relay-v1 section 1): scheme://host[:port] with a
-// lowercase host, no trailing dot, the default port omitted, IPv6 bracketed, no path.
-// Input that is not a URL is returned unchanged.
-export function normalizeOrigin(raw: string): string {
+// Normalizes an origin the way clients do (relay-v1 section 1; the Go reference is
+// relayproto.NormalizeOrigin): scheme://host[:port] with a lowercase host, no trailing dot,
+// the default port omitted, IPv6 bracketed. A lone trailing "/" is dropped. Returns null for
+// anything else: characters outside printable ASCII, a scheme other than http or https,
+// user info, a path, a query, a fragment, a missing host or a bad port.
+export function normalizeOrigin(raw: string): string | null {
+  if (!/^https?:\/\/[\x21-\x7e]+$/i.test(raw) || !/^[a-z]+:\/\/[^/?#@%\\]+\/?$/i.test(raw)) return null;
   let u: URL;
   try {
     u = new URL(raw);
   } catch {
-    return raw;
+    return null;
   }
   const scheme = u.protocol.toLowerCase();
   const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  if (host === "" || u.port === "0") return null;
   const port = u.port !== "" && u.port !== DEFAULT_PORTS[scheme] ? `:${u.port}` : "";
   return `${scheme}//${host}${port}`;
 }

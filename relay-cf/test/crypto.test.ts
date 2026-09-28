@@ -112,13 +112,43 @@ describe("origin normalization", () => {
     ["https://relay.test", "https://relay.test"],
     ["HTTPS://Relay.Example.COM/", "https://relay.example.com"],
     ["https://relay.example.com.:443", "https://relay.example.com"],
-    ["http://relay.example.com:80/path?q=1", "http://relay.example.com"],
+    ["http://relay.example.com:80", "http://relay.example.com"],
+    ["https://relay.example.com:0443", "https://relay.example.com"],
     ["http://127.0.0.1:8787", "http://127.0.0.1:8787"],
     ["https://relay.example.com:8443", "https://relay.example.com:8443"],
     ["http://[::1]:80", "http://[::1]"],
     ["http://[0:0:0:0:0:0:0:1]:8787", "http://[::1]:8787"],
   ])("%s -> %s", (raw, want) => {
     expect(normalizeOrigin(raw)).toBe(want);
+  });
+
+  // The same inputs relayproto.NormalizeOrigin rejects.
+  it.each([
+    "",
+    "relay.example.com",
+    "not a url",
+    "ftp://relay.example.com",
+    "wss://relay.example.com",
+    "https:relay.example.com",
+    "https://",
+    "https://.",
+    "https://relay.example.com/path",
+    "https://relay.example.com//",
+    "https://relay.example.com/.",
+    "https://relay.example.com?",
+    "https://relay.example.com?q=1",
+    "https://relay.example.com#frag",
+    "https://user@relay.example.com",
+    "https://relay.example.com:0",
+    "https://relay.example.com:65536",
+    "https://relay.example.com:x",
+    "https://rel%61y.example.com",
+    "https://relay\\example.com",
+    "https://relay.example.com ",
+    "https://rélay.example.com",
+    "https://[::1",
+  ])("rejects %j", (raw) => {
+    expect(normalizeOrigin(raw)).toBeNull();
   });
 });
 

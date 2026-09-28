@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -155,6 +156,51 @@ func blobCases() []testCase {
 			body, _ := json.Marshal(relayproto.BlobCreateRequest{Size: 1, Chunks: 1, Recipient: relayproto.B64(rcpt.Public())})
 			if code := s.rawHTTP(t, up, "https://other-relay.invalid", http.MethodPost, relayproto.PathBlobs, body, s.now()); code != http.StatusUnauthorized {
 				t.Fatalf("signature for another origin: %d, want 401", code)
+			}
+		}},
+		{"blobs/signature_bound_to_method_path_and_body_401", func(t *testing.T, s *suite) {
+			up, _ := s.member(t)
+			rcpt, _ := s.member(t)
+			body, _ := json.Marshal(relayproto.BlobCreateRequest{Size: 1, Chunks: 1, Recipient: relayproto.B64(rcpt.Public())})
+			other, _ := json.Marshal(relayproto.BlobCreateRequest{Size: 2, Chunks: 1, Recipient: relayproto.B64(rcpt.Public())})
+			origin, ts := s.client.Origin(), strconv.FormatInt(s.now().Unix(), 10)
+			for _, tc := range []struct {
+				name         string
+				method, path string
+				body         []byte
+			}{
+				{"method", http.MethodPut, relayproto.PathBlobs, body},
+				{"path", http.MethodPost, relayproto.PathBlobs + "/x", body},
+				{"body", http.MethodPost, relayproto.PathBlobs, other},
+			} {
+				h := sigHeaders(up, origin, tc.method, tc.path, ts, tc.body)
+				if code := s.sendHTTP(t, http.MethodPost, relayproto.PathBlobs, body, h); code != http.StatusUnauthorized {
+					t.Fatalf("signature over another %s: %d, want 401", tc.name, code)
+				}
+			}
+			h := sigHeaders(up, origin, http.MethodPost, relayproto.PathBlobs, ts, body)
+			if code := s.sendHTTP(t, http.MethodPost, relayproto.PathBlobs, body, h); code != http.StatusCreated {
+				t.Fatalf("untampered control request: %d, want 201", code)
+			}
+		}},
+		{"blobs/missing_header_or_non_numeric_ts_401", func(t *testing.T, s *suite) {
+			up, _ := s.member(t)
+			rcpt, _ := s.member(t)
+			body, _ := json.Marshal(relayproto.BlobCreateRequest{Size: 1, Chunks: 1, Recipient: relayproto.B64(rcpt.Public())})
+			origin, now := s.client.Origin(), s.now().Unix()
+			// Each malformed ts is signed as sent, so only its format is wrong.
+			for _, ts := range []string{"abc", strconv.FormatInt(now, 10) + ".5", "1e9", ""} {
+				h := sigHeaders(up, origin, http.MethodPost, relayproto.PathBlobs, ts, body)
+				if code := s.sendHTTP(t, http.MethodPost, relayproto.PathBlobs, body, h); code != http.StatusUnauthorized {
+					t.Fatalf("X-Cravv-TS %q: %d, want 401", ts, code)
+				}
+			}
+			for _, missing := range []string{relayproto.HeaderTS, relayproto.HeaderIK, relayproto.HeaderSig} {
+				h := sigHeaders(up, origin, http.MethodPost, relayproto.PathBlobs, strconv.FormatInt(now, 10), body)
+				h.Del(missing)
+				if code := s.sendHTTP(t, http.MethodPost, relayproto.PathBlobs, body, h); code != http.StatusUnauthorized {
+					t.Fatalf("without %s: %d, want 401", missing, code)
+				}
 			}
 		}},
 		{"blobs/stored_bytes_capped_by_declared_size_413", func(t *testing.T, s *suite) {

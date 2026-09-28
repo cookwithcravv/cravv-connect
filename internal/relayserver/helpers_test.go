@@ -36,6 +36,13 @@ func newTestRelay(t *testing.T, lim Limits) *testRelay {
 // The hook sees PublicOrigin already set to the httptest URL.
 func newTestRelayCfg(t *testing.T, mod func(*Config)) *testRelay {
 	t.Helper()
+	return newTestRelayBackend(t, mod, nil)
+}
+
+// newTestRelayBackend is newTestRelayCfg whose memory backend is first passed through
+// wrap (when not nil), for tests that inject backend failures.
+func newTestRelayBackend(t *testing.T, mod func(*Config), wrap func(Backend) Backend) *testRelay {
+	t.Helper()
 	tr := &testRelay{clock: core.NewFakeClock(time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC))}
 	tr.ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { tr.srv.ServeHTTP(w, r) }))
 	t.Cleanup(tr.ts.Close)
@@ -43,7 +50,11 @@ func newTestRelayCfg(t *testing.T, mod func(*Config)) *testRelay {
 	if mod != nil {
 		mod(&cfg)
 	}
-	srv, err := New(cfg, NewMemoryBackend(tr.clock))
+	var be Backend = NewMemoryBackend(tr.clock)
+	if wrap != nil {
+		be = wrap(be)
+	}
+	srv, err := New(cfg, be)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

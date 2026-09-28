@@ -543,8 +543,8 @@ make conformance-cf       # the Go conformance suite against relay-cf under wran
 Run the conformance suite against any relay:
 
 ```sh
-bin/cravv-relay --addr 127.0.0.1:8787 --admin-token dev-token &
-go run ./cmd/cravv-conformance --relay http://127.0.0.1:8787 --admin-token dev-token
+CRAVV_RELAY_ADMIN_TOKEN=dev-token bin/cravv-relay --addr 127.0.0.1:8787 &
+CRAVV_CONFORMANCE_ADMIN_TOKEN=dev-token go run ./cmd/cravv-conformance --relay http://127.0.0.1:8787
 ```
 
 `e2e/` starts an in-process relay and several real daemons in temporary
