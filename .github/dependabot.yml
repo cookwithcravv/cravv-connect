@@ -11,6 +11,14 @@ updates:
     directory: /relay-cf
     schedule:
       interval: weekly
+    # @cloudflare/vitest-pool-workers pins a vitest major, so they must move
+    # together: one PR that updates both, which only passes once they match.
+    groups:
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+          - "@cloudflare/vitest-pool-workers"
   - package-ecosystem: github-actions
     directory: /
     schedule:
