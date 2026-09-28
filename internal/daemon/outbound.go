@@ -59,6 +59,7 @@ type Outbound struct {
 	wake      chan struct{}
 
 	pass    chan struct{} // holds a token while a SendDue pass runs (the loop and the kill flush)
+	pauses  PauseRecorder // nil: markPausedByPeer only holds the outbox and marks the peer
 	mu      sync.Mutex
 	recent  []string
 	waiting map[core.MachineID]*noMailbox // items the relay had no mailbox for, by peer
@@ -89,6 +90,21 @@ func NewOutbound(id *keys.Identity, peers store.PeerStore, outbox store.OutboxSt
 		pass:    make(chan struct{}, 1),
 		waiting: map[core.MachineID]*noMailbox{},
 	}
+}
+
+// PauseRecorder records that a peer paused (or unpaired) this machine and
+// cuts it off: its links close and its tasks and files end. Implemented by
+// *PeerService.
+type PauseRecorder interface {
+	MarkPausedByPeer(ctx context.Context, id core.MachineID, paused bool) error
+}
+
+// SetPauseRecorder routes a relay's not_allowed (the peer paused or
+// unpaired this machine) through r, like a control.paused from the peer.
+func (o *Outbound) SetPauseRecorder(r PauseRecorder) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.pauses = r
 }
 
 // ErrNoLinkID is returned by SendEnvelope for a link-scoped kind (chat,
@@ -447,7 +463,16 @@ func (o *Outbound) seal(peer store.Peer, env core.Envelope) ([]byte, error) {
 	return frame.Marshal()
 }
 
+// markPausedByPeer records that the peer paused or unpaired this machine:
+// through the PauseRecorder when there is one (it holds the outbox and runs
+// the cut-off), otherwise by holding the outbox and marking the peer.
 func (o *Outbound) markPausedByPeer(ctx context.Context, peer store.Peer) error {
+	o.mu.Lock()
+	pauses := o.pauses
+	o.mu.Unlock()
+	if pauses != nil {
+		return pauses.MarkPausedByPeer(ctx, peer.MachineID, true)
+	}
 	if err := o.outbox.HoldPeer(ctx, peer.MachineID); err != nil {
 		return err
 	}

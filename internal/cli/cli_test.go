@@ -37,9 +37,9 @@ func TestPeersTable(t *testing.T) {
 	fd.start()
 	r := fd.run(nil, "peers")
 	want := "" +
-		"ALIAS    STATE           MACHINE ID                                            PAIRED\n" +
-		"gpu-box  online          abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrst  2026-09-26 10:00 UTC\n" +
-		"mac      paused by peer  m2                                                    2026-09-26 10:00 UTC\n"
+		"ALIAS    STATE                   MACHINE ID                                            PAIRED\n" +
+		"gpu-box  online                  abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrst  2026-09-26 10:00 UTC\n" +
+		"mac      paused or unpaired you  m2                                                    2026-09-26 10:00 UTC\n"
 	if r.code != 0 || r.stdout != want {
 		t.Fatalf("code %d\n%s\nwant\n%s", r.code, r.stdout, want)
 	}

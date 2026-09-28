@@ -8,7 +8,7 @@
 {{range .Peers}}<tr>
 <td>{{.Alias}}</td>
 <td><code>{{short .MachineID}}</code></td>
-<td>{{if .Paused}}paused by you{{else if .PausedByPeer}}paused by them{{else if .Online}}online{{else}}offline{{end}}</td>
+<td>{{if .Paused}}paused by you{{else if .PausedByPeer}}paused or unpaired you{{else if .Online}}online{{else}}offline{{end}}</td>
 <td>{{time .LastSeen}}</td>
 <td>{{time .PairedAt}}</td>
 <td>

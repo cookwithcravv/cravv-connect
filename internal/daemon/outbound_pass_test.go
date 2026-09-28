@@ -5,7 +5,41 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/cookwithcravv/cravv-connect/internal/store"
+	"github.com/cookwithcravv/cravv-connect/internal/transport"
 )
+
+// cutOffRecorder records PeerCutOff calls.
+type cutOffRecorder struct{ reasons []string }
+
+func (c *cutOffRecorder) PeerCutOff(_ context.Context, _ store.Peer, reason string) error {
+	c.reasons = append(c.reasons, reason)
+	return nil
+}
+
+// A relay not_allowed long after pairing means the peer paused (or
+// unpaired) this machine. Recording it goes through the PeerService, so the
+// cut-off observers run: links close and tasks end, as for control.paused.
+func TestOutboundNotAllowedCutsThePeerOff(t *testing.T) {
+	f := newOutboundFixture(t)
+	peers := NewPeerService(f.peers, f.slot, f.o, nil, f.clock)
+	cut := &cutOffRecorder{}
+	peers.AddCutOffObserver(cut)
+	f.o.SetPauseRecorder(peers)
+	f.mb.statuses = []transport.SendStatus{transport.SendNotAllowed}
+	id := f.send(t, "x")
+	f.pass(t)
+	if !mustGetPeer(t, f.peers, f.gpu.rec.MachineID).PausedByPeer {
+		t.Fatal("peer not marked as pausing us")
+	}
+	if st := f.status(t, id).Status; st != store.OutboxHeld {
+		t.Fatalf("item status = %s, want held", st)
+	}
+	if len(cut.reasons) != 1 || cut.reasons[0] != CutOffPausedByPeer {
+		t.Fatalf("cut-offs = %v, want one %q", cut.reasons, CutOffPausedByPeer)
+	}
+}
 
 // A pass stuck on a relay that does not answer must not hold up another
 // pass past that pass's own deadline: the kill flush waits at most

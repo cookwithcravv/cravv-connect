@@ -51,6 +51,9 @@ change behaviour or wire formats, and the notes say so.
   the kill switch stops one in progress), a file chunk request after 2
   minutes (it then counts as a failed attempt), and any HTTP response
   header after 30 seconds.
+- When the relay says a peer no longer allows this machine, its links now
+  close and its tasks end, as when the peer says it paused you. `peers` and
+  the web UI show such a peer as "paused or unpaired you".
 
 ## v0.2.1 (2026-09-28)
 

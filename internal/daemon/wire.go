@@ -301,6 +301,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	// as soon as Kill starts (Killed).
 	g.outbound = NewOutbound(id, db, db, d, clock, func() bool { return !d.kill.SendingAllowed() }, d.log)
 	g.peers = NewPeerService(db, d, g.outbound, lg, clock)
+	g.outbound.SetPauseRecorder(g.peers)
 	g.discover = NewDiscovery(d.shared, g.peers, g.outbound, clock, d.log)
 	g.replies = NewLinkReplies(g.outbound, clock, d.log)
 	g.links = NewLinkService(LinkDeps{
