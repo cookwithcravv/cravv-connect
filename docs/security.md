@@ -32,7 +32,7 @@ exact limits behind each claim. Protocol details are in
 |---|---|
 | Accept a link at `messages` or `tasks-ask`; approve one task on a `tasks-ask` link | The human, in the chat (an elicitation form, or a 4-digit code from a desktop notification), or with the password in the CLI or web UI |
 | Accept or raise a link to `tasks-auto`; raise any link; edit managed-session offers; pair and join; resume after the kill switch; allow another folder for files; reset the identity | Only with the password, in the CLI or web UI |
-| Reject a request or deny a task; restrict or disconnect a link; pause, resume-peer or unpair a machine; close a managed session; the kill switch; stop the daemon | Anyone local, agents included: no password, so cutting off stays easy |
+| Reject a request or deny a task; restrict or disconnect a link; pause, resume-peer or unpair a machine; close any session on this machine (`session close`); the kill switch; stop the daemon | Anyone local, agents included: no password, so cutting off stays easy |
 
 ## What we defend against
 
@@ -312,8 +312,8 @@ Needs the password:
 
 Does not need it: rejecting a link request (`link reject`), restricting or
 disconnecting a link (`link restrict`, `link disconnect`, or `link permit`
-to a lower level), `pause`, `resume-peer`, `unpair`, closing a managed
-session (`session close`), `kill`, stopping the daemon, and everything
+to a lower level), `pause`, `resume-peer`, `unpair`, closing any session
+on this machine (`session close`), `kill`, stopping the daemon, and everything
 agents do on their own links (sending, reading, working on tasks they
 received, cancelling tasks they sent). `resume-peer` is the one widening
 without a password, because it only restores what you chose when pairing;
@@ -330,6 +330,20 @@ confirmation code:
 - Only a real answer counts: the form's action `accept` with one of the
   choices it offered. A dismissed or auto-declined form (the VS Code
   extension declines forms without showing them) leaves the item pending.
+- The daemon cannot see a screen: it trusts the MCP client to have shown
+  the form to a human. On MCP protocol 2026-07-28 and later the forms go
+  out as input requests, and the answers come back as `InputResponses` in
+  the client's next `review_pending` call, with a single-use request state
+  that expires after 10 minutes. The model supplies only the tool's
+  arguments, never these responses, so it cannot answer a form itself. But
+  a client that fills in input requests without asking anyone (a script
+  built on an MCP SDK, or a client set to answer them automatically)
+  answers for the human, and the daemon takes that answer at the chat
+  tier. That is no worse than the older elicitation forms, which trust the
+  client the same way, and the chat tier still cannot grant `tasks-auto`
+  or raise a permission. If you connect cravv-connect to such a client, do
+  not rely on `review_pending` as a human check: decide with the password
+  in the CLI or web UI instead.
 - The code is shown only in a macOS desktop notification. The daemon hands
   the notification script to `osascript` on stdin, never as an argument, so
   the code does not appear in `ps`. It never travels over the daemon socket
@@ -574,7 +588,8 @@ at the relay for up to 7 days. Until `cravv-connect resume` (password),
 every IPC method fails except `status`, `peer.list`, `machines`,
 `audit.read`, `hook.counts`, `auth.unlock`, `resume`, `kill`,
 `reset_identity`, `daemon.shutdown`, `offers.list`, `managed.list`,
-`managed.close`, `sessions.local` and `ui.start` (so the web UI can resume).
+`managed.close`, `sessions.local`, `sessions.close` and `ui.start` (so the
+web UI can resume).
 After resume, links must be requested again. `reset-identity` still works
 (with the password), so a machine killed because it may be compromised gets
 a new identity without reconnecting under the old one first.
