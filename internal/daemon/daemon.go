@@ -88,12 +88,13 @@ type Daemon struct {
 	// the password verifier cannot check passwords.
 	authWarning string
 
-	mu        sync.Mutex
-	mb        transport.Mailbox
-	lastErr   error
-	changed   chan struct{} // closed and replaced whenever mb or lastErr changes
-	cancelRun context.CancelFunc
-	wake      chan struct{} // buffered(1): kicks the connection loop
+	mu         sync.Mutex
+	mb         transport.Mailbox
+	lastErr    error
+	changed    chan struct{} // closed and replaced whenever mb or lastErr changes
+	cancelRun  context.CancelFunc
+	cancelDial context.CancelFunc // stops the relay dial in progress, if any
+	wake       chan struct{}      // buffered(1): kicks the connection loop
 }
 
 // Mailbox implements MailboxProvider: the live mailbox, or false when offline or killed.
@@ -191,15 +192,37 @@ func (d *Daemon) goLive(mb transport.Mailbox) bool {
 	return true
 }
 
-// disconnect closes the live mailbox (kill switch).
+// disconnect closes the live mailbox and stops a dial in progress (kill switch).
 func (d *Daemon) disconnect() {
 	d.mu.Lock()
-	mb := d.mb
+	mb, cancelDial := d.mb, d.cancelDial
 	d.mu.Unlock()
+	if cancelDial != nil {
+		cancelDial()
+	}
 	if mb != nil {
 		mb.Close()
 	}
 	d.poke()
+}
+
+// dial dials the relay with a context the kill switch can cancel
+// (disconnect), so a relay that never answers cannot hold the loop.
+func (d *Daemon) dial(ctx context.Context, g *services, creds transport.Credentials) (transport.Mailbox, error) {
+	dctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	d.mu.Lock()
+	d.cancelDial = cancel
+	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		d.cancelDial = nil
+		d.mu.Unlock()
+	}()
+	if d.kill.Killed() { // killed between the loop's check and here
+		return nil, core.ErrKilled
+	}
+	return d.relay.Dialer().Dial(dctx, g.identity, creds)
 }
 
 // Run runs the services until ctx ends. After ResetIdentity it continues
@@ -280,7 +303,7 @@ func (d *Daemon) connectLoop(ctx context.Context, g *services) {
 			}
 			d.log.Warn("read relay credentials; dialing with the existing registration", "err", err)
 		}
-		mb, err := d.relay.Dialer().Dial(ctx, g.identity, creds)
+		mb, err := d.dial(ctx, g, creds)
 		if err != nil {
 			if ctx.Err() != nil {
 				return

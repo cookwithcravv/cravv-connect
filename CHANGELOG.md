@@ -47,6 +47,10 @@ change behaviour or wire formats, and the notes say so.
 - `cravv-connect daemon start` on a machine that is not set up says to run
   `cravv-connect setup` at once, and a daemon that exits while starting is
   reported right away with its error output.
+- Network waits are bounded: a relay dial gives up after 30 seconds (and
+  the kill switch stops one in progress), a file chunk request after 2
+  minutes (it then counts as a failed attempt), and any HTTP response
+  header after 30 seconds.
 
 ## v0.2.1 (2026-09-28)
 

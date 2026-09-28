@@ -24,7 +24,9 @@ func (r rooms) Open(ctx context.Context, nameplate, creatorToken string) (transp
 	if creatorToken != "" {
 		u += "?" + relayproto.QueryToken + "=" + url.QueryEscape(creatorToken)
 	}
-	ws, _, err := websocket.Dial(ctx, u, &websocket.DialOptions{HTTPClient: r.c.http})
+	dctx, cancel := bounded(ctx, r.c.dialTimeout)
+	ws, _, err := websocket.Dial(dctx, u, &websocket.DialOptions{HTTPClient: r.c.http})
+	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("relay: dial room: %w", err)
 	}

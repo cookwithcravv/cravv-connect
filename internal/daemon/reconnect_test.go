@@ -38,6 +38,49 @@ func (r *flapRelay) count() int {
 	return len(r.dials)
 }
 
+// hangRelay accepts dials that never finish until their context ends.
+type hangRelay struct {
+	d2Relay
+	dialing chan struct{}
+	ended   chan error
+}
+
+func (r *hangRelay) Dialer() transport.Dialer { return r }
+
+func (r *hangRelay) Dial(ctx context.Context, _ transport.Signer, _ transport.Credentials) (transport.Mailbox, error) {
+	select {
+	case r.dialing <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	select {
+	case r.ended <- ctx.Err():
+	default:
+	}
+	return nil, ctx.Err()
+}
+
+// The kill switch stops a dial that hangs (a relay that accepts TCP and
+// never answers): the connect loop is not stuck in it.
+func TestKillCancelsADialInProgress(t *testing.T) {
+	relay := &hangRelay{dialing: make(chan struct{}, 1), ended: make(chan error, 1)}
+	d := d2NewDaemon(t, t.TempDir(), relay)
+	d2Run(t, d)
+	select {
+	case <-relay.dialing:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no dial started")
+	}
+	if err := d.Kill().Kill(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-relay.ended:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the kill switch did not stop the dial in progress")
+	}
+}
+
 // A connection that ends at once grows the backoff: no reconnect storm.
 func TestReconnectBacksOffWhenConnectionsDropAtOnce(t *testing.T) {
 	relay := &flapRelay{}

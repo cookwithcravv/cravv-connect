@@ -2,6 +2,7 @@
 package relayclient
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -21,6 +22,8 @@ type Client struct {
 	pingInterval time.Duration
 	pingTimeout  time.Duration
 	reqTimeout   time.Duration
+	dialTimeout  time.Duration
+	blobTimeout  time.Duration
 }
 
 // Keepalive defaults: relay-v1 clients SHOULD ping every 30 seconds.
@@ -33,6 +36,25 @@ const (
 // deny, invite, room) waits for the relay's answer. A relay that does not
 // answer in time is treated as a dead connection.
 const DefaultRequestTimeout = 30 * time.Second
+
+// Network timeouts. DefaultDialTimeout bounds a mailbox dial up to the
+// WebSocket upgrade (the relay-v1 handshake after it has its own limit).
+// DefaultBlobTimeout bounds one blob request, a 1 MiB chunk included, so a
+// stalled transfer fails and is retried. DefaultResponseHeaderTimeout bounds
+// the wait for any HTTP response's headers.
+const (
+	DefaultDialTimeout           = 30 * time.Second
+	DefaultBlobTimeout           = 2 * time.Minute
+	DefaultResponseHeaderTimeout = 30 * time.Second
+)
+
+// newHTTPClient is the default HTTP client: the standard transport with a
+// bound on the wait for response headers.
+func newHTTPClient() *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = DefaultResponseHeaderTimeout
+	return &http.Client{Transport: t}
+}
 
 // Option customizes a Client.
 type Option func(*Client)
@@ -52,6 +74,13 @@ func WithKeepalive(interval, timeout time.Duration) Option {
 // d <= 0 means no limit beyond the caller's context.
 func WithRequestTimeout(d time.Duration) Option { return func(c *Client) { c.reqTimeout = d } }
 
+// WithDialTimeout bounds a mailbox or pairing-room dial up to the WebSocket
+// upgrade; d <= 0 means only the caller's context.
+func WithDialTimeout(d time.Duration) Option { return func(c *Client) { c.dialTimeout = d } }
+
+// WithBlobTimeout bounds each blob request; d <= 0 means only the caller's context.
+func WithBlobTimeout(d time.Duration) Option { return func(c *Client) { c.blobTimeout = d } }
+
 // WithClock sets the clock used for request-signature timestamps.
 func WithClock(clk core.Clock) Option { return func(c *Client) { c.clock = clk } }
 
@@ -66,11 +95,13 @@ func New(relayURL string, opts ...Option) (*Client, error) {
 	c := &Client{
 		origin:       origin,
 		wsBase:       map[string]string{"http": "ws", "https": "wss"}[scheme] + "://" + host,
-		http:         http.DefaultClient,
+		http:         newHTTPClient(),
 		clock:        core.SystemClock{},
 		pingInterval: DefaultPingInterval,
 		pingTimeout:  DefaultPingTimeout,
 		reqTimeout:   DefaultRequestTimeout,
+		dialTimeout:  DefaultDialTimeout,
+		blobTimeout:  DefaultBlobTimeout,
 	}
 	for _, o := range opts {
 		o(c)
@@ -80,6 +111,14 @@ func New(relayURL string, opts ...Option) (*Client, error) {
 
 // Origin is the normalized scheme://host[:port], the value bound into auth and HTTP signatures.
 func (c *Client) Origin() string { return c.origin }
+
+// bounded returns ctx limited to d (d <= 0: ctx itself).
+func bounded(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if d <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, d)
+}
 
 // Dialer returns a transport.Dialer for mailbox connections.
 func (c *Client) Dialer() transport.Dialer { return dialer{c: c} }
