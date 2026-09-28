@@ -422,8 +422,15 @@ func (d *Daemon) relayErrors() []string {
 func inboundWarnings(in *Inbound) func() []string {
 	return func() []string {
 		var out []string
-		if n := in.Dropped(); n > 0 {
-			out = append(out, fmt.Sprintf("%d corrupt or unverifiable frames dropped", n))
+		drops := in.Drops()
+		if drops.Corrupt > 0 {
+			out = append(out, fmt.Sprintf("%d corrupt or unverifiable frames dropped", drops.Corrupt))
+		}
+		if drops.Unknown > 0 {
+			out = append(out, fmt.Sprintf("%d messages from unknown machines dropped", drops.Unknown))
+		}
+		if drops.Paused > 0 {
+			out = append(out, fmt.Sprintf("%d messages from machines you paused dropped", drops.Paused))
 		}
 		if n := in.SkewRejected(); n > 0 {
 			out = append(out, fmt.Sprintf("%d messages rejected for a timestamp in the future: check the clocks", n))

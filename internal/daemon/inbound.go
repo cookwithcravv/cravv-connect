@@ -54,7 +54,9 @@ type Inbound struct {
 	logger   *slog.Logger
 	stale    *RateLimiter // control.stale_prekey replies per peer
 
-	dropped atomic.Int64 // corrupt, unverifiable, stale, or unroutable frames
+	corrupt atomic.Int64 // unparseable or unverifiable frames, bad IDs and timestamps
+	unknown atomic.Int64 // frames from machines that are not paired
+	paused  atomic.Int64 // frames from machines this one paused
 	skewed  atomic.Int64 // frames rejected for a timestamp too far in the future
 
 	mu      sync.Mutex
@@ -78,8 +80,19 @@ func NewInbound(id *keys.Identity, peers store.PeerStore, dedup store.DedupStore
 	}
 }
 
-// Dropped counts frames dropped as corrupt, unverifiable, stale, or unroutable (for status).
-func (in *Inbound) Dropped() int64 { return in.dropped.Load() }
+// DropCounts counts dropped frames by why they were dropped (for status).
+// Stale presence and discovery frames, expected after being offline, and
+// kinds this version has no handler for are not counted.
+type DropCounts struct {
+	Corrupt int64 // unparseable, unverifiable, or with a bad ID or timestamp
+	Unknown int64 // from a machine that is not paired
+	Paused  int64 // from a machine this one paused
+}
+
+// Drops returns the dropped-frame counts since the daemon started.
+func (in *Inbound) Drops() DropCounts {
+	return DropCounts{Corrupt: in.corrupt.Load(), Unknown: in.unknown.Load(), Paused: in.paused.Load()}
+}
 
 // SkewRejected counts frames rejected for timestamps too far in the future (status warns).
 func (in *Inbound) SkewRejected() int64 { return in.skewed.Load() }
@@ -130,16 +143,16 @@ func (in *Inbound) Run(ctx context.Context, mb transport.Mailbox) error {
 func (in *Inbound) process(ctx context.Context, d transport.Delivery) error {
 	peer, err := in.peers.GetPeer(ctx, keys.MachineIDOf(d.From))
 	if err != nil {
-		in.drop("unknown sender", d, err)
+		in.drop(&in.unknown, "unknown sender", d, err)
 		return nil
 	}
 	if peer.Paused {
-		in.drop("paused peer", d, nil)
+		in.drop(&in.paused, "paused peer", d, nil)
 		return nil
 	}
 	frame, err := sealing.ParseFrame(d.Frame)
 	if err != nil {
-		in.drop("unparseable frame", d, err)
+		in.drop(&in.corrupt, "unparseable frame", d, err)
 		return nil
 	}
 	env, err := sealing.Open(frame, peer.IK, in.identity.MachineID(), in.prekeys)
@@ -147,22 +160,22 @@ func (in *Inbound) process(ctx context.Context, d transport.Delivery) error {
 		// Only the header is authenticated here: check its ID like an
 		// envelope's before answering, so replayed old frames get no reply.
 		if err := in.checkIDTime(frame.Header.ID); err != nil {
-			in.drop("frame for an unknown prekey", d, err)
+			in.drop(&in.corrupt, "frame for an unknown prekey", d, err)
 			return nil
 		}
 		in.replyStalePrekey(ctx, peer, frame.Header.ID)
 		return nil
 	}
 	if err != nil {
-		in.drop("unverifiable frame", d, err)
+		in.drop(&in.corrupt, "unverifiable frame", d, err)
 		return nil
 	}
 	if !core.ValidID(env.ID) {
-		in.drop("message id is not a core ID", d, nil)
+		in.drop(&in.corrupt, "message id is not a core ID", d, nil)
 		return nil
 	}
 	if err := in.checkTimestamp(env); err != nil {
-		in.drop("bad timestamp", d, err)
+		in.drop(&in.corrupt, "bad timestamp", d, err)
 		return nil
 	}
 	if env.Kind.Ephemeral() {
@@ -182,7 +195,7 @@ func (in *Inbound) process(ctx context.Context, d transport.Delivery) error {
 	}
 	h, ok := in.registry.Lookup(env.Kind)
 	if !ok {
-		in.drop("no handler for kind "+string(env.Kind), d, nil)
+		in.drop(nil, "no handler for kind "+string(env.Kind), d, nil)
 		return nil
 	}
 	if err := h.Handle(ctx, peer, env); err != nil {
@@ -208,12 +221,12 @@ func (in *Inbound) process(ctx context.Context, d transport.Delivery) error {
 // was offline), never deduplicated, receipted or retried.
 func (in *Inbound) processEphemeral(ctx context.Context, peer store.Peer, env core.Envelope, d transport.Delivery) {
 	if in.clock.Now().Sub(time.UnixMilli(env.TS)) > core.PresenceMaxAge {
-		in.drop("stale "+string(env.Kind), d, nil)
+		in.drop(nil, "stale "+string(env.Kind), d, nil) // expected after being offline
 		return
 	}
 	h, ok := in.registry.Lookup(env.Kind)
 	if !ok {
-		in.drop("no handler for kind "+string(env.Kind), d, nil)
+		in.drop(nil, "no handler for kind "+string(env.Kind), d, nil)
 		return
 	}
 	if err := h.Handle(ctx, peer, env); err != nil {
@@ -273,8 +286,12 @@ func (in *Inbound) replyStalePrekey(ctx context.Context, peer store.Peer, msgID 
 	}
 }
 
-func (in *Inbound) drop(reason string, d transport.Delivery, err error) {
-	in.dropped.Add(1)
+// drop logs a dropped delivery and adds it to counter; a nil counter is a
+// drop that is expected and no reason for a status warning.
+func (in *Inbound) drop(counter *atomic.Int64, reason string, d transport.Delivery, err error) {
+	if counter != nil {
+		counter.Add(1)
+	}
 	in.logger.Info("dropped delivery", "reason", reason, "seq", d.Seq, "id", d.ID, "err", err)
 }
 

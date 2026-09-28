@@ -170,23 +170,25 @@ func TestDuplicateDeliveryShownOnce(t *testing.T) {
 }
 
 func TestInboundDrops(t *testing.T) {
+	corrupt := DropCounts{Corrupt: 1}
 	cases := []struct {
 		name  string
+		want  DropCounts
 		build func(t *testing.T, f *inboundFixture) transport.Delivery
 	}{
-		{"unknown sender", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"unknown sender", DropCounts{Unknown: 1}, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			stranger := newTestPeer(t, "stranger")
 			id, raw := f.frameFrom(t, stranger, testEpoch, f.myPK)
 			return transport.Delivery{Seq: 1, From: stranger.id.Public(), ID: id, Frame: raw}
 		}},
-		{"paused peer", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"paused peer", DropCounts{Paused: 1}, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			p := f.gpu.rec
 			p.Paused = true
 			mustPut(t, f.peers, p)
 			id, raw := f.frameFrom(t, f.gpu, testEpoch, f.myPK)
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
 		}},
-		{"bad signature", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"bad signature", corrupt, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			id, raw := f.frameFrom(t, f.gpu, testEpoch, f.myPK)
 			fr, err := sealing.ParseFrame(raw)
 			if err != nil {
@@ -196,23 +198,24 @@ func TestInboundDrops(t *testing.T) {
 			raw, _ = fr.Marshal()
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
 		}},
-		{"signed by another key", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"signed by another key", corrupt, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			impostor := newTestPeer(t, "impostor")
 			id, raw := f.frameFrom(t, impostor, testEpoch, f.myPK)
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
 		}},
-		{"garbage frame", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"garbage frame", corrupt, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: "x", Frame: []byte("not json")}
 		}},
-		{"too old", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"too old", corrupt, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			id, raw := f.frameFrom(t, f.gpu, testEpoch.Add(-core.MaxMessageAge-time.Minute), f.myPK)
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
 		}},
-		{"from the future", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"from the future", corrupt, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			id, raw := f.frameFrom(t, f.gpu, testEpoch.Add(core.MaxClockSkew+time.Minute), f.myPK)
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
 		}},
-		{"no handler for kind", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		// A kind this version has no handler for (a newer peer's) is not corrupt.
+		{"no handler for kind", DropCounts{}, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			env, err := core.NewEnvelope(f.clock, f.gpu.id.MachineID(), f.me.MachineID(), core.KindFileOffer, core.EmptyBody{})
 			if err != nil {
 				t.Fatal(err)
@@ -236,8 +239,8 @@ func TestInboundDrops(t *testing.T) {
 			if got := mb.ackedSeqs(); !slices.Equal(got, []uint64{1}) {
 				t.Fatalf("dropped delivery must still be acked, acks = %v", got)
 			}
-			if f.in.Dropped() != 1 {
-				t.Fatalf("Dropped = %d", f.in.Dropped())
+			if got := f.in.Drops(); got != tc.want {
+				t.Fatalf("drops = %+v, want %+v", got, tc.want)
 			}
 			if n := len(f.sender.envelopes()); n != 0 {
 				t.Fatalf("sent %d envelopes for a dropped delivery", n)
@@ -415,8 +418,8 @@ func TestInboundStalePrekeyReplyNeedsAFreshID(t *testing.T) {
 	if got := mb.ackedSeqs(); !slices.Equal(got, []uint64{1, 2}) {
 		t.Fatalf("acks = %v", got)
 	}
-	if f.in.Dropped() != 2 {
-		t.Fatalf("dropped = %d, want 2", f.in.Dropped())
+	if got := f.in.Drops(); got != (DropCounts{Corrupt: 2}) {
+		t.Fatalf("drops = %+v, want 2 corrupt", got)
 	}
 }
 

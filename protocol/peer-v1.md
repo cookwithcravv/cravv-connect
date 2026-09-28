@@ -232,7 +232,11 @@ each delivery:
    `control.delivered` receipt to the sender.
 10. **Ack** the relay `seq`.
 
-Dropped frames are logged and counted in `status`. A handler failure that is
+Dropped frames are logged. `status` counts them apart: frames that are
+unparseable, unverifiable or have a bad ID or timestamp ("corrupt or
+unverifiable"), frames from unknown machines, and frames from machines this
+one paused. Stale ephemeral frames, expected after being offline, and kinds
+without a handler are only logged. A handler failure that is
 worth retrying (a local database error, including a failed deduplication
 lookup) is not acked: the receiver stops reading, closes the connection and
 reconnects after a backoff (1 second, doubling, at most 5 minutes), and
