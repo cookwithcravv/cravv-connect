@@ -24,6 +24,10 @@ import (
 	"github.com/cookwithcravv/cravv-connect/internal/transport/relayclient"
 )
 
+// ReconnectStable is how long a relay connection must stay up before the
+// reconnect backoff starts over from Options.ReconnectMin.
+const ReconnectStable = 60 * time.Second
+
 // Options configure New. Zero values get production defaults.
 type Options struct {
 	Paths    config.Paths
@@ -38,6 +42,7 @@ type Options struct {
 	Username         string                                           // for the password Guard; default auth.CurrentUsername()
 	IdentityStore    func(settings store.SettingsStore) IdentityStore // default DefaultIdentityStore
 	ReconnectMin     time.Duration                                    // default core.BackoffMin
+	ReconnectStable  time.Duration                                    // a connection this long resets the backoff; default 60 s
 	MaintenanceEvery time.Duration                                    // default 1 minute
 	PresenceEvery    time.Duration                                    // default core.PresenceInterval
 	FileRetryDelay   time.Duration                                    // default 2 seconds
@@ -193,6 +198,9 @@ func normalize(o *Options) error {
 	}
 	if o.ReconnectMin <= 0 {
 		o.ReconnectMin = core.BackoffMin
+	}
+	if o.ReconnectStable <= 0 {
+		o.ReconnectStable = ReconnectStable
 	}
 	if o.MaintenanceEvery <= 0 {
 		o.MaintenanceEvery = time.Minute

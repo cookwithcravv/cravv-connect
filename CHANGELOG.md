@@ -23,6 +23,12 @@ change behaviour or wire formats, and the notes say so.
   vulnerabilities in `net/http`, `crypto/tls`, `crypto/x509`, `net/url`,
   `html/template`, `encoding/asn1` and `net/textproto`.
 
+### Fixed
+
+- A relay that accepts the connection and then drops it no longer makes the
+  daemon reconnect every second: the reconnect delay keeps growing (up to 5
+  minutes) until a connection stays up for a minute.
+
 ## v0.2.1 (2026-09-28)
 
 ### Fixed
