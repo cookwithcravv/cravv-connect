@@ -28,6 +28,9 @@ change behaviour or wire formats, and the notes say so.
 - A relay that accepts the connection and then drops it no longer makes the
   daemon reconnect every second: the reconnect delay keeps growing (up to 5
   minutes) until a connection stays up for a minute.
+- A machine whose own relay connection is down no longer closes its links
+  with `presence_timeout`: only silence after a ping that actually left,
+  while connected, counts against a peer.
 
 ## v0.2.1 (2026-09-28)
 

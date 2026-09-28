@@ -40,8 +40,10 @@ type PresenceService struct {
 	mu       sync.Mutex
 	fresh    map[linkKey]time.Time // last fresh evidence per active link
 	pings    map[core.MachineID][]sentPing
-	lastTick time.Time // when Tick last ran (zero before the first)
+	pingLeft map[core.MachineID]bool // peers whose ping of the last round left this machine
+	lastTick time.Time               // when Tick last ran (zero before the first)
 	grace    func(ctx context.Context, l store.Link) time.Duration
+	online   func() bool // whether this machine's relay mailbox is live; nil means always
 }
 
 type linkKey struct {
@@ -61,8 +63,16 @@ func NewPresenceService(links store.LinkStore, peers store.PeerStore, closer Pre
 	}
 	return &PresenceService{
 		links: links, peers: peers, closer: closer, sender: sender, clock: clock, log: log,
-		fresh: map[linkKey]time.Time{}, pings: map[core.MachineID][]sentPing{},
+		fresh: map[linkKey]time.Time{}, pings: map[core.MachineID][]sentPing{}, pingLeft: map[core.MachineID]bool{},
 	}
+}
+
+// SetOnline tells the service how to see whether this machine's relay
+// mailbox is live. While it is not, silence proves nothing about a peer.
+func (p *PresenceService) SetOnline(online func() bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.online = online
 }
 
 // SetGrace sets how long a link may stay away before it closes (default
@@ -101,7 +111,11 @@ func elapsed(now, last time.Time) time.Duration {
 // the first time (new, or after a restart) gets the full timeout from now.
 // After a local sleep (more than two heartbeats since the last round) every
 // link gets the full timeout from now and nothing is closed this round:
-// the pings go out first.
+// the pings go out first. The same holds for a peer this machine could not
+// hear from: while its own mailbox is not live, and for a peer whose ping
+// of the last round did not leave (offline, or the relay refused it). Only
+// silence after a ping that left, while connected, counts against a link,
+// so a machine that is itself offline never closes its links.
 func (p *PresenceService) Tick(ctx context.Context) error {
 	active, err := p.links.ListLinks(ctx, store.LinkFilter{States: []store.LinkState{store.LinkActive}})
 	if err != nil {
@@ -112,19 +126,21 @@ func (p *PresenceService) Tick(ctx context.Context) error {
 	var silent, away []store.Link
 	p.mu.Lock()
 	slept := !p.lastTick.IsZero() && elapsed(now, p.lastTick) > sleepGap
+	offline := p.online != nil && !p.online()
 	p.lastTick = now
 	live := make(map[linkKey]bool, len(active))
 	for _, l := range active {
 		k := linkKey{l.Peer, l.ID}
 		live[k] = true
 		byPeer[l.Peer] = append(byPeer[l.Peer], l.ID)
+		blind := slept || offline || !p.pingLeft[l.Peer]
 		last, ok := p.fresh[k]
-		if !ok || slept {
+		if !ok || blind {
 			p.fresh[k] = now
 			last = now
 		}
 		switch {
-		case slept:
+		case blind:
 		case !l.PresenceAway.IsZero():
 			away = append(away, l)
 		case now.Sub(last) > core.PresenceTimeout:
@@ -139,6 +155,9 @@ func (p *PresenceService) Tick(ctx context.Context) error {
 	p.mu.Unlock()
 	if slept {
 		p.log.Info("presence: this machine was asleep; pinging before timing links out")
+	}
+	if offline {
+		p.log.Info("presence: this machine is not connected to the relay; not timing links out")
 	}
 	for _, l := range silent {
 		if err := p.markAway(ctx, l, now); err != nil {
@@ -157,6 +176,12 @@ func (p *PresenceService) Tick(ctx context.Context) error {
 			p.log.Warn("close link away too long", "link", l.Num, "err", err)
 		}
 	}
+	left := make(map[core.MachineID]bool, len(byPeer))
+	defer func() {
+		p.mu.Lock()
+		p.pingLeft = left
+		p.mu.Unlock()
+	}()
 	for id, ids := range byPeer {
 		peer, err := p.peers.GetPeer(ctx, id)
 		if err != nil || peer.Paused || peer.PausedByPeer {
@@ -171,8 +196,10 @@ func (p *PresenceService) Tick(ctx context.Context) error {
 		p.pings[id] = h
 		p.mu.Unlock()
 		if err := p.sender.SendDirect(ctx, peer, core.KindPresencePing, core.PresencePingBody{TS: ping.ts, LinkIDs: ids}); err != nil {
-			p.log.Debug("presence ping not sent", "peer", peer.Alias, "err", err)
+			p.log.Info("presence ping not sent; its silence will not count", "peer", peer.Alias, "err", err)
+			continue
 		}
+		left[id] = true
 	}
 	return nil
 }

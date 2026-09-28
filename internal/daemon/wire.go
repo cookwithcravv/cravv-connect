@@ -309,6 +309,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	})
 	g.presence = NewPresenceService(db, db, g.links, g.outbound, clock, d.log)
 	g.presence.SetGrace(presenceGrace(d.shared, db, offersNow{d}))
+	g.presence.SetOnline(func() bool { _, ok := d.Mailbox(); return ok })
 	g.versions = NewVersionNotices()
 	g.prekeys = NewPrekeyManager(db, db, id, g.outbound, clock)
 	g.files = NewFileService(FileDeps{

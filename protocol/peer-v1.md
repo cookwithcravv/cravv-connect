@@ -578,6 +578,11 @@ read from the link, and closes a managed session whose link it was.
 - A side that finds more than 60 seconds passed since its last heartbeat
   round (it slept) resets its evidence, pings, and closes nothing in that
   round.
+- Only silence after a ping that left counts. While a side's own relay
+  mailbox is not live, and for a peer whose ping of the last round could
+  not be sent, that side treats the round like a sleep for those links: it
+  resets their evidence and marks or closes nothing. A machine that is
+  itself offline therefore never times out its links.
 - Both kinds are ephemeral (section 4, step 5): a ping or pong older than
   120 seconds, or more than 10 minutes in the future, is ignored.
 
