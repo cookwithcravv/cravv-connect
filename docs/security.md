@@ -426,6 +426,11 @@ peer sends runs `claude -p` in that folder, with the prompt on stdin
   token, reading `~/.cravv-connect`, and editing your `~/.claude`
   settings. Choose it only for a machine you trust as much as yourself.
 
+In every run mode, files a run sends (`send_file`, files attached to a
+task result) must be inside the offer's folder. The folders you allowed
+with `cravv-connect allow-path` count for your own chats only, never for a
+run.
+
 How a run is contained (Claude Code 2.1.283 flags, checked by probes):
 
 | Run mode | Flags |

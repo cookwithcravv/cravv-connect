@@ -304,7 +304,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	g.versions = NewVersionNotices()
 	g.prekeys = NewPrekeyManager(db, db, id, g.outbound, clock)
 	g.files = NewFileService(FileDeps{
-		Blobs: func() transport.BlobStore { return d.blobs(id) }, Peers: db, Links: db, Files: db, Inbox: d.inbox,
+		Blobs: func() transport.BlobStore { return d.blobs(id) }, Peers: db, Links: db, Sessions: d.shared, Files: db, Inbox: d.inbox,
 		Sender: g.outbound, Guard: d.allow, FilesDir: d.opts.Paths.Files, Quota: d.opts.Config.PeerQuota,
 		Policy: PermissionPolicy{}, Clock: clock, Audit: lg, Log: d.log, RetryDelay: d.opts.FileRetryDelay,
 		Killed: d.kill.Killed,

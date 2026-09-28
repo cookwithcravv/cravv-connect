@@ -131,7 +131,7 @@ func d2FileSvc(t *testing.T, quota int64) *d2FileEnv {
 	t.Helper()
 	e := &d2FileEnv{te: d2Tasks(t, core.PermMessages), blobs: newD2Blobs(), filesDir: filepath.Join(t.TempDir(), "files"), project: t.TempDir(), free: 1 << 40}
 	e.files = NewFileService(FileDeps{
-		Blobs: func() transport.BlobStore { return e.blobs }, Peers: e.te.st, Links: e.te.st, Files: e.te.st, Inbox: e.te.inbox,
+		Blobs: func() transport.BlobStore { return e.blobs }, Peers: e.te.st, Links: e.te.st, Sessions: e.te.shared, Files: e.te.st, Inbox: e.te.inbox,
 		Sender: e.te.sender, Guard: NewAllowPaths(e.te.st, e.te.audit), FilesDir: e.filesDir, Quota: quota,
 		Clock: e.te.clock, Audit: e.te.audit,
 		FreeSpace: func(string) (uint64, error) { return e.free, nil },
@@ -271,6 +271,39 @@ func TestSendFileRefusesSecrets(t *testing.T) {
 	closed.State = store.LinkClosed
 	if _, err := e.files.SendFile(ctx, closed, e.project, "ok.txt", ""); !errors.Is(err, core.ErrLinkClosed) {
 		t.Fatalf("send on a closed link err = %v", err)
+	}
+}
+
+// A managed run sends from its offered folder only: the human's allow-path
+// roots do not count for it, and neither does the folder its caller names.
+func TestSendFileManagedSessionUsesOnlyItsFolder(t *testing.T) {
+	ctx := context.Background()
+	e := d2FileSvc(t, 0)
+	folder := t.TempDir()
+	os.WriteFile(filepath.Join(folder, "result.txt"), []byte("ok"), 0o600)
+	allowed := t.TempDir()
+	outside := filepath.Join(allowed, "notes.txt")
+	os.WriteFile(outside, []byte("private"), 0o600)
+	if err := e.files.d.Guard.(*AllowPaths).Add(ctx, allowed, true); err != nil {
+		t.Fatal(err)
+	}
+	managed, err := e.te.shared.CreateManaged(ctx, "trainer-ab12", "", folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := d2Link(t, e.te.st, e.te.peer, managed, "lead", core.PermMessages, core.PermMessages)
+	if _, err := e.files.SendFile(ctx, l, folder, outside, ""); !errors.Is(err, core.ErrPathRefused) {
+		t.Fatalf("managed run sent from an allow-path root: err = %v", err)
+	}
+	if _, err := e.files.SendFile(ctx, l, allowed, "notes.txt", ""); !errors.Is(err, core.ErrPathRefused) {
+		t.Fatalf("managed run sent from a folder its caller named: err = %v", err)
+	}
+	if _, err := e.files.SendFile(ctx, l, "", "result.txt", ""); err != nil {
+		t.Fatalf("managed run refused a file in its own folder: %v", err)
+	}
+	// The human's own session still gets the allow-path roots.
+	if _, err := e.files.SendFile(ctx, e.te.link, e.project, outside, ""); err != nil {
+		t.Fatalf("allow-path root refused for a human session: %v", err)
 	}
 }
 

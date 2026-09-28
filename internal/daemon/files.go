@@ -42,7 +42,10 @@ var (
 // a single hard link); info comes from fstat and the caller reads at most
 // info.Size() bytes and closes the file. Implemented by *AllowPaths.
 type OutboundChecker interface {
+	// Open allows projectDir and the human's allow-path roots.
 	Open(ctx context.Context, projectDir, path string) (*os.File, os.FileInfo, error)
+	// OpenInFolder allows folder only.
+	OpenInFolder(folder, path string) (*os.File, os.FileInfo, error)
 }
 
 // FileDeps are the FileService collaborators.
@@ -50,6 +53,7 @@ type FileDeps struct {
 	Blobs      func() transport.BlobStore // signed with the current identity
 	Peers      store.PeerStore
 	Links      LinkLookup
+	Sessions   SessionLookup // a managed session's files come from its folder only
 	Files      store.FileStore
 	Inbox      *InboxService
 	Sender     EnvelopeSender
@@ -178,7 +182,7 @@ func (s *FileService) SendFile(ctx context.Context, l store.Link, projectDir, pa
 	if l.State != store.LinkActive {
 		return core.FileRef{}, fmt.Errorf("link %d: %w", l.Num, core.ErrLinkClosed)
 	}
-	f, info, err := s.d.Guard.Open(ctx, projectDir, path)
+	f, info, err := s.open(ctx, l, projectDir, path)
 	if err != nil {
 		return core.FileRef{}, err
 	}
@@ -244,6 +248,20 @@ func (s *FileService) SendFile(ctx context.Context, l store.Link, projectDir, pa
 		return core.FileRef{}, err
 	}
 	return core.FileRef{FileID: rec.FileID, Name: rec.Name, Size: size}, nil
+}
+
+// open approves and opens path for sending on link l. A managed session
+// (a run nobody watches) may send from its offered folder only: never from
+// the human's allow-path roots, and never from a folder its caller names.
+func (s *FileService) open(ctx context.Context, l store.Link, projectDir, path string) (*os.File, os.FileInfo, error) {
+	sh, err := s.d.Sessions.Get(ctx, l.Session)
+	if err != nil {
+		return nil, nil, err
+	}
+	if sh.Kind == core.SessionManaged {
+		return s.d.Guard.OpenInFolder(sh.ProjectDir, path)
+	}
+	return s.d.Guard.Open(ctx, projectDir, path)
 }
 
 // upload streams at most rec.Size bytes of f, which the guard opened and

@@ -97,6 +97,12 @@ func (a *AllowPaths) Check(ctx context.Context, projectDir, path string) (string
 	return pathguard.NewOutbound(roots).Check(projectDir, path)
 }
 
+// OpenInFolder is Open without the extra roots: only files inside folder.
+// A managed run sends from its offered folder and nowhere else.
+func (a *AllowPaths) OpenInFolder(folder, path string) (*os.File, os.FileInfo, error) {
+	return pathguard.NewOutbound(nil).Open(folder, path)
+}
+
 // Open applies the same rules as Check and opens the approved file without
 // following symlinks, refusing a file with more than one hard link. The
 // caller reads at most info.Size() bytes and closes the file.
