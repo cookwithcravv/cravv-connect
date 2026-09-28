@@ -165,6 +165,9 @@ func (o *Outbound) SendDirect(ctx context.Context, peer store.Peer, kind core.Ki
 	if err != nil {
 		return err
 	}
+	if st == transport.SendUnknownMailbox {
+		return fmt.Errorf("%s has no mailbox on the relay yet (it may still be finishing pairing or setup)", peer.Alias)
+	}
 	if st != transport.SendQueued {
 		return fmt.Errorf("relay refused %s: %s", kind, st)
 	}
@@ -345,6 +348,28 @@ func (o *Outbound) waitForMailbox(ctx context.Context, peer store.Peer, it store
 
 func noMailboxDrop(id, alias string) string {
 	return fmt.Sprintf("dropped message %s: %s has no mailbox on this relay", id, alias)
+}
+
+// WithdrawUnsent deletes a message that is still waiting for the peer to
+// have a relay mailbox and reports whether it did: the message never left.
+// A message that is being sent, was sent, or waits for another reason is
+// left alone.
+func (o *Outbound) WithdrawUnsent(ctx context.Context, peer core.MachineID, msgID string) (bool, error) {
+	o.mu.Lock()
+	waiting := false
+	if w, ok := o.waiting[peer]; ok {
+		_, waiting = w.items[msgID]
+	}
+	o.mu.Unlock()
+	if !waiting {
+		return false, nil
+	}
+	deleted, err := o.outbox.DeleteIf(ctx, msgID, store.OutboxPending)
+	if err != nil || !deleted {
+		return false, err
+	}
+	o.unwait(peer, msgID)
+	return true, nil
 }
 
 // unwait forgets one waiting item.

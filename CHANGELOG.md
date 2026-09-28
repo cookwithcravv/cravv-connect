@@ -31,6 +31,10 @@ change behaviour or wire formats, and the notes say so.
 - A machine whose own relay connection is down no longer closes its links
   with `presence_timeout`: only silence after a ping that actually left,
   while connected, counts against a peer.
+- A peer that has no relay mailbox yet (just paired, or set up again) no
+  longer loses messages: they wait and go out once it has one, and status
+  says how many are waiting. A link request that never left before it timed
+  out is reported as "not sent: <alias> has no mailbox on the relay yet".
 
 ## v0.2.1 (2026-09-28)
 

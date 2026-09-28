@@ -305,7 +305,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	g.replies = NewLinkReplies(g.outbound, clock, d.log)
 	g.links = NewLinkService(LinkDeps{
 		Links: db, Sessions: d.shared, Peers: db, Directory: g.discover, Sender: g.outbound, Replies: g.replies,
-		Inbox: d.inbox, Desktop: d.opts.Desktop, Managed: d.host, Clock: clock, Audit: lg, Log: d.log,
+		Inbox: d.inbox, Desktop: d.opts.Desktop, Managed: d.host, Unsent: g.outbound, Clock: clock, Audit: lg, Log: d.log,
 	})
 	g.presence = NewPresenceService(db, db, g.links, g.outbound, clock, d.log)
 	g.presence.SetGrace(presenceGrace(d.shared, db, offersNow{d}))

@@ -139,3 +139,33 @@ func TestOutboundRelayInternalErrorIsRetried(t *testing.T) {
 		t.Fatalf("status after the retry = %s, want queued", st)
 	}
 }
+
+// A message still waiting for the peer's mailbox can be withdrawn; one that
+// went out cannot.
+func TestOutboundWithdrawUnsent(t *testing.T) {
+	ctx := context.Background()
+	f := newOutboundFixture(t)
+	peer := f.gpu.rec.MachineID
+	f.mb.statuses = unknownMailbox(1)
+	f.send(t, "waiting")
+	f.pass(t)
+	sent := f.send(t, "sent")
+	f.pass(t) // the relay has a mailbox now: both go out on this pass or the next
+	if ok, err := f.o.WithdrawUnsent(ctx, peer, sent); ok || err != nil {
+		t.Fatalf("withdrew a message that went out: %v %v", ok, err)
+	}
+
+	g := newOutboundFixture(t)
+	g.mb.statuses = unknownMailbox(10)
+	waiting := g.send(t, "waiting")
+	g.pass(t)
+	if ok, err := g.o.WithdrawUnsent(ctx, g.gpu.rec.MachineID, waiting); !ok || err != nil {
+		t.Fatalf("WithdrawUnsent = %v %v, want true", ok, err)
+	}
+	if _, ok := g.outbox.item(waiting); ok {
+		t.Fatal("the withdrawn message is still in the outbox")
+	}
+	if got := g.o.Errors(); len(got) != 0 {
+		t.Fatalf("errors after withdrawing = %q", got)
+	}
+}

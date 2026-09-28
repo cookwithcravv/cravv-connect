@@ -519,7 +519,11 @@ A pending request is decided once, on the receiving side, by a human:
 accepted (at the level asked or lower) or rejected (`declined`).
 Accepting at `messages` or `tasks-ask` takes a chat decision or the
 password; accepting at `tasks-auto` takes the password. A request pending
-for 10 minutes is rejected with `timeout`.
+for 10 minutes is rejected with `timeout`. On the sending side, a request
+whose `link.request` is still waiting for the peer to have a relay mailbox
+(section 4.1, `unknown_mailbox`) when it times out is taken out of the
+outbox, and the session is told `not sent: <alias> has no mailbox on the
+relay yet` instead.
 
 **Request to an offer.** With `offer_id` instead of `to_session_id`, the
 receiver checks the offer's rules, caps and concurrency limit, creates a

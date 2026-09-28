@@ -550,3 +550,60 @@ func TestDecideForIsScopedToTheSession(t *testing.T) {
 		t.Fatalf("the human's CLI accepts: %+v, %v", l, err)
 	}
 }
+
+// fakeUnsent is an UnsentWithdrawer whose messages are all still waiting.
+type fakeUnsent struct{ withdrawn []string }
+
+func (f *fakeUnsent) WithdrawUnsent(_ context.Context, _ core.MachineID, msgID string) (bool, error) {
+	f.withdrawn = append(f.withdrawn, msgID)
+	return true, nil
+}
+
+// A link request that never left (the peer has no relay mailbox yet) is not
+// reported as a bare timeout: the session learns it was not sent, and the
+// request is taken back so it does not arrive long after.
+func TestExpiredRequestThatNeverLeftSaysNotSent(t *testing.T) {
+	ctx := context.Background()
+	n, a, b := linkNet(t)
+	unsent := &fakeUnsent{}
+	a.links.d.Unsent = unsent
+	lead := shareOn(t, a, 1, "lead", core.Visibility{})
+	shareOn(t, b, 1, "trainer", core.Visibility{Mode: core.VisibilityAllPeers})
+	l, err := a.links.Connect(ctx, lead.Session.ID, b.name+"/trainer", core.PermMessages, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests := n.sent(core.KindLinkRequest)
+	if len(requests) != 1 {
+		t.Fatalf("%d link.request queued", len(requests))
+	}
+	n.clock.Advance(core.LinkRequestExpiry + time.Second)
+	if _, err := a.links.ExpireDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := "not sent: " + b.name + " has no mailbox on the relay yet"
+	if got := a.linkOf(t, b, l.ID); got.State != store.LinkClosed || got.Reason != want {
+		t.Fatalf("expired link = %+v, want closed %q", got, want)
+	}
+	if len(unsent.withdrawn) != 1 || unsent.withdrawn[0] != requests[0].env.ID {
+		t.Fatalf("withdrawn = %v, want the link.request %s", unsent.withdrawn, requests[0].env.ID)
+	}
+	items := a.notices(t, lead.Session.ID)
+	if len(items) == 0 || !strings.Contains(string(items[len(items)-1].Body), want) {
+		t.Fatalf("the session was not told: %+v", items)
+	}
+
+	// A request that did leave still expires as a plain timeout.
+	a.links.d.Unsent = nil
+	l2, err := a.links.Connect(ctx, lead.Session.ID, b.name+"/trainer", core.PermMessages, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.clock.Advance(core.LinkRequestExpiry + time.Second)
+	if _, err := a.links.ExpireDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.linkOf(t, b, l2.ID); got.Reason != core.RejectTimeout {
+		t.Fatalf("reason = %q, want %q", got.Reason, core.RejectTimeout)
+	}
+}

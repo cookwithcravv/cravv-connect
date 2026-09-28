@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/cookwithcravv/cravv-connect/internal/audit"
 	"github.com/cookwithcravv/cravv-connect/internal/core"
@@ -53,11 +52,7 @@ func (s *LinkService) connectOffer(ctx context.Context, sess store.SharedSession
 		LinkID: l.ID, FromSession: core.SessionRef{ID: sess.ID, Name: sess.Name, Purpose: sess.Purpose},
 		OfferID: offer.OfferID, ProposedPermission: proposed, Note: note,
 	}
-	if _, err := s.d.Sender.SendEnvelope(ctx, peer.MachineID, core.KindLinkRequest, "", body); err != nil {
-		_, _ = s.d.Links.UpdateLink(ctx, l.Peer, l.ID, func(x *store.Link) error {
-			x.State, x.Reason, x.ExpiresAt, x.UpdatedAt = store.LinkClosed, "not sent: "+err.Error(), time.Time{}, now
-			return nil
-		})
+	if err := s.sendRequest(ctx, l, body); err != nil {
 		return store.Link{}, err
 	}
 	s.record(audit.EvLinkRequest, peer, l, map[string]any{"direction": "out", "proposed": string(proposed), "offer": offer.Label})
