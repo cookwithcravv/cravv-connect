@@ -46,6 +46,7 @@ type services struct {
 	activity *PeerActivity
 	outbound *Outbound
 	inbound  *Inbound
+	limiter  *InboundLimiter
 	peers    *PeerService
 	discover *Discovery
 	replies  *LinkReplies

@@ -127,6 +127,9 @@ type InboxStore interface {
 	SessionUnreadGroups(ctx context.Context, session string, after int64) ([]UnreadGroup, error)
 	// DeleteSessionItems deletes the session's items from one link with seq > after.
 	DeleteSessionItems(ctx context.Context, session, linkID string, after int64) (int, error)
+	// LinkUnread counts the session's items from one link with seq > after
+	// and the total size of their bodies.
+	LinkUnread(ctx context.Context, session, linkID string, after int64) (items int, bytes int64, err error)
 }
 
 // UnreadGroup counts a session's unread items from one sender on one link

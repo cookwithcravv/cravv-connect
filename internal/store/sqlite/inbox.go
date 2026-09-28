@@ -132,6 +132,18 @@ WHERE to_session = ? AND seq > ? GROUP BY from_machine, link_id, kind ORDER BY M
 	return out, rows.Err()
 }
 
+// LinkUnread counts the session's items from one link after the cursor and
+// sums their body sizes.
+func (d *DB) LinkUnread(ctx context.Context, session, linkID string, after int64) (int, int64, error) {
+	var (
+		n     int
+		bytes int64
+	)
+	err := d.sql.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(LENGTH(body)), 0) FROM inbox
+WHERE to_session = ? AND link_id = ? AND seq > ?`, session, linkID, after).Scan(&n, &bytes)
+	return n, bytes, err
+}
+
 // DeleteSessionItems drops the session's unread items from one link.
 func (d *DB) DeleteSessionItems(ctx context.Context, session, linkID string, after int64) (int, error) {
 	if session == "" || linkID == "" {

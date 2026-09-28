@@ -210,7 +210,12 @@ each delivery:
       sender is told.
 
    The handler then works on that link's local session only, and takes the
-   peer's session from the link record.
+   peer's session from the link record. `chat` and `task.update` also
+   pass the link's inbound limits: at most 60 a minute (a token bucket of
+   120), and at most 1000 items or 32 MiB of bodies the local session has
+   not read yet. An item over either is dropped as a handler failure for
+   good: it is recorded and confirmed (steps 8 and 9), so the sender stops
+   resending it.
 8. **Record** `id` in the deduplication store. This happens only after the
    handler succeeded or failed for good, so a retryable failure leaves the
    message unrecorded and a redelivery runs the handler again. Handlers are

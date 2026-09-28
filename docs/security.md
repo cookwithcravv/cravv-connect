@@ -84,6 +84,12 @@ exact limits behind each claim. Protocol details are in
   - Its link requests wait for your decision. It may have at most 5
     pending and send at most 10 a minute; a request expires after 10
     minutes. It may list your sessions at most 30 times a minute.
+  - It cannot fill your disk through a link: each link may add at most 60
+    messages and task updates a minute here (up to 120 at once), and at
+    most 1000 items or 32 MiB its session has not read yet. Anything over
+    is dropped (and confirmed, so the sender stops resending it), written
+    to the audit log at most once a minute per link, and `status` says
+    "link N: <alias> is sending too fast, dropped K messages" for an hour.
   - On a `messages` link its tasks are rejected; on a `tasks-ask` link each
     task waits for a human here (expiring after 24 hours), and agents
     cannot read a held task's text: the chat gets a notice without it, and
