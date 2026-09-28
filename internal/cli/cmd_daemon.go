@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cookwithcravv/cravv-connect/internal/config"
 	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/cookwithcravv/cravv-connect/internal/logfile"
 	"github.com/spf13/cobra"
@@ -118,6 +119,16 @@ func newDaemonStartCmd(env *Env) *cobra.Command {
 // startDaemon starts the daemon (through the login service when installed,
 // else as a detached process) and waits until it answers.
 func startDaemon(ctx context.Context, env *Env) error {
+	paths, err := env.Paths()
+	if err != nil {
+		return err
+	}
+	// The daemon refuses to run without a relay: say so now, not after
+	// waiting for a daemon that cannot come up.
+	if _, err := config.LoadReady(paths); err != nil {
+		return err
+	}
+	var exited <-chan struct{} // nil (never ready) for the login service
 	if env.Service != nil && env.Service.Installed() {
 		if err := env.Service.Start(ctx); err != nil {
 			return err
@@ -127,13 +138,9 @@ func startDaemon(ctx context.Context, env *Env) error {
 		if err != nil {
 			return err
 		}
-		paths, err := env.Paths()
-		if err != nil {
-			return err
-		}
 		// The daemon rotates its own log; the spawn's output file only
 		// catches crash output.
-		if _, err := env.Spawn(exe, []string{"daemon", "run", "--log-file", paths.Log}, paths.StderrLog()); err != nil {
+		if exited, err = env.Spawn(exe, []string{"daemon", "run", "--log-file", paths.Log}, paths.StderrLog()); err != nil {
 			return err
 		}
 	}
@@ -142,9 +149,17 @@ func startDaemon(ctx context.Context, env *Env) error {
 		if daemonUp(ctx, env) {
 			return nil
 		}
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-exited:
+			if daemonUp(ctx, env) { // another daemon won the socket
+				return nil
+			}
+			return fmt.Errorf("the daemon exited while starting; see %s%s", paths.Log, stderrTail(paths.StderrLog()))
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
-	paths, _ := env.Paths()
 	return fmt.Errorf("daemon did not start within %s; see %s and %s%s", startWait, paths.Log, paths.StderrLog(),
 		stderrTail(paths.StderrLog()))
 }

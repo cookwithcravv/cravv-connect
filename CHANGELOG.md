@@ -44,6 +44,9 @@ change behaviour or wire formats, and the notes say so.
   the job again rather than kickstarting one that is going away, and start
   waits up to 15 seconds and shows the end of the daemon's stderr log when
   it gives up. On Linux, start clears a unit's failed state first.
+- `cravv-connect daemon start` on a machine that is not set up says to run
+  `cravv-connect setup` at once, and a daemon that exits while starting is
+  reported right away with its error output.
 
 ## v0.2.1 (2026-09-28)
 

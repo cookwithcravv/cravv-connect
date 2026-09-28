@@ -44,7 +44,8 @@ type Env struct {
 	Hostname     func() (string, error)
 	OpenSettings func(dbPath string) (store.SettingsStore, func() error, error)
 	RunDaemon    func(ctx context.Context, paths config.Paths, logger *slog.Logger) error
-	Spawn        func(exe string, args []string, logPath string) (pid int, err error)
+	// Spawn starts a detached process; exited is closed when it exits.
+	Spawn        func(exe string, args []string, logPath string) (exited <-chan struct{}, err error)
 	Executable   func() (string, error)
 	Service      ServiceManager
 	ServiceSetup ServiceInstaller  // installs the login service; nil when unsupported
@@ -91,19 +92,25 @@ func DefaultEnv() *Env {
 	return env
 }
 
-// spawnDetached starts exe in its own session with output appended to logPath.
-func spawnDetached(exe string, args []string, logPath string) (int, error) {
+// spawnDetached starts exe in its own session with output appended to
+// logPath. The returned channel is closed if the process exits while this
+// one still runs (it keeps running after this process exits).
+func spawnDetached(exe string, args []string, logPath string) (<-chan struct{}, error) {
 	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer logf.Close()
 	cmd := exec.Command(exe, args...)
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
-		return 0, err
+		return nil, err
 	}
-	pid := cmd.Process.Pid
-	return pid, cmd.Process.Release()
+	exited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(exited)
+	}()
+	return exited, nil
 }

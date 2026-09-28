@@ -66,6 +66,54 @@ func TestDaemonStopWithServiceWaitsForTheProcess(t *testing.T) {
 	}
 }
 
+// On a machine that is not set up, start says what to do at once instead of
+// spawning a daemon that cannot run and waiting for it.
+func TestDaemonStartOnAMachineThatIsNotSetUp(t *testing.T) {
+	fd := newFakeDaemon(t)
+	env, _, errb := fd.env(&fakePrompter{}, "")
+	spawned := false
+	env.Executable = func() (string, error) { return "/usr/local/bin/cravv-connect", nil }
+	env.Spawn = func(string, []string, string) (<-chan struct{}, error) {
+		spawned = true
+		return make(chan struct{}), nil
+	}
+	start := time.Now()
+	if code := Main([]string{"daemon", "start"}, env); code == 0 {
+		t.Fatal("start succeeded without a config")
+	}
+	if spawned || time.Since(start) > 2*time.Second {
+		t.Fatalf("spawned %v after %v", spawned, time.Since(start))
+	}
+	if !strings.Contains(errb.String(), "run `cravv-connect setup`") {
+		t.Fatalf("stderr = %q", errb.String())
+	}
+}
+
+// A spawned daemon that exits while starting is reported at once, with its
+// stderr, instead of after the whole start wait.
+func TestDaemonStartReportsAnEarlyExit(t *testing.T) {
+	fd := newFakeDaemon(t)
+	fd.setUp(t)
+	os.WriteFile(filepath.Join(fd.home, "daemon-stderr.log"), []byte("error: open store: disk I/O error\n"), 0o600)
+	env, _, errb := fd.env(&fakePrompter{}, "")
+	env.Executable = func() (string, error) { return "/usr/local/bin/cravv-connect", nil }
+	env.Spawn = func(string, []string, string) (<-chan struct{}, error) {
+		exited := make(chan struct{})
+		close(exited)
+		return exited, nil
+	}
+	start := time.Now()
+	if code := Main([]string{"daemon", "start"}, env); code == 0 {
+		t.Fatal("start succeeded")
+	}
+	if waited := time.Since(start); waited > 3*time.Second {
+		t.Fatalf("waited %v for a daemon that had exited", waited)
+	}
+	if msg := errb.String(); !strings.Contains(msg, "exited while starting") || !strings.Contains(msg, "disk I/O error") {
+		t.Fatalf("stderr = %q", msg)
+	}
+}
+
 // setUp writes a config with a relay, like `cravv-connect setup` does.
 func (fd *fakeDaemon) setUp(t *testing.T) {
 	t.Helper()

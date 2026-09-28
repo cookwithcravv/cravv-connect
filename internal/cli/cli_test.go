@@ -375,6 +375,7 @@ func (s *fakeService) Stop(context.Context) error  { s.stopped = true; return ni
 
 func TestDaemonStartUsesServiceOrSpawn(t *testing.T) {
 	fd := newFakeDaemon(t)
+	fd.setUp(t)
 	fd.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, ipc.StatusResult{Version: BuildVersion()})
 	// Not running yet: the service start is followed by a status probe. Start
 	// serving only when Start is called.
@@ -390,15 +391,16 @@ func TestDaemonStartUsesServiceOrSpawn(t *testing.T) {
 	}
 
 	fd2 := newFakeDaemon(t)
+	fd2.setUp(t)
 	fd2.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, ipc.StatusResult{})
 	env3, out3, _ := fd2.env(&fakePrompter{}, "")
 	var spawned []string
 	env3.Executable = func() (string, error) { return "/usr/local/bin/cravv-connect", nil }
-	env3.Spawn = func(exe string, args []string, logPath string) (int, error) {
+	env3.Spawn = func(exe string, args []string, logPath string) (<-chan struct{}, error) {
 		spawned = append([]string{exe}, args...)
 		spawned = append(spawned, filepath.Base(logPath))
 		fd2.start()
-		return 4242, nil
+		return make(chan struct{}), nil
 	}
 	if code := Main([]string{"daemon", "start"}, env3); code != 0 || out3.String() != "Daemon started.\n" {
 		t.Fatalf("spawn: %q", out3.String())

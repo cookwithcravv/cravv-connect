@@ -23,12 +23,9 @@ import (
 // the desktop notifier and the identity store. version is the binary's
 // version, which status reports (so a newer CLI can restart an older daemon).
 func Run(ctx context.Context, paths config.Paths, logger *slog.Logger, version string) error {
-	cfg, err := config.Load(paths)
+	cfg, err := config.LoadReady(paths)
 	if err != nil {
-		return fmt.Errorf("load config (run `cravv-connect init` first): %w", err)
-	}
-	if cfg.RelayURL == "" {
-		return errors.New("no relay_url in config.toml: run `cravv-connect init --relay <url>`")
+		return err
 	}
 	clock := core.SystemClock{}
 	d, err := daemon.New(daemon.Options{Paths: paths, Config: cfg, Version: version, Clock: clock, Log: logger})

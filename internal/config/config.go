@@ -93,6 +93,23 @@ func Defaults() Config {
 // Unknown keys are ignored; malformed lines are errors naming the line.
 // A peer_quota <= 0 is an error. A pam_service that is set but not allowlisted by auth is an error
 // matching auth.ErrServiceNotAllowed.
+// ErrNotSetUp is returned by LoadReady when this machine has no relay yet.
+var ErrNotSetUp = errors.New("cravv-connect is not set up on this machine: run `cravv-connect setup` " +
+	"(or `cravv-connect init --relay <url>`)")
+
+// LoadReady loads the config and checks that the daemon can run with it:
+// a relay is configured. Anything else wraps ErrNotSetUp.
+func LoadReady(p Paths) (Config, error) {
+	c, err := Load(p)
+	if err != nil {
+		return Config{}, fmt.Errorf("%w: %v", ErrNotSetUp, err)
+	}
+	if c.RelayURL == "" {
+		return Config{}, ErrNotSetUp
+	}
+	return c, nil
+}
+
 func Load(p Paths) (Config, error) {
 	c := Defaults()
 	data, err := os.ReadFile(p.Config)
