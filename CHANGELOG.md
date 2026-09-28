@@ -4,7 +4,7 @@ All notable changes to cravv-connect. Versions follow
 [semantic versioning](https://semver.org); before 1.0, a minor version may
 change behaviour or wire formats, and the notes say so.
 
-## Unreleased
+## v0.2.2 (2026-09-28)
 
 ### Added
 
