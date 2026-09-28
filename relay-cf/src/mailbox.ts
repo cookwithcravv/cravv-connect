@@ -29,9 +29,10 @@ import {
   type Frame,
   type SendStatus,
 } from "./protocol";
-import { Meta, Queue } from "./queue";
+import { META_DDL, Meta, QUEUE_DDL, Queue } from "./queue";
 import { REGISTRY_NAME, type InviteResult } from "./registry";
 import { describeError, retryOnce } from "./rpc";
+import { Schema } from "./schema";
 
 export type BlobReservation = "ok" | "quota" | "count";
 
@@ -56,13 +57,27 @@ const ROOM_CREATE_ATTEMPTS = 16;
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 const MAX_ID_CHARS = 128;
 
+const MAILBOX_DDL = [
+  META_DDL,
+  QUEUE_DDL,
+  "CREATE TABLE IF NOT EXISTS allow (mailbox_id TEXT PRIMARY KEY)",
+  `CREATE TABLE IF NOT EXISTS blob_usage (
+    blob_id TEXT PRIMARY KEY,
+    size INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  )`,
+];
+
 // Mailbox is one SQLite-backed Durable Object per mailbox id. It owns the queue, the allow-list
-// (keyed by sender mailbox id), the seq counter, and this member's blob quota accounting, and
-// holds at most one live WebSocket (hibernation API).
+// (keyed by sender mailbox id), the seq counter, and this member's blob quota accounting,
+// and holds at most one live WebSocket (hibernation API). Its tables are created when the
+// mailbox registers (or on its first write, for objects created by older versions), so an
+// unregistered key stores nothing.
 export class Mailbox extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private readonly limits: Limits;
   private readonly ops: Record<string, Op>;
+  private readonly schema: Schema;
   private readonly meta: Meta;
   private readonly queue: Queue;
   private chain: Promise<void> = Promise.resolve();
@@ -75,14 +90,9 @@ export class Mailbox extends DurableObject<Env> {
     this.limits = readLimits(env);
     this.tokens = this.limits.requestBurst;
     this.refilledAt = Date.now();
+    this.schema = new Schema(this.sql, "meta", MAILBOX_DDL);
     this.meta = new Meta(this.sql);
     this.queue = new Queue(this.sql, this.meta, this.limits);
-    this.sql.exec("CREATE TABLE IF NOT EXISTS allow (mailbox_id TEXT PRIMARY KEY)");
-    this.sql.exec(`CREATE TABLE IF NOT EXISTS blob_usage (
-      blob_id TEXT PRIMARY KEY,
-      size INTEGER NOT NULL,
-      expires_at INTEGER NOT NULL
-    )`);
     this.ops = {
       allow: (ws, _a, f, rid) => this.opAllow(ws, f, rid, true),
       deny: (ws, _a, f, rid) => this.opAllow(ws, f, rid, false),
@@ -251,6 +261,7 @@ export class Mailbox extends DurableObject<Env> {
       }
       return;
     }
+    this.schema.ensure();
     this.meta.set("registered", "1");
     ws.send(resFrame(rid, { status: Status.OK }));
     this.activate(ws, a);
@@ -268,6 +279,7 @@ export class Mailbox extends DurableObject<Env> {
 
   // Marks ws as the single live connection, closes older ones, and pushes the backlog.
   private activate(ws: WebSocket, a: Attachment): void {
+    this.schema.ensure();
     this.meta.set("live", a.connId);
     for (const other of this.ctx.getWebSockets()) {
       if (other === ws) continue;
@@ -407,6 +419,7 @@ export class Mailbox extends DurableObject<Env> {
 
   async enqueue(fromIk: string, fromMailbox: string, id: string, frame: string, size: number): Promise<SendStatus> {
     if (!this.isRegistered()) return Status.UNKNOWN_MAILBOX;
+    this.schema.ensure();
     if (this.sql.exec("SELECT 1 FROM allow WHERE mailbox_id = ?", fromMailbox).toArray().length === 0) {
       return Status.NOT_ALLOWED;
     }
@@ -429,14 +442,15 @@ export class Mailbox extends DurableObject<Env> {
   // ---------- RPC: called by the blob handlers and BlobMeta ----------
 
   // The persisted registered flag. Blob requests check membership here, in the caller's own
-  // mailbox, instead of in the global Registry.
+  // mailbox, instead of in the global Registry. Read only, so asking stores nothing.
   isRegistered(): boolean {
-    return this.meta.get("registered") === "1";
+    return this.schema.exists() && this.meta.get("registered") === "1";
   }
 
   // Reserves a new blob against this member's quota (relay-v1 6.2) and live-blob cap.
-  // Expired reservations never count.
+  // Expired reservations never count. Callers check isRegistered first.
   reserveBlob(blobId: string, size: number, expiresAt: number): BlobReservation {
+    this.schema.ensure();
     this.sql.exec("DELETE FROM blob_usage WHERE expires_at <= ?", Date.now());
     const row = this.sql
       .exec<{ n: number; used: number }>("SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS used FROM blob_usage")
@@ -453,12 +467,15 @@ export class Mailbox extends DurableObject<Env> {
   }
 
   releaseBlob(blobId: string): void {
+    if (!this.schema.exists()) return;
+    this.schema.ensure();
     this.sql.exec("DELETE FROM blob_usage WHERE blob_id = ?", blobId);
   }
 
   // ---------- TTL ----------
 
   async alarm(): Promise<void> {
+    if (!this.schema.exists()) return;
     const now = Date.now();
     this.queue.dropExpired(now);
     const oldest = this.queue.oldest();

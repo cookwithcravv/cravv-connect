@@ -435,6 +435,16 @@ describe("internal errors", () => {
     cb.close();
     cx.close();
   });
+
+  it("a failure during the handshake still sends a fixed error and closes", async () => {
+    const id = await Identity.create();
+    await runInDurableObject(testEnv.MAILBOX.getByName(id.mailboxId), (_inst, state) => {
+      state.storage.sql.exec("CREATE TABLE meta (broken INTEGER)");
+    });
+    const { conn, authOk } = await handshake(id);
+    expect(authOk).toEqual({ t: "error", code: "internal", message: "internal error" });
+    await conn.waitClosed();
+  });
 });
 
 describe("retryOnce", () => {

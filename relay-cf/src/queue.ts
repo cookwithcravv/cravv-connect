@@ -1,10 +1,20 @@
 import type { Limits } from "./limits";
 
+// Tables of a Mailbox DO's meta and queue. The Mailbox creates them on its first write
+// (see schema.ts); Meta and Queue assume they exist.
+export const META_DDL = "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)";
+export const QUEUE_DDL = `CREATE TABLE IF NOT EXISTS queue (
+  seq INTEGER PRIMARY KEY,
+  from_ik TEXT NOT NULL,
+  id TEXT NOT NULL,
+  frame TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+)`;
+
 // Meta is a tiny key/value table inside a Mailbox DO (registered flag, seq counter, ...).
 export class Meta {
-  constructor(private readonly sql: SqlStorage) {
-    sql.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
-  }
+  constructor(private readonly sql: SqlStorage) {}
 
   get(key: string): string | undefined {
     const rows = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key).toArray();
@@ -30,16 +40,7 @@ export class Queue {
     private readonly sql: SqlStorage,
     private readonly meta: Meta,
     private readonly limits: Limits,
-  ) {
-    sql.exec(`CREATE TABLE IF NOT EXISTS queue (
-      seq INTEGER PRIMARY KEY,
-      from_ik TEXT NOT NULL,
-      id TEXT NOT NULL,
-      frame TEXT NOT NULL,
-      size INTEGER NOT NULL,
-      created_at INTEGER NOT NULL
-    )`);
-  }
+  ) {}
 
   // Removes frames older than the queue TTL.
   dropExpired(now: number): void {
