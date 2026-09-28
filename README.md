@@ -87,7 +87,7 @@ cgo:
   on Debian and Ubuntu, `sudo dnf install gcc pam-devel` on Fedora).
 
 ```sh
-git clone <this repository> cravv-connect
+git clone https://github.com/cookwithcravv/cravv-connect.git
 cd cravv-connect
 make build            # bin/cravv-connect (cgo), bin/cravv-relay, bin/cravv-conformance
 sudo install bin/cravv-connect /usr/local/bin/
@@ -100,36 +100,51 @@ check, so the binary the daemon runs is the one that needs cgo.
 
 ## Quick start
 
-**Joining someone who already uses cravv-connect?** You do not need a relay
-of your own. Install Claude Code first, then install cravv-connect (above),
-ask them to run `cravv-connect pair` and send you the join code it prints
-(it works once, for 10 minutes), and run:
+You run your own relay: a small Cloudflare Worker on your own Cloudflare
+account (the free plan is enough). Nobody else's relay is involved, and
+cravv-connect has no default one. Install Claude Code (and Codex, if you use
+it) before `setup`, so it can add cravv-connect to them; if you install one
+later, run `cravv-connect install claude` (or `codex`).
+
+### 0. Deploy your relay (once)
+
+You need [Node.js](https://nodejs.org) 22 or newer and a free
+[Cloudflare account](https://dash.cloudflare.com/sign-up). In the Cloudflare
+dashboard, first:
+
+1. **Enable R2:** open R2 Object Storage and accept the plan (the free tier
+   is enough).
+2. **Create your workers.dev subdomain:** open Compute (Workers), then
+   Workers & Pages; opening it the first time creates the subdomain.
+
+Then, on any machine:
 
 ```sh
-cravv-connect setup --join 'cravv-join:...'
+git clone https://github.com/cookwithcravv/cravv-connect.git
+cravv-connect/relay-cf/scripts/deploy.sh
 ```
 
-On a Linux machine you reach over SSH, also run `loginctl enable-linger $USER`
-so the daemon keeps running after you log out. Then restart Claude Code and
-type `/cravv` in a chat (step 3 below).
-
-**Starting fresh?** Deploy a relay once ([relay-cf/README.md](relay-cf/README.md),
-about 10 minutes on a free Cloudflare account), then follow the steps below.
-Install Claude Code (and Codex, if you use it) before `setup`, so it can add
-cravv-connect to them; if you install one later, run
-`cravv-connect install claude` (or `codex`).
+The script logs wrangler in to your Cloudflare account (a browser opens),
+creates the R2 bucket, generates the relay's admin token into
+`~/.cravv-relay-admin-token` (it never appears on screen), deploys the
+relay, waits until it answers, and prints the command for step 1. Run it
+again at any time to update the relay; it only redoes what is missing. The
+details are in [relay-cf/README.md](relay-cf/README.md).
 
 ### 1. Set up the first machine
 
-```sh
-cravv-connect setup
-```
-
-With the Cloudflare relay you deployed, you can give the relay and its admin
-token up front (the token is read from the private file, not typed):
+Run the command the deploy script printed. It gives setup your relay and its
+admin token (read from the private file, not typed):
 
 ```sh
 cravv-connect setup --relay https://cravv-relay.<subdomain>.workers.dev --relay-token - < ~/.cravv-relay-admin-token
+```
+
+If the token file is on another machine, run plain setup and paste the
+relay URL and the token when it asks:
+
+```sh
+cravv-connect setup
 ```
 
 The wizard walks through:
@@ -172,7 +187,10 @@ asks first). Without questions:
 
 ### 2. Set up every other machine
 
-Install as above, then use the join code the first machine shows:
+Every other machine uses the same relay, and needs neither the repository
+nor the admin token. Install as above, then use the join code the first
+machine shows (run `cravv-connect pair` on it for a new code). This is also
+how someone else joins your machines: send them the code.
 
 ```sh
 cravv-connect setup --join cravv-join:nb2hi4dthixs64tfnrqxsltfpbqw24dmmuxgg33n:7K3F-9QXMTR2A
@@ -414,9 +432,11 @@ Linux `login`, the default, or `system-auth`; any other value is refused).
 
 ### Relays
 
-For real use, deploy the Cloudflare relay once: follow
-[relay-cf/README.md](relay-cf/README.md). You end up with a URL such as
-`https://cravv-relay.<account>.workers.dev` and an admin token.
+For real use, deploy the Cloudflare relay to your own account with
+`relay-cf/scripts/deploy.sh` (step 0 of the quick start;
+[relay-cf/README.md](relay-cf/README.md) has the details). You end up with a
+URL such as `https://cravv-relay.<subdomain>.workers.dev` and an admin token
+in `~/.cravv-relay-admin-token`.
 
 For a local test on one machine (or a LAN), run the Go reference relay. It
 keeps everything in memory and loses it on exit:

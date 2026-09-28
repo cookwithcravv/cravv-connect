@@ -35,47 +35,37 @@ npm run dev         # wrangler dev on http://127.0.0.1:8787
 
 ## Deploy
 
-You need Node.js (for `npx`) and a Cloudflare account; the free plan is enough.
-Do these once in the Cloudflare dashboard first:
+Each cravv-connect user deploys this relay to their own Cloudflare account; the free plan is
+enough. You need Node.js 22 or newer. Do these once in the Cloudflare dashboard first:
 
 1. **Enable R2:** R2 Object Storage, then accept the plan (the free tier is
-   enough). Until R2 is enabled, `wrangler r2 bucket create` fails.
+   enough). Until R2 is enabled, creating the bucket fails.
 2. **Create your workers.dev subdomain:** open Compute (Workers), then
    Workers & Pages. Opening it the first time creates the subdomain (you can
    rename it there). Until it exists, `wrangler deploy` fails with
    "You need a workers.dev subdomain" (code 10063). The relay's URL will be
-   `https://cravv-relay.<subdomain>.workers.dev`. Renaming the subdomain later
-   changes that URL, and a new name can take a few minutes before it answers
-   over HTTPS; machines already set up must then move to the new URL
-   (`cravv-connect setup --reset --relay <new url>`, and pair again).
+   `https://cravv-relay.<subdomain>.workers.dev`.
 
 Then, from a clone of this repository:
 
 ```sh
-cd relay-cf
-npm ci
-npx wrangler login                        # opens a browser to authorize wrangler
-npx wrangler r2 bucket create cravv-relay-blobs
-npx wrangler r2 bucket lifecycle add cravv-relay-blobs expire-blobs blobs/ --expire-days 15
-
-# The admin token: generate it into a private file and hand it to Cloudflare
-# on stdin, so it never appears on screen or in your shell history.
-(umask 077; openssl rand -hex 32 > ~/.cravv-relay-admin-token)
-npx wrangler secret put ADMIN_TOKEN < ~/.cravv-relay-admin-token
-
-npx wrangler deploy --var PUBLIC_ORIGIN:https://cravv-relay.<subdomain>.workers.dev
-curl https://cravv-relay.<subdomain>.workers.dev/v1/health   # {"ok":true,"version":1}
+relay-cf/scripts/deploy.sh
 ```
 
-The lifecycle rule is a backstop: `BlobMeta` deletes chunks on `DELETE` and at the 7 day TTL,
-so R2 only keeps an object past 15 days if that cleanup failed. Check it with
-`npx wrangler r2 bucket lifecycle list cravv-relay-blobs`.
+The script is safe to run again, and running it again is also how you update the relay. It:
 
-`PUBLIC_ORIGIN` pins the relay origin that clients sign during auth (you can also put
-`[vars] PUBLIC_ORIGIN = "..."` in `wrangler.toml`). Without it the relay falls back to the origin of
-each request URL. Pass it again on every later `wrangler deploy`, or it is dropped.
-
-Set up the first machine on the relay (see the main README):
+1. installs the npm packages (`npm ci`) when they are missing or out of date;
+2. runs `wrangler login` if wrangler is not logged in (a browser opens);
+3. creates the `cravv-relay-blobs` R2 bucket and a lifecycle rule that expires
+   `blobs/` after 15 days, if they do not exist;
+4. generates the admin token into `~/.cravv-relay-admin-token` (mode 0600), unless that file
+   already exists; the token never appears on screen or in your shell history;
+5. deploys the Worker, learns its workers.dev URL from wrangler, and deploys again with
+   `PUBLIC_ORIGIN` pinned to that URL (it remembers the URL in `relay-cf/.relay-url`, which git
+   ignores, so later runs deploy once);
+6. hands the token to Cloudflare with `wrangler secret put ADMIN_TOKEN`, reading the file;
+7. waits for `/v1/health` (a new subdomain can take a few minutes to answer over HTTPS), and
+   prints the command for your first machine:
 
 ```sh
 cravv-connect setup --relay https://cravv-relay.<subdomain>.workers.dev --relay-token - < ~/.cravv-relay-admin-token
@@ -84,6 +74,21 @@ cravv-connect setup --relay https://cravv-relay.<subdomain>.workers.dev --relay-
 Every other machine joins with `cravv-connect setup --join <code>`: its invite arrives inside the
 encrypted pairing exchange, so the admin token is needed only once. Keep the token file private;
 it lets anyone register new machines on your relay.
+
+Overrides: `TOKEN_FILE` (another token file), `RELAY_URL` (when clients reach the relay at a
+custom domain rather than workers.dev), `HEALTH_TRIES` (60 tries, 5 seconds apart).
+
+If you rename the workers.dev subdomain later, the relay's URL changes: run the script again (it
+pins the new URL and says so), and move every machine with
+`cravv-connect setup --reset --relay <new url>`, then pair again.
+
+The lifecycle rule is a backstop: `BlobMeta` deletes chunks on `DELETE` and at the 7 day TTL,
+so R2 only keeps an object past 15 days if that cleanup failed. Check it with
+`npx wrangler r2 bucket lifecycle list cravv-relay-blobs`.
+
+`PUBLIC_ORIGIN` pins the relay origin that clients sign during auth. Without it the relay falls
+back to the origin of each request URL. A plain `npx wrangler deploy` drops it, so deploy with the
+script (or `npm run deploy`, which runs the script).
 
 ## Conformance against wrangler dev
 

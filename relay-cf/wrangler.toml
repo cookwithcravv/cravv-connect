@@ -39,8 +39,6 @@ simple = { limit = 600, period = 60 }
 # ADMIN_TOKEN is a secret: `npx wrangler secret put ADMIN_TOKEN` (production)
 # or a line in .dev.vars (local `wrangler dev`). It is never stored in this file.
 #
-# PUBLIC_ORIGIN is the origin clients sign during auth (relay-v1 section 1). Set it to the URL
-# clients use, for example with a [vars] table:
-#   [vars]
-#   PUBLIC_ORIGIN = "https://cravv-relay.<account>.workers.dev"
-# If unset, the relay falls back to the origin of the request URL.
+# PUBLIC_ORIGIN is the origin clients sign during auth (relay-v1 section 1). scripts/deploy.sh
+# passes it on every deploy (--var PUBLIC_ORIGIN:https://cravv-relay.<subdomain>.workers.dev),
+# so deploy with the script. If unset, the relay falls back to the origin of the request URL.

@@ -246,7 +246,8 @@ func (s *setup) chooseRelay() (string, string, error) {
 		if s.o.yes {
 			return "", "", errors.New("setup --yes needs --relay <url> on a machine that is not set up yet")
 		}
-		fmt.Fprintln(s.w, "cravv-connect talks through a relay. For real use, deploy the Cloudflare relay (relay-cf/README.md);")
+		fmt.Fprintln(s.w, "cravv-connect talks through a relay you run. For real use, deploy the Cloudflare relay to your own")
+		fmt.Fprintln(s.w, "account with relay-cf/scripts/deploy.sh from the repository (it prints the setup command to run next);")
 		fmt.Fprintln(s.w, "to try it on this network, this machine can run a test relay.")
 		a, err := s.env.Prompt.Line("Relay URL (press Enter to start a LAN test relay here)", "")
 		if err != nil {
