@@ -66,10 +66,15 @@ const MAILBOX_DDL = [
     size INTEGER NOT NULL,
     expires_at INTEGER NOT NULL
   )`,
+  // Live pairing rooms this member created, keyed by the room's token hash.
+  `CREATE TABLE IF NOT EXISTS room_usage (
+    room TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+  )`,
 ];
 
 // Mailbox is one SQLite-backed Durable Object per mailbox id. It owns the queue, the allow-list
-// (keyed by sender mailbox id), the seq counter, and this member's blob quota accounting,
+// (keyed by sender mailbox id), the seq counter, and this member's blob and room accounting,
 // and holds at most one live WebSocket (hibernation API). Its tables are created when the
 // mailbox registers (or on its first write, for objects created by older versions), so an
 // unregistered key stores nothing.
@@ -97,7 +102,7 @@ export class Mailbox extends DurableObject<Env> {
       allow: (ws, _a, f, rid) => this.opAllow(ws, f, rid, true),
       deny: (ws, _a, f, rid) => this.opAllow(ws, f, rid, false),
       invite_request: (ws, a, _f, rid) => this.opInvite(ws, a, rid),
-      room_create: (ws, _a, _f, rid) => this.opRoomCreate(ws, rid),
+      room_create: (ws, a, _f, rid) => this.opRoomCreate(ws, a, rid),
       send: (ws, a, f, rid) => this.opSend(ws, a, f, rid),
       register: async (ws, _a, _f, rid) => ws.send(resFrame(rid, { status: Status.OK })),
     };
@@ -351,16 +356,31 @@ export class Mailbox extends DurableObject<Env> {
     ws.send(resFrame(rid, { status: Status.OK, invite: r.invite }));
   }
 
-  private async opRoomCreate(ws: WebSocket, rid: string): Promise<void> {
+  // Messages are handled one at a time, so the cap check and the insert cannot interleave
+  // with another room_create on this mailbox.
+  private async opRoomCreate(ws: WebSocket, a: Attachment, rid: string): Promise<void> {
+    const now = Date.now();
+    this.schema.ensure();
+    this.sql.exec("DELETE FROM room_usage WHERE expires_at <= ?", now);
+    const live = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM room_usage").one().n;
+    if (live >= this.limits.maxRoomsPerMember) {
+      ws.send(resFrame(rid, { status: Status.ERROR, code: Code.RATE_LIMITED }));
+      return;
+    }
     for (let i = 0; i < ROOM_CREATE_ATTEMPTS; i++) {
       const nameplate = randomNameplate();
       const token = randomToken();
       const tokenHash = await sha256Hex(token);
       const created = await retryOnce(
         () => this.env.ROOM.getByName(nameplate),
-        (room) => room.init(tokenHash),
+        (room) => room.init(tokenHash, a.mailboxId),
       );
       if (created) {
+        this.sql.exec(
+          "INSERT OR REPLACE INTO room_usage (room, expires_at) VALUES (?, ?)",
+          tokenHash,
+          now + this.limits.roomTtlMs,
+        );
         ws.send(resFrame(rid, { status: Status.OK, nameplate, creator_token: token }));
         return;
       }
@@ -470,6 +490,16 @@ export class Mailbox extends DurableObject<Env> {
     if (!this.schema.exists()) return;
     this.schema.ensure();
     this.sql.exec("DELETE FROM blob_usage WHERE blob_id = ?", blobId);
+  }
+
+  // ---------- RPC: called by a Room DO when it burns ----------
+
+  // Frees the room's slot under the per-member cap. Expiry frees it too, so a missed call
+  // only delays that.
+  releaseRoom(room: string): void {
+    if (!this.schema.exists()) return;
+    this.schema.ensure();
+    this.sql.exec("DELETE FROM room_usage WHERE room = ?", room);
   }
 
   // ---------- TTL ----------

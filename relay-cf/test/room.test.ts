@@ -1,4 +1,4 @@
-import { runDurableObjectAlarm } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { b64encode } from "../src/crypto";
 import { Conn, frameB64, Identity, member, testEnv } from "./helpers";
@@ -153,5 +153,47 @@ describe("pairing rooms", () => {
     expect(await creator.next()).toMatchObject({ t: "error", code: "gone" });
     const late = await Conn.open(`/v1/pair/${nameplate}`);
     expect(await late.next()).toMatchObject({ t: "error", code: "not_found" });
+  });
+});
+
+describe("live rooms per member", () => {
+  async function fill(c: Conn): Promise<{ nameplate: string; token: string }[]> {
+    const rooms: { nameplate: string; token: string }[] = [];
+    for (let i = 0; i < 8; i++) {
+      const res = await c.request({ t: "room_create" });
+      expect(res.status).toBe("ok");
+      rooms.push({ nameplate: res.nameplate as string, token: res.creator_token as string });
+    }
+    expect(await c.request({ t: "room_create" })).toMatchObject({ t: "res", status: "error", code: "rate_limited" });
+    return rooms;
+  }
+
+  it("allows 8, then rate_limited; the cap is per member", async () => {
+    const c = await member(await Identity.create());
+    await fill(c);
+    const other = await member(await Identity.create());
+    expect((await other.request({ t: "room_create" })).status).toBe("ok");
+    c.close();
+    other.close();
+  });
+
+  it("a burned room frees its slot", async () => {
+    const c = await member(await Identity.create());
+    const [first] = await fill(c);
+    const creator = await openCreator(first.nameplate, first.token);
+    creator.close();
+    await expect.poll(async () => (await c.request({ t: "room_create" })).status).toBe("ok");
+    c.close();
+  });
+
+  it("an expired room no longer counts", async () => {
+    const id = await Identity.create();
+    const c = await member(id);
+    await fill(c);
+    await runInDurableObject(testEnv.MAILBOX.getByName(id.mailboxId), (_inst, state) => {
+      state.storage.sql.exec("UPDATE room_usage SET expires_at = ? WHERE room IN (SELECT room FROM room_usage LIMIT 1)", Date.now() - 1);
+    });
+    expect((await c.request({ t: "room_create" })).status).toBe("ok");
+    c.close();
   });
 });

@@ -13,6 +13,7 @@ export interface Limits {
   maxLiveBlobs: number;
   maxTotalBlobBytes: number;
   maxOutstandingInvites: number;
+  maxRoomsPerMember: number;
   requestBurst: number;
   requestRatePerSecond: number;
   maxFrameBytes: number;
@@ -39,6 +40,8 @@ export const DEFAULT_LIMITS: Limits = {
   maxTotalBlobBytes: 50 * 1024 * 1024 * 1024,
   // Unexpired invites one member may hold; more is res{status:"error", code:"rate_limited"}.
   maxOutstandingInvites: 20,
+  // Live pairing rooms one member may own; more is res{status:"error", code:"rate_limited"}.
+  maxRoomsPerMember: 8,
   requestBurst: 1000,
   requestRatePerSecond: 200,
   maxFrameBytes: 262144,

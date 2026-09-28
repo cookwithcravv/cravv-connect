@@ -104,7 +104,7 @@ describe("no tables left behind", () => {
 
   it("a room burned by a disconnect leaves no tables", async () => {
     const { nameplate, token } = await createRoom();
-    expect((await storageOf(testEnv.ROOM, nameplate)).tables).toEqual(["pending", "room", "sqlite_sequence"]);
+    expect((await storageOf(testEnv.ROOM, nameplate)).tables).toEqual(["owner", "pending", "room", "sqlite_sequence"]);
     const creator = await Conn.open(`/v1/pair/${nameplate}?token=${token}`);
     expect(await creator.next()).toEqual({ t: "waiting" });
     const joiner = await Conn.open(`/v1/pair/${nameplate}`);
@@ -144,7 +144,7 @@ describe("no tables left behind", () => {
 });
 
 describe("objects created by older versions", () => {
-  it("a mailbox created before tables were made lazily keeps working", async () => {
+  it("a mailbox whose tables predate room_usage keeps working", async () => {
     const old = await Identity.create();
     const peer = await Identity.create();
     await testEnv.REGISTRY.getByName("registry").register(old.mailboxId, ADMIN_TOKEN);
@@ -158,6 +158,7 @@ describe("objects created by older versions", () => {
     });
     const { conn, authOk } = await handshake(old);
     expect(authOk).toMatchObject({ t: "auth_ok", registered: true });
+    expect((await conn.request({ t: "room_create" })).status).toBe("ok");
     expect((await conn.request({ t: "allow", ik: peer.ikB64 })).status).toBe("ok");
     const cp = await member(peer);
     expect((await cp.request({ t: "send", to: old.mailboxId, id: "hi", frame: frameB64("hi") })).status).toBe("queued");
