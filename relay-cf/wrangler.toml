@@ -2,6 +2,12 @@ name = "cravv-relay"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 
+# Workers Logs: keeps the relay's own error logs (for example "mailbox: request failed" with the
+# exception) so a failure can be diagnosed after the fact. The relay logs only errors, never
+# frames, tokens or keys. View them in the dashboard (Workers & Pages, cravv-relay, Logs).
+[observability]
+enabled = true
+
 [[durable_objects.bindings]]
 name = "MAILBOX"
 class_name = "Mailbox"
