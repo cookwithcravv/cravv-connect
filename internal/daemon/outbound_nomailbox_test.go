@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -113,5 +114,28 @@ func TestOutboundUnknownMailboxForget(t *testing.T) {
 	}
 	if got := f.o.Errors(); len(got) != 0 {
 		t.Fatalf("errors after forget = %q", got)
+	}
+}
+
+// A relay's per-request internal error (res{status:"error",code:"internal"})
+// fails that send only: the item backs off and goes out on a later pass over
+// the same connection.
+func TestOutboundRelayInternalErrorIsRetried(t *testing.T) {
+	f := newOutboundFixture(t)
+	f.mb.sendErr = fmt.Errorf("relay: internal: %w", transport.ErrRelayInternal)
+	id := f.send(t, "hello")
+	f.pass(t)
+	it := f.status(t, id)
+	if it.Status != store.OutboxPending || it.Attempts != 1 || !it.NextAttempt.Equal(f.clock.Now().Add(time.Second)) {
+		t.Fatalf("after an internal error: %s attempts %d next +%v", it.Status, it.Attempts, it.NextAttempt.Sub(f.clock.Now()))
+	}
+	if mb, ok := f.slot.Mailbox(); !ok || mb != f.mb {
+		t.Fatal("the connection was dropped after an internal error")
+	}
+	f.mb.sendErr = nil
+	f.clock.Advance(time.Second)
+	f.pass(t)
+	if st := f.status(t, id).Status; st != store.OutboxQueued {
+		t.Fatalf("status after the retry = %s, want queued", st)
 	}
 }

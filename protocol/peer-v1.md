@@ -277,7 +277,7 @@ The relay's answer to `send` decides what happens:
 | `not_allowed` | Within 30 minutes of pairing: the peer has most likely not finalized yet (it has not allowed this machine on the relay); retry with backoff capped at 5 seconds and mark nothing. Later: the peer paused this machine: mark the peer "paused by peer" and hold every non-control item for it until `control.resumed`. Control items keep retrying with backoff |
 | `too_large` | Drop the item and report it in `status` (items for a peer that is no longer paired are dropped the same way) |
 | `unknown_mailbox` | The peer has no mailbox on this relay yet (it just paired or set up again): back off from 1 second, doubling per attempt, at most 30 minutes, and report in `status` how many items wait for it. Any other answer for that peer retries its waiting items at once. An item still waiting when it is 21 days old is dropped and reported |
-| `queue_full`, `rate_limited`, network error | Back off: 1 second, doubling per attempt, at most 5 minutes |
+| `queue_full`, `rate_limited`, `error` with code `internal`, network error | Back off: 1 second, doubling per attempt, at most 5 minutes. An `internal` answer fails that request only: the connection stays up |
 
 `control.delivered` deletes the confirmed items (only items addressed to the
 peer that sent the receipt). Items older than 21 days are purged. Receivers
