@@ -29,9 +29,17 @@ func init() {
 	ipc.RegisterErrorKind(errTestLocked, ipc.KindCodeLocked)
 }
 
-// Claude Code negotiates a protocol before 2026-07-28, on which a server
-// may elicit during a tool call (Phase 0 used this path).
-const claudeProto = "2025-11-25"
+// Older Claude Code versions negotiate a protocol before 2026-07-28, on
+// which a server elicits during a tool call (Phase 0 used this path); newer
+// ones negotiate 2026-07-28, on which the tool returns input requests
+// instead (SEP-2322) and the client asks the human, then calls again.
+const (
+	claudeProto = "2025-11-25"
+	modernProto = "2026-07-28"
+)
+
+// reviewProtos are the protocols every form test runs on.
+var reviewProtos = []string{claudeProto, modernProto}
 
 // reviewDaemon fakes the review methods and records the decisions and
 // code requests it gets.
@@ -149,23 +157,74 @@ func TestReviewPendingElicitationAnswers(t *testing.T) {
 			[]ipc.ReviewDecideParams{{Item: "link-3"}}, nil, "link-3: rejected"},
 		{"decline is not a decision", answering("decline", nil), nil, []string{"link-3"}, "4-digit code"},
 		{"cancel is not a decision", answering("cancel", nil), nil, []string{"link-3"}, "4-digit code"},
+	}
+	// On protocols before 2026-07-28 the server sees these answers and falls
+	// back; on 2026-07-28 the client refuses them before they reach the
+	// server (see TestReviewPendingClientRefusesBadAnswers).
+	oldOnly := []struct {
+		name     string
+		answer   func(*mcp.ElicitParams) (*mcp.ElicitResult, error)
+		decided  []ipc.ReviewDecideParams
+		codes    []string
+		contains string
+	}{
 		{"accept without a decision", answering("accept", map[string]any{}), nil, []string{"link-3"}, "4-digit code"},
 		{"a choice the form did not offer", answering("accept", map[string]any{"decision": "accept as tasks-auto"}), nil, []string{"link-3"}, "4-digit code"},
 		{"client error", func(*mcp.ElicitParams) (*mcp.ElicitResult, error) { return nil, fmt.Errorf("no ui") }, nil, []string{"link-3"}, "4-digit code"},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, proto := range reviewProtos {
+		all := cases
+		if proto == claudeProto {
+			all = append(slices.Clone(cases), oldOnly...)
+		}
+		for _, tc := range all {
+			t.Run(proto+"/"+tc.name, func(t *testing.T) {
+				d := newReviewDaemon(t, askItem)
+				h := &human{answer: tc.answer}
+				cs, _ := connectWith(t, d.daemonFake, "claude-code", Options{}, h.opts(), proto)
+				text, isErr := callTool(t, cs, "review_pending", nil)
+				decided, codes := d.got()
+				if isErr || !strings.Contains(text, tc.contains) || !slices.Equal(decided, tc.decided) || !slices.Equal(codes, tc.codes) {
+					t.Fatalf("text %q (err %v)\ndecided %+v\ncodes %v", text, isErr, decided, codes)
+				}
+				if forms := h.shown(); len(forms) != 1 || !strings.Contains(forms[0].Message, "gpu-box/trainer asks to link") ||
+					!strings.Contains(forms[0].Message, "note: train it") {
+					t.Fatalf("forms %+v", forms)
+				}
+			})
+		}
+	}
+}
+
+// On protocol 2026-07-28 the client validates the human's answer against
+// the form before sending it and reports a failed form as an error: nothing
+// is decided, and the next review_pending shows the form again instead of
+// waiting on the abandoned one.
+func TestReviewPendingClientRefusesBadAnswers(t *testing.T) {
+	bad := map[string]func(*mcp.ElicitParams) (*mcp.ElicitResult, error){
+		"accept without a decision":       answering("accept", map[string]any{}),
+		"a choice the form did not offer": answering("accept", map[string]any{"decision": "accept as tasks-auto"}),
+		"client error":                    func(*mcp.ElicitParams) (*mcp.ElicitResult, error) { return nil, fmt.Errorf("no ui") },
+	}
+	for name, answer := range bad {
+		t.Run(name, func(t *testing.T) {
 			d := newReviewDaemon(t, askItem)
-			h := &human{answer: tc.answer}
-			cs, _ := connectWith(t, d.daemonFake, "claude-code", Options{}, h.opts(), claudeProto)
-			text, isErr := callTool(t, cs, "review_pending", nil)
-			decided, codes := d.got()
-			if isErr || !strings.Contains(text, tc.contains) || !slices.Equal(decided, tc.decided) || !slices.Equal(codes, tc.codes) {
-				t.Fatalf("text %q (err %v)\ndecided %+v\ncodes %v", text, isErr, decided, codes)
+			h := &human{answer: answer}
+			cs, _ := connectWith(t, d.daemonFake, "claude-code", Options{}, h.opts(), modernProto)
+			_, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "review_pending", Arguments: map[string]any{}})
+			if err == nil {
+				t.Fatal("the client passed on an answer the form did not allow")
 			}
-			if forms := h.shown(); len(forms) != 1 || !strings.Contains(forms[0].Message, "gpu-box/trainer asks to link") ||
-				!strings.Contains(forms[0].Message, "note: train it") {
-				t.Fatalf("forms %+v", forms)
+			if decided, _ := d.got(); len(decided) != 0 {
+				t.Fatalf("decided %+v", decided)
+			}
+			h.answer = answering("accept", map[string]any{"decision": "reject"})
+			text, isErr := callTool(t, cs, "review_pending", nil)
+			if decided, _ := d.got(); isErr || !strings.Contains(text, "link-3: rejected") || len(decided) != 1 {
+				t.Fatalf("second call: %q (err %v), decided %+v", text, isErr, decided)
+			}
+			if forms := h.shown(); len(forms) != 2 {
+				t.Fatalf("forms shown %d, want 2 (the abandoned form is asked again)", len(forms))
 			}
 		})
 	}
@@ -175,6 +234,12 @@ func TestReviewPendingElicitationAnswers(t *testing.T) {
 // it), and a task's instructions reach only the human's form, never the
 // model.
 func TestReviewPendingTierAndTaskText(t *testing.T) {
+	for _, proto := range reviewProtos {
+		t.Run(proto, func(t *testing.T) { testTierAndTaskText(t, proto) })
+	}
+}
+
+func testTierAndTaskText(t *testing.T, proto string) {
 	d := newReviewDaemon(t, autoItem, taskItem)
 	h := &human{answer: func(p *mcp.ElicitParams) (*mcp.ElicitResult, error) {
 		if strings.Contains(p.Message, "sent a task") {
@@ -182,7 +247,7 @@ func TestReviewPendingTierAndTaskText(t *testing.T) {
 		}
 		return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"decision": "accept as tasks-ask"}}, nil
 	}}
-	cs, _ := connectWith(t, d.daemonFake, "claude-code", Options{}, h.opts(), claudeProto)
+	cs, _ := connectWith(t, d.daemonFake, "claude-code", Options{}, h.opts(), proto)
 	text, isErr := callTool(t, cs, "review_pending", nil)
 	if isErr || strings.Contains(text, "SECRET-TASK") {
 		t.Fatalf("model saw %q", text)
@@ -190,6 +255,10 @@ func TestReviewPendingTierAndTaskText(t *testing.T) {
 	forms := h.shown()
 	if len(forms) != 2 {
 		t.Fatalf("forms %d", len(forms))
+	}
+	// A round's forms may be shown in any order: put the link request first.
+	if strings.Contains(forms[0].Message, "sent a task") {
+		forms[0], forms[1] = forms[1], forms[0]
 	}
 	if c := choicesOf(t, forms[0]); !slices.Equal(c, []string{"accept as tasks-ask", "accept as messages", "reject"}) ||
 		!strings.Contains(forms[0].Message, "cravv-connect link accept 4") || !strings.Contains(forms[0].Message, "web UI (cravv-connect ui)") {
@@ -215,7 +284,7 @@ func TestReviewPendingWithoutForms(t *testing.T) {
 		proto string
 	}{
 		{"no elicitation capability", nil, claudeProto},
-		{"protocol 2026-07-28", (&human{answer: answering("accept", map[string]any{"decision": "accept"})}).opts(), ""},
+		{"no elicitation capability on 2026-07-28", nil, modernProto},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := newReviewDaemon(t, askItem)
@@ -272,6 +341,47 @@ func TestReviewPendingTypedAnswers(t *testing.T) {
 
 // One open form per item: a second call while the human has not answered
 // does not open another.
+// On protocol 2026-07-28 a parallel call gets its own round of forms, and
+// the first round's answer is still applied: nothing is lost or stuck.
+func TestReviewPendingParallelRoundsKeepAnswers(t *testing.T) {
+	d := newReviewDaemon(t, askItem)
+	release := make(chan struct{})
+	var calls sync.Mutex
+	n := 0
+	h := &human{answer: func(*mcp.ElicitParams) (*mcp.ElicitResult, error) {
+		calls.Lock()
+		n++
+		first := n == 1
+		calls.Unlock()
+		if first {
+			<-release // the first form stays on screen
+		}
+		return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"decision": "reject"}}, nil
+	}}
+	cs, _ := connectWith(t, d.daemonFake, "claude-code", Options{}, h.opts(), modernProto)
+	first := make(chan string, 1)
+	go func() {
+		text, _ := callTool(t, cs, "review_pending", nil)
+		first <- text
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(h.shown()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if text, _ := callTool(t, cs, "review_pending", nil); !strings.Contains(text, "link-3: rejected") {
+		t.Fatalf("parallel call: %q", text)
+	}
+	close(release)
+	if text := <-first; !strings.Contains(text, "link-3") {
+		t.Fatalf("first call lost its answer: %q", text)
+	}
+	if decided, _ := d.got(); len(decided) != 2 {
+		t.Fatalf("decided %+v, want both answers sent (the daemon refuses the second)", decided)
+	}
+}
+
+// On protocols before 2026-07-28 the form is shown within the call, and a
+// parallel call waits for it instead of showing a second one.
 func TestReviewPendingOneFormPerItem(t *testing.T) {
 	d := newReviewDaemon(t, askItem)
 	release := make(chan struct{})

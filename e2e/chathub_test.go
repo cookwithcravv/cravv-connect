@@ -22,6 +22,11 @@ type Human struct {
 	mu     sync.Mutex
 	script []func(*mcp.ElicitParams) *mcp.ElicitResult
 	forms  []*mcp.ElicitParams
+	// Proto is the MCP protocol the human's Claude Code speaks: before
+	// 2026-07-28 forms are elicited within the tool call; from 2026-07-28 the
+	// tool returns input requests and the client calls again (SEP-2322).
+	// Empty means the older protocol.
+	Proto string
 }
 
 // Answer queues answers.
@@ -98,8 +103,12 @@ func newClaudeAgent(t *testing.T, n *Node, chatID string, h *Human) (*mcpAgent, 
 	if h != nil {
 		opts = &mcp.ClientOptions{ElicitationHandler: h.handle}
 	}
+	proto := "2025-11-25"
+	if h != nil && h.Proto != "" {
+		proto = h.Proto
+	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "claude-code", Version: "1"}, opts)
-	cs, err := client.Connect(ctx, ct, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
+	cs, err := client.Connect(ctx, ct, &mcp.ClientSessionOptions{ProtocolVersion: proto})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,8 +148,17 @@ func (n *Node) listenFile(file string) <-chan CLIRun {
 // unhandled items going.
 func TestChatHubEndToEnd(t *testing.T) {
 	t.Parallel()
+	for _, proto := range []string{"2025-11-25", "2026-07-28"} {
+		t.Run(proto, func(t *testing.T) {
+			t.Parallel()
+			chatHubEndToEnd(t, proto)
+		})
+	}
+}
+
+func chatHubEndToEnd(t *testing.T, proto string) {
 	_, a, b := NewPair(t)
-	human := &Human{}
+	human := &Human{Proto: proto}
 	mb, bSeen := newClaudeAgent(t, b, "chat-bob", human)
 	ma, _ := newClaudeAgent(t, a, "chat-alice", nil)
 

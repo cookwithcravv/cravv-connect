@@ -2,11 +2,15 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cookwithcravv/cravv-connect/internal/ipc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -57,10 +61,23 @@ type reviewer struct {
 	mu      sync.Mutex
 	open    map[string]bool         // items with a form on screen
 	answers map[string]reviewAnswer // answered but not yet applied (single use)
+	rounds  map[string]reviewRound  // forms sent as input requests, by request state (single use)
+	now     func() time.Time
 }
 
+// reviewRound is one set of forms sent as input requests on protocol
+// 2026-07-28 or later (SEP-2322): the client asks the human, then calls
+// review_pending again with the answers and this round's request state.
+type reviewRound struct {
+	items   map[string]ipc.ReviewItemView
+	expires time.Time
+}
+
+// reviewRoundTTL bounds how long a round of forms waits for its answers.
+const reviewRoundTTL = 10 * time.Minute
+
 func (reviewPendingTool) Register(s *mcp.Server, c Caller) {
-	r := &reviewer{c: c, open: map[string]bool{}, answers: map[string]reviewAnswer{}}
+	r := &reviewer{c: c, open: map[string]bool{}, answers: map[string]reviewAnswer{}, rounds: map[string]reviewRound{}, now: time.Now}
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "review_pending",
 		Description: "Ask your human to decide link requests and tasks waiting on tasks-ask links: one form each. " +
@@ -70,9 +87,19 @@ func (reviewPendingTool) Register(s *mcp.Server, c Caller) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in reviewIn) (*mcp.CallToolResult, any, error) {
 		var text string
 		var err error
-		if in.Item != "" || in.Decision != "" || in.Code != "" {
+		switch {
+		case in.Item != "" || in.Decision != "" || in.Code != "":
 			text, err = r.typed(ctx, in)
-		} else {
+		case req.Params != nil && (req.Params.RequestState != "" || len(req.Params.InputResponses) > 0):
+			text, err = r.answered(ctx, req.Params.RequestState, req.Params.InputResponses)
+		case modernClient(req.Session) && canShowForms(req.Session):
+			var res *mcp.CallToolResult
+			if res, text, err = r.requestForms(ctx); res != nil {
+				return res, nil, nil
+			}
+		case modernClient(req.Session):
+			text, err = r.review(ctx, nil) // no forms: straight to the fallback
+		default:
 			text, err = r.review(ctx, req.Session)
 		}
 		if err != nil {
@@ -80,6 +107,129 @@ func (reviewPendingTool) Register(s *mcp.Server, c Caller) {
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil, nil
 	})
+}
+
+// modernClient reports whether the client speaks protocol 2026-07-28 or
+// later, on which a server may not elicit during a tool call: forms go out
+// as input requests instead (SEP-2322).
+func modernClient(ss *mcp.ServerSession) bool {
+	if ss == nil {
+		return false
+	}
+	ip := ss.InitializeParams()
+	return ip == nil || ip.ProtocolVersion >= "2026-07-28"
+}
+
+// canShowForms reports whether the client says it can show elicitation
+// forms. A client that says nothing is assumed able to (Claude Code
+// advertises the capability when it has it).
+func canShowForms(ss *mcp.ServerSession) bool {
+	ip := ss.InitializeParams()
+	return ip == nil || ip.Capabilities == nil || ip.Capabilities.Elicitation != nil
+}
+
+// requestForms returns one form per pending item as input requests. Items
+// with an answer cached from before are applied first, and if nothing needs
+// a form the text says what happened instead.
+func (r *reviewer) requestForms(ctx context.Context) (*mcp.CallToolResult, string, error) {
+	var list ipc.ReviewListResult
+	if err := r.c.Call(ctx, ipc.MethodReviewList, nil, &list); err != nil {
+		return nil, "", err
+	}
+	if len(list.Items) == 0 {
+		return nil, "Nothing is waiting for a decision.", nil
+	}
+	// Rounds do not hold items open: a round the client failed to show
+	// would otherwise block its items, and a round still on screen must not
+	// be dropped by a parallel call (its answer would be lost). An item asked
+	// in two rounds is decided once; the daemon refuses the second answer.
+	r.pruneRounds()
+	var lines []string
+	round := reviewRound{items: map[string]ipc.ReviewItemView{}}
+	requests := mcp.InputRequestMap{}
+	for _, it := range list.Items {
+		if ans, ok := r.take(it.Item); ok {
+			lines = append(lines, r.apply(ctx, it, ans))
+			continue
+		}
+		round.items[it.Item] = it
+		requests[it.Item] = formParams(it)
+	}
+	if len(requests) == 0 {
+		return nil, strings.Join(lines, "\n"), nil
+	}
+	if len(lines) > 0 {
+		// A result carries either content or input requests, never both:
+		// report what was applied and let the next call show the forms.
+		return nil, strings.Join(append(lines, "More items are waiting: call review_pending again to show their forms."), "\n"), nil
+	}
+	state, err := newRoundState()
+	if err != nil {
+		return nil, "", err
+	}
+	round.expires = r.now().Add(reviewRoundTTL)
+	r.mu.Lock()
+	r.rounds[state] = round
+	r.mu.Unlock()
+	return &mcp.CallToolResult{InputRequests: requests, RequestState: state}, "", nil
+}
+
+// answered applies the human's answers to a round of forms. Only answers
+// to that round's items count, and only a real answer: action accept with
+// a choice the form offered. Anything else falls back like a declined form.
+func (r *reviewer) answered(ctx context.Context, state string, responses mcp.InputResponseMap) (string, error) {
+	r.mu.Lock()
+	round, ok := r.rounds[state]
+	delete(r.rounds, state)
+	r.mu.Unlock()
+	if !ok || r.now().After(round.expires) {
+		return "Those forms expired or were already answered; call review_pending again.", nil
+	}
+	lines := make([]string, 0, len(round.items))
+	for _, item := range slices.Sorted(maps.Keys(round.items)) {
+		it := round.items[item]
+		ans, real := realAnswer(it, responses[item])
+		if real {
+			lines = append(lines, r.apply(ctx, it, ans))
+		} else {
+			lines = append(lines, r.fallback(ctx, it))
+		}
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// pruneRounds drops rounds whose forms were never answered in time.
+func (r *reviewer) pruneRounds() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for k, round := range r.rounds {
+		if r.now().After(round.expires) {
+			delete(r.rounds, k)
+		}
+	}
+}
+
+// realAnswer turns one form's response into a decision, if it is one.
+func realAnswer(it ipc.ReviewItemView, resp mcp.InputResponse) (reviewAnswer, bool) {
+	res, ok := resp.(*mcp.ElicitResult)
+	if !ok || res == nil || res.Action != "accept" {
+		return reviewAnswer{}, false
+	}
+	_, choices := formFor(it)
+	choice, _ := res.Content[decisionFieldName].(string)
+	if !slices.Contains(choices, choice) {
+		return reviewAnswer{}, false
+	}
+	return answerFor(it, choice), true
+}
+
+// newRoundState is an unguessable, single-use request state.
+func newRoundState() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // typed applies what the human typed in the chat.
@@ -140,8 +290,17 @@ func (r *reviewer) ask(ctx context.Context, ss *mcp.ServerSession, it ipc.Review
 	if ss == nil {
 		return reviewAnswer{}, false
 	}
+	res, err := ss.Elicit(ctx, formParams(it))
+	if err != nil {
+		return reviewAnswer{}, false
+	}
+	return realAnswer(it, res)
+}
+
+// formParams is the elicitation form for one item.
+func formParams(it ipc.ReviewItemView) *mcp.ElicitParams {
 	message, choices := formFor(it)
-	res, err := ss.Elicit(ctx, &mcp.ElicitParams{
+	return &mcp.ElicitParams{
 		Message: message,
 		RequestedSchema: map[string]any{
 			"type": "object",
@@ -150,15 +309,7 @@ func (r *reviewer) ask(ctx context.Context, ss *mcp.ServerSession, it ipc.Review
 			},
 			"required": []string{decisionFieldName},
 		},
-	})
-	if err != nil || res == nil || res.Action != "accept" {
-		return reviewAnswer{}, false
 	}
-	choice, _ := res.Content[decisionFieldName].(string)
-	if !slices.Contains(choices, choice) {
-		return reviewAnswer{}, false
-	}
-	return answerFor(it, choice), true
 }
 
 // formFor builds the form text shown to the human and its choices. The
