@@ -70,6 +70,24 @@ func ValidID(s string) bool {
 	return true
 }
 
+// IDTime returns the time encoded in an ID made by NewID or NewIDAt (to the
+// millisecond). ok is false for anything that is not such an ID.
+func IDTime(id string) (t time.Time, ok bool) {
+	if !ValidID(id) {
+		return time.Time{}, false
+	}
+	// The first 10 characters are 50 bits: 2 zero bits, then the 48-bit
+	// millisecond timestamp.
+	var ms uint64
+	for i := range 10 {
+		ms = ms<<5 | uint64(strings.IndexByte(crockford, id[i]))
+	}
+	if ms>>48 != 0 {
+		return time.Time{}, false
+	}
+	return time.UnixMilli(int64(ms)), true
+}
+
 // MaxBlobIDLen is the longest blob ID a relay may issue (relay-v1 section 6.2).
 const MaxBlobIDLen = 64
 

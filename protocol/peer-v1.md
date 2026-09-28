@@ -180,9 +180,13 @@ each delivery:
    4. `h.suite` is known;
    5. the private prekey `h.pk_id` exists (current or superseded and not yet
       purged). If it does not, reply with `control.stale_prekey` (section 5.3),
-      ack the delivery, and stop. The reply is sent at most once per sender and
+      ack the delivery, and stop. The reply is sent only when `h.id` is a valid
+      message ID (section 1) whose millisecond time passes the freshness check
+      of step 5 (otherwise the frame is dropped), at most once per sender and
       message ID (recorded in the deduplication store), so a relay redelivery
-      of the same frame does not trigger another resend;
+      of the same frame does not trigger another resend, and at most 10 times
+      per sender per minute (a frame over that gets no reply; its sender
+      resends it after the relay TTL);
    6. decrypt;
    7. the envelope has `v` 1 and its `id`, `from_machine`, `to_machine` equal the
       header's. This stops a valid signature from being stripped and replaced.

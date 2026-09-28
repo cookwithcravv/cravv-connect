@@ -395,6 +395,60 @@ func TestInboundStalePrekeyReplyOncePerMessage(t *testing.T) {
 	}
 }
 
+// A frame sealed to a prekey this machine no longer has gets no
+// control.stale_prekey when its (signed) message ID is older than
+// core.MaxMessageAge or too far in the future: a relay replaying old frames
+// cannot make this machine answer them.
+func TestInboundStalePrekeyReplyNeedsAFreshID(t *testing.T) {
+	f := newInboundFixture(t)
+	gone, err := keys.GeneratePrekey(testEpoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldID, oldRaw := f.frameFrom(t, f.gpu, testEpoch.Add(-core.MaxMessageAge-time.Hour), gone.Signed(f.me))
+	futureID, futureRaw := f.frameFrom(t, f.gpu, testEpoch.Add(core.MaxClockSkew+time.Hour), gone.Signed(f.me))
+	mb := f.run(t, transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: oldID, Frame: oldRaw},
+		transport.Delivery{Seq: 2, From: f.gpu.id.Public(), ID: futureID, Frame: futureRaw})
+	if sent := f.sender.ofKind(core.KindControlStalePrekey); len(sent) != 0 {
+		t.Fatalf("stale_prekey sent for an old or future ID: %+v", sent)
+	}
+	if got := mb.ackedSeqs(); !slices.Equal(got, []uint64{1, 2}) {
+		t.Fatalf("acks = %v", got)
+	}
+	if f.in.Dropped() != 2 {
+		t.Fatalf("dropped = %d, want 2", f.in.Dropped())
+	}
+}
+
+// control.stale_prekey replies are rate limited per peer.
+func TestInboundStalePrekeyReplyRateLimited(t *testing.T) {
+	f := newInboundFixture(t)
+	gone, err := keys.GeneratePrekey(testEpoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ds []transport.Delivery
+	for i := range core.StalePrekeyRepliesPerMinute + 5 {
+		id, raw := f.frameFrom(t, f.gpu, testEpoch, gone.Signed(f.me))
+		ds = append(ds, transport.Delivery{Seq: uint64(i + 1), From: f.gpu.id.Public(), ID: id, Frame: raw})
+	}
+	f.run(t, ds...)
+	if n := len(f.sender.ofKind(core.KindControlStalePrekey)); n != core.StalePrekeyRepliesPerMinute {
+		t.Fatalf("stale_prekey replies = %d, want %d", n, core.StalePrekeyRepliesPerMinute)
+	}
+	// Another peer has its own budget, and a minute later this one does again.
+	other := newTestPeer(t, "laptop")
+	mustPut(t, f.peers, other.rec)
+	id, raw := f.frameFrom(t, other, testEpoch, gone.Signed(f.me))
+	f.run(t, transport.Delivery{Seq: 100, From: other.id.Public(), ID: id, Frame: raw})
+	f.clock.Advance(time.Minute)
+	id, raw = f.frameFrom(t, f.gpu, f.clock.Now(), gone.Signed(f.me))
+	f.run(t, transport.Delivery{Seq: 101, From: f.gpu.id.Public(), ID: id, Frame: raw})
+	if n := len(f.sender.ofKind(core.KindControlStalePrekey)); n != core.StalePrekeyRepliesPerMinute+2 {
+		t.Fatalf("stale_prekey replies = %d, want %d", n, core.StalePrekeyRepliesPerMinute+2)
+	}
+}
+
 func TestInboundControlKindsGetNoReceipt(t *testing.T) {
 	f := newInboundFixture(t)
 	var got []core.Kind

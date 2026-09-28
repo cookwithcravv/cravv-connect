@@ -129,3 +129,17 @@ func TestValidBlobID(t *testing.T) {
 		}
 	}
 }
+
+func TestIDTime(t *testing.T) {
+	at := time.Date(2026, 9, 28, 12, 34, 56, 789_000_000, time.UTC)
+	id := NewIDAt(NewFakeClock(at))
+	got, ok := IDTime(id)
+	if !ok || !got.Equal(at) {
+		t.Fatalf("IDTime(%s) = %v, %v; want %v", id, got, ok, at)
+	}
+	for _, bad := range []string{"", "short", strings.Repeat("Z", IDLen), "01ARZ3NDEKTSV4RRFFQ69G5FA!"} {
+		if _, ok := IDTime(bad); ok {
+			t.Errorf("IDTime(%q) ok, want not an ID", bad)
+		}
+	}
+}

@@ -44,8 +44,10 @@ exact limits behind each claim. Protocol details are in
   messages older than 21 days or more than 10 minutes in the future are
   rejected, and tampered or re-signed frames fail verification. Frames from
   unknown or paused peers are dropped. A frame sealed to an unknown prekey
-  gets at most one `control.stale_prekey` reply per peer and message ID, and
-  only after its signature verifies. Presence and discovery frames older
+  gets at most one `control.stale_prekey` reply per peer and message ID,
+  only after its signature verifies, only when the time in its signed
+  message ID passes the same 21-day and 10-minute checks, and at most 10
+  such replies per peer a minute. Presence and discovery frames older
   than 120 seconds are ignored, so the relay cannot replay an old "the link
   is open". The relay never sees message contents, file contents, file
   names, aliases, session names, purposes, link notes or offer labels.

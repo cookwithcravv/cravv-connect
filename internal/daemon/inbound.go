@@ -52,6 +52,7 @@ type Inbound struct {
 	clock    core.Clock
 	killed   func() bool
 	logger   *slog.Logger
+	stale    *RateLimiter // control.stale_prekey replies per peer
 
 	dropped atomic.Int64 // corrupt, unverifiable, stale, or unroutable frames
 	skewed  atomic.Int64 // frames rejected for a timestamp too far in the future
@@ -72,6 +73,7 @@ func NewInbound(id *keys.Identity, peers store.PeerStore, dedup store.DedupStore
 	return &Inbound{
 		identity: id, peers: peers, dedup: dedup, prekeys: prekeys, registry: registry,
 		sender: sender, clock: clock, killed: killed, logger: logger,
+		stale:   NewRateLimiter(clock, core.StalePrekeyRepliesPerMinute, time.Minute),
 		receipt: make(map[core.MachineID][]string),
 	}
 }
@@ -142,6 +144,12 @@ func (in *Inbound) process(ctx context.Context, d transport.Delivery) error {
 	}
 	env, err := sealing.Open(frame, peer.IK, in.identity.MachineID(), in.prekeys)
 	if errors.Is(err, sealing.ErrUnknownPrekey) {
+		// Only the header is authenticated here: check its ID like an
+		// envelope's before answering, so replayed old frames get no reply.
+		if err := in.checkIDTime(frame.Header.ID); err != nil {
+			in.drop("frame for an unknown prekey", d, err)
+			return nil
+		}
 		in.replyStalePrekey(ctx, peer, frame.Header.ID)
 		return nil
 	}
@@ -214,21 +222,40 @@ func (in *Inbound) processEphemeral(ctx context.Context, peer store.Peer, env co
 }
 
 func (in *Inbound) checkTimestamp(env core.Envelope) error {
-	ts := time.UnixMilli(env.TS)
+	return in.checkTime(env.ID, time.UnixMilli(env.TS))
+}
+
+// checkIDTime applies checkTimestamp to the time a core ID encodes.
+func (in *Inbound) checkIDTime(id string) error {
+	ts, ok := core.IDTime(id)
+	if !ok {
+		return fmt.Errorf("message id %q is not a core ID", id)
+	}
+	return in.checkTime(id, ts)
+}
+
+// checkTime rejects message id sent at ts when it is older than
+// core.MaxMessageAge or further than core.MaxClockSkew in the future.
+func (in *Inbound) checkTime(id string, ts time.Time) error {
 	now := in.clock.Now()
 	if now.Sub(ts) > core.MaxMessageAge {
-		return fmt.Errorf("message %s is older than %s", env.ID, core.MaxMessageAge)
+		return fmt.Errorf("message %s is older than %s", id, core.MaxMessageAge)
 	}
 	if ts.Sub(now) > core.MaxClockSkew {
 		in.skewed.Add(1)
-		return fmt.Errorf("message %s is %s in the future", env.ID, ts.Sub(now).Round(time.Second))
+		return fmt.Errorf("message %s is %s in the future", id, ts.Sub(now).Round(time.Second))
 	}
 	return nil
 }
 
 // replyStalePrekey tells the sender which prekey to use, at most once per (peer, message ID):
 // the relay may redeliver the frame, and each reply would otherwise trigger another resend.
+// It answers at most core.StalePrekeyRepliesPerMinute frames per peer.
 func (in *Inbound) replyStalePrekey(ctx context.Context, peer store.Peer, msgID string) {
+	if !in.stale.Allow(string(peer.MachineID)) {
+		in.logger.Info("stale_prekey reply rate limited", "peer", peer.Alias, "id", msgID)
+		return
+	}
 	key := "stale:" + string(peer.MachineID) + ":" + msgID
 	if seen, err := in.dedup.SeenOrMark(ctx, key, in.clock.Now()); err != nil {
 		in.logger.Warn("stale_prekey dedup failed", "id", msgID, "err", err)
