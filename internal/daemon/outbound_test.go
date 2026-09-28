@@ -210,7 +210,8 @@ func TestOutboundStatusHandling(t *testing.T) {
 		{name: "rate limited", status: transport.SendRateLimited, wantPresent: true, wantStatus: store.OutboxPending, wantNext: time.Second},
 		{name: "transport error", sendErr: errBoom, wantPresent: true, wantStatus: store.OutboxPending, wantNext: time.Second},
 		{name: "too large", status: transport.SendTooLarge, wantErrors: 1},
-		{name: "unknown mailbox", status: transport.SendUnknownMailbox, wantErrors: 1},
+		// Retried until it expires (TestOutboundUnknownMailboxWaits); status says it waits.
+		{name: "unknown mailbox", status: transport.SendUnknownMailbox, wantPresent: true, wantStatus: store.OutboxPending, wantNext: time.Second, wantErrors: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
