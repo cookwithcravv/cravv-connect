@@ -10,13 +10,15 @@ import (
 
 func registerCases() []testCase {
 	return []testCase{
-		{"register/unregistered_op_rejected", func(t *testing.T, s *suite) {
-			id := s.tg.NewIdentity()
-			c := s.rawConnect(t, ikQuery(id))
-			c.auth(s.client.Origin(), c.hello(), id)
-			c.write(relayproto.InviteRequest{T: relayproto.TypeInviteRequest, RID: "1"})
-			c.expectError(relayproto.CodeNotRegistered)
-		}},
+		{"register/unregistered_op_rejected", unregisteredOp(func(transport.Signer) any {
+			return relayproto.InviteRequest{T: relayproto.TypeInviteRequest, RID: "1"}
+		})},
+		{"register/unregistered_send_rejected", unregisteredOp(func(id transport.Signer) any {
+			return relayproto.Send{T: relayproto.TypeSend, RID: "1", To: string(mailboxOf(id)), ID: "x", Frame: relayproto.B64([]byte("x"))}
+		})},
+		{"register/unregistered_room_create_rejected", unregisteredOp(func(transport.Signer) any {
+			return relayproto.RoomCreate{T: relayproto.TypeRoomCreate, RID: "1"}
+		})},
 		{"register/forbidden_without_credentials", func(t *testing.T, s *suite) {
 			_, err := s.client.Dialer().Dial(ctxT(t), s.tg.NewIdentity(), transport.Credentials{})
 			if !errors.Is(err, transport.ErrRelayForbidden) {
@@ -95,5 +97,17 @@ func registerCases() []testCase {
 				t.Fatalf("invites %q %q (%v %v)", i1, i2, err1, err2)
 			}
 		}},
+	}
+}
+
+// unregisteredOp checks that a key that authenticated but never registered gets
+// error{not_registered} for the request build returns (relay-v1 3.4 step 5).
+func unregisteredOp(build func(id transport.Signer) any) func(*testing.T, *suite) {
+	return func(t *testing.T, s *suite) {
+		id := s.tg.NewIdentity()
+		c := s.rawConnect(t, ikQuery(id))
+		c.auth(s.client.Origin(), c.hello(), id)
+		c.write(build(id))
+		c.expectError(relayproto.CodeNotRegistered)
 	}
 }
