@@ -24,6 +24,11 @@ func TestLimitValues(t *testing.T) {
 		{"MaxPendingLinkRequests", MaxPendingLinkRequests, 5},
 		{"LinkRequestsPerMinute", LinkRequestsPerMinute, 10},
 		{"DiscoveryPerMinute", DiscoveryPerMinute, 30},
+		{"StalePrekeyRepliesPerMinute", StalePrekeyRepliesPerMinute, 10},
+		{"InboundItemsPerMinute", InboundItemsPerMinute, 60},
+		{"InboundItemsBurst", InboundItemsBurst, 120},
+		{"MaxUnreadItemsPerLink", MaxUnreadItemsPerLink, 1000},
+		{"MaxUnreadBytesPerLink", MaxUnreadBytesPerLink, 33554432},
 	}
 	for _, tt := range ints {
 		if tt.got != tt.want {

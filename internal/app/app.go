@@ -194,7 +194,7 @@ func (a control) Kill(ctx context.Context) error { return a.d.Kill().Kill(ctx) }
 func (a control) Resume(ctx context.Context, unlocked bool) error {
 	return a.d.Kill().Resume(ctx, unlocked)
 }
-func (a control) ResetIdentity(ctx context.Context, unlocked bool) error {
+func (a control) ResetIdentity(ctx context.Context, unlocked bool) ([]string, error) {
 	return a.d.ResetIdentity(ctx, unlocked)
 }
 func (a control) AddAllowPath(ctx context.Context, dir string, unlocked bool) error {

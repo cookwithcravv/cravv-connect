@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -35,6 +36,13 @@ const (
 	PairingGraceRetry = 5 * time.Second
 )
 
+// NoMailboxRetryMax caps the backoff for an item the relay answered
+// unknown_mailbox for. A peer that just paired or set up again may have no
+// mailbox on this relay for a while, so such an item is retried (doubling
+// from core.BackoffMin up to this) until it expires after
+// core.OutboxRetention, and status says it is waiting.
+const NoMailboxRetryMax = 30 * time.Minute
+
 // ErrOffline is returned by SendDirect when there is no live mailbox.
 var ErrOffline = errors.New(errOffline)
 
@@ -50,9 +58,16 @@ type Outbound struct {
 	logger    *slog.Logger
 	wake      chan struct{}
 
-	pass   sync.Mutex // serializes SendDue passes (the loop and Flush)
-	mu     sync.Mutex
-	recent []string
+	pass    sync.Mutex // serializes SendDue passes (the loop and Flush)
+	mu      sync.Mutex
+	recent  []string
+	waiting map[core.MachineID]*noMailbox // items the relay had no mailbox for, by peer
+}
+
+// noMailbox is a peer's items waiting for it to have a relay mailbox.
+type noMailbox struct {
+	alias string
+	items map[string]time.Time // outbox item ID -> CreatedAt
 }
 
 // NewOutbound wires an Outbound. stopped reports that sending must stop (the kill
@@ -70,7 +85,8 @@ func NewOutbound(id *keys.Identity, peers store.PeerStore, outbox store.OutboxSt
 	return &Outbound{
 		identity: id, peers: peers, outbox: outbox, mailboxes: mailboxes,
 		clock: clock, stopped: stopped, logger: logger,
-		wake: make(chan struct{}, 1),
+		wake:    make(chan struct{}, 1),
+		waiting: map[core.MachineID]*noMailbox{},
 	}
 }
 
@@ -253,6 +269,13 @@ func (o *Outbound) attempt(ctx context.Context, mb transport.Mailbox, it store.O
 		o.logger.Info("relay send failed", "id", it.ID, "err", err)
 		return o.backoffSending(ctx, it)
 	}
+	if st == transport.SendUnknownMailbox {
+		return o.waitForMailbox(ctx, peer, it)
+	}
+	// Any other answer means the peer has a mailbox now: its waiting items go at once.
+	if err := o.retryWaiting(ctx, peer.MachineID); err != nil {
+		return err
+	}
 	switch st {
 	case transport.SendQueued:
 		if env.Kind.IsControl() {
@@ -285,15 +308,82 @@ func (o *Outbound) attempt(ctx context.Context, mb transport.Mailbox, it store.O
 	case transport.SendTooLarge:
 		o.recordError(fmt.Sprintf("dropped message %s to %s: too large for the relay", it.ID, peer.Alias))
 		return o.deleteSending(ctx, it.ID)
-	case transport.SendUnknownMailbox:
-		o.recordError(fmt.Sprintf("dropped message %s: %s has no mailbox on this relay", it.ID, peer.Alias))
-		return o.deleteSending(ctx, it.ID)
 	case transport.SendQueueFull:
 		o.recordError(fmt.Sprintf("peer's mailbox full: %s", peer.Alias))
 		return o.backoffSending(ctx, it)
 	default: // rate_limited and anything unknown
 		return o.backoffSending(ctx, it)
 	}
+}
+
+// waitForMailbox handles a relay's unknown_mailbox: the item is retried
+// with a backoff capped at NoMailboxRetryMax until it expires, and only
+// then dropped and reported.
+func (o *Outbound) waitForMailbox(ctx context.Context, peer store.Peer, it store.OutboxItem) error {
+	if !o.clock.Now().Before(it.CreatedAt.Add(core.OutboxRetention)) {
+		o.unwait(peer.MachineID, it.ID)
+		o.recordError(noMailboxDrop(it.ID, peer.Alias))
+		return o.deleteSending(ctx, it.ID)
+	}
+	attempts := it.Attempts + 1
+	next := o.clock.Now().Add(backoffDelayMax(attempts, NoMailboxRetryMax))
+	applied, err := o.outbox.SetStatusIf(ctx, it.ID, store.OutboxSending, store.OutboxPending, attempts, next)
+	if err != nil || !applied {
+		return err
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	w, ok := o.waiting[peer.MachineID]
+	if !ok {
+		w = &noMailbox{items: map[string]time.Time{}}
+		o.waiting[peer.MachineID] = w
+	}
+	w.alias = peer.Alias
+	w.items[it.ID] = it.CreatedAt
+	return nil
+}
+
+func noMailboxDrop(id, alias string) string {
+	return fmt.Sprintf("dropped message %s: %s has no mailbox on this relay", id, alias)
+}
+
+// unwait forgets one waiting item.
+func (o *Outbound) unwait(peer core.MachineID, id string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if w, ok := o.waiting[peer]; ok {
+		delete(w.items, id)
+		if len(w.items) == 0 {
+			delete(o.waiting, peer)
+		}
+	}
+}
+
+// retryWaiting makes the peer's waiting items due now (those still pending)
+// and forgets them.
+func (o *Outbound) retryWaiting(ctx context.Context, peer core.MachineID) error {
+	o.mu.Lock()
+	w, ok := o.waiting[peer]
+	delete(o.waiting, peer)
+	o.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	now := o.clock.Now()
+	for id := range w.items {
+		it, err := o.outbox.Get(ctx, id)
+		if errors.Is(err, core.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := o.outbox.SetStatusIf(ctx, id, store.OutboxPending, store.OutboxPending, it.Attempts, now); err != nil {
+			return err
+		}
+	}
+	o.Wake()
+	return nil
 }
 
 // sendingTimeout is how long an item may stay marked in flight before
@@ -337,15 +427,18 @@ func (o *Outbound) markPausedByPeer(ctx context.Context, peer store.Peer) error 
 }
 
 // backoffDelay is BackoffMin doubled per failed attempt, capped at BackoffMax.
-func backoffDelay(attempts int) time.Duration {
+func backoffDelay(attempts int) time.Duration { return backoffDelayMax(attempts, core.BackoffMax) }
+
+// backoffDelayMax is BackoffMin doubled per failed attempt, capped at limit.
+func backoffDelayMax(attempts int, limit time.Duration) time.Duration {
 	if attempts < 1 {
 		attempts = 1
 	}
 	d := core.BackoffMin
 	for i := 1; i < attempts; i++ {
 		d *= 2
-		if d >= core.BackoffMax {
-			return core.BackoffMax
+		if d >= limit {
+			return limit
 		}
 	}
 	return d
@@ -411,19 +504,52 @@ func (o *Outbound) Release(ctx context.Context, peer core.MachineID) error {
 
 // Forget deletes every outbox item for a peer (unpair).
 func (o *Outbound) Forget(ctx context.Context, peer core.MachineID) error {
+	o.mu.Lock()
+	delete(o.waiting, peer)
+	o.mu.Unlock()
 	return o.outbox.DeleteOutboxForPeer(ctx, peer)
 }
 
-// PurgeOld deletes items older than core.OutboxRetention.
+// PurgeOld deletes items older than core.OutboxRetention. Items that were
+// still waiting for the peer's mailbox are reported as dropped.
 func (o *Outbound) PurgeOld(ctx context.Context) (int, error) {
-	return o.outbox.PurgeOutboxBefore(ctx, o.clock.Now().Add(-core.OutboxRetention))
+	cutoff := o.clock.Now().Add(-core.OutboxRetention)
+	n, err := o.outbox.PurgeOutboxBefore(ctx, cutoff)
+	if err != nil {
+		return n, err
+	}
+	var dropped []string
+	o.mu.Lock()
+	for peer, w := range o.waiting {
+		for id, created := range w.items {
+			if created.Before(cutoff) {
+				dropped = append(dropped, noMailboxDrop(id, w.alias))
+				delete(w.items, id)
+			}
+		}
+		if len(w.items) == 0 {
+			delete(o.waiting, peer)
+		}
+	}
+	o.mu.Unlock()
+	for _, msg := range dropped {
+		o.recordError(msg)
+	}
+	return n, nil
 }
 
-// Errors returns recent delivery problems, oldest first, for status.
+// Errors returns recent delivery problems, oldest first, then one line per
+// peer whose items wait for it to have a relay mailbox, for status.
 func (o *Outbound) Errors() []string {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return append([]string(nil), o.recent...)
+	out := append([]string(nil), o.recent...)
+	waiting := make([]string, 0, len(o.waiting))
+	for _, w := range o.waiting {
+		waiting = append(waiting, fmt.Sprintf("%s has no mailbox on this relay yet; %d messages waiting", w.alias, len(w.items)))
+	}
+	slices.Sort(waiting)
+	return append(out, waiting...)
 }
 
 func (o *Outbound) recordError(msg string) {

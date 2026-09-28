@@ -469,7 +469,7 @@ whitespace fail with `bad_request`; `result` and `reason` may be empty.
 | `allow_path.add` | `{path}` | `{}` |
 | `kill` | `{}` | `{}` |
 | `resume` | `{}` | `{}` |
-| `reset_identity` | `{}` | `{}` |
+| `reset_identity` | `{}` | `{untold: [alias]}` |
 | `audit.read` | `{limit}` | `{events: [Event]}` |
 | `daemon.shutdown` | `{}` | `{}` |
 
@@ -499,9 +499,13 @@ whitespace fail with `bad_request`; `result` and `reason` may be empty.
   counts as on from the moment `kill` starts. Calling it again changes
   nothing. **`resume`** (password) turns it off; links must be requested
   again.
-- **`reset_identity`** runs while killed: it turns the kill switch on (or
-  leaves it on), deletes every peer, prekey and outbox item, stops pending
-  pairings, and creates a new identity with no relay mailbox.
+- **`reset_identity`** runs while killed. It first unpairs every peer
+  (`control.unpaired` sent directly, best effort, and a deny on the old
+  mailbox), then turns the kill switch on (or leaves it on), deletes every
+  peer, prekey and outbox item, stops pending pairings, and creates a new
+  identity with no relay mailbox. `untold` names the peers the notice did
+  not reach (this machine was offline or already killed); their humans must
+  unpair this machine themselves.
 - **`audit.read`**: the newest `limit` events (default 50, at most 1000),
   oldest first.
 - **`daemon.shutdown`** replies `{}` and the daemon exits about 100 ms

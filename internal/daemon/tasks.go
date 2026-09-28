@@ -253,7 +253,9 @@ func (s *TaskService) tellHeld(ctx context.Context, t store.Task, l store.Link, 
 // a redelivery of the message that created a queued or held task and the
 // earlier attempt failed after storing the task, the inbox item (the task,
 // or a held task's approval notice) is written now. Anything else (a
-// duplicate, or an ID naming another task) is ignored.
+// duplicate, or an ID naming another task) is ignored. A queued task may
+// have been held and approved since: Decide delivered it under the task's
+// own ID, so that counts as delivered too.
 func (s *TaskService) redeliverCreate(ctx context.Context, cur store.Task, l store.Link, msgID string) error {
 	if cur.Direction != store.TaskInbound || cur.Peer != l.Peer || cur.LinkID != l.ID {
 		return nil
@@ -261,9 +263,14 @@ func (s *TaskService) redeliverCreate(ctx context.Context, cur store.Task, l sto
 	if cur.State != core.TaskQueued && cur.State != core.TaskAwaitingApproval {
 		return nil
 	}
-	done, err := s.d.Inbox.Delivered(ctx, msgID)
-	if err != nil || done {
-		return err
+	ids := []string{msgID}
+	if cur.State == core.TaskQueued {
+		ids = append(ids, cur.ID)
+	}
+	for _, k := range ids {
+		if done, err := s.d.Inbox.Delivered(ctx, k); err != nil || done {
+			return err
+		}
 	}
 	if cur.State == core.TaskAwaitingApproval {
 		return s.tellHeld(ctx, cur, l, msgID)

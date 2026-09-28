@@ -496,8 +496,10 @@ func TestHumanOnlyActionsPassUnlockState(t *testing.T) {
 	h := newHarness(t)
 	c := h.dial(t)
 	unlock(t, c)
-	if err := c.Call(bg, ipc.MethodResetIdentity, nil, nil); err != nil || h.w.lastCall() != "reset" {
-		t.Fatalf("reset identity: %v %q", err, h.w.lastCall())
+	var reset ipc.ResetIdentityResult
+	if err := c.Call(bg, ipc.MethodResetIdentity, nil, &reset); err != nil || h.w.lastCall() != "reset" ||
+		len(reset.Untold) != 1 || reset.Untold[0] != "gpu-box" {
+		t.Fatalf("reset identity: %v %q %+v", err, h.w.lastCall(), reset)
 	}
 	if err := c.Call(bg, ipc.MethodApprovalsDecide, ipc.ApprovalsDecideParams{TaskID: "T3", Approve: false}, nil); err != nil || h.w.lastCall() != "deny T3" {
 		t.Fatalf("decide: %v %q", err, h.w.lastCall())

@@ -109,8 +109,8 @@ func TestInboundDropsHostileMessageID(t *testing.T) {
 	if got := f.handledIDs(); len(got) != 0 {
 		t.Fatalf("hostile message handled: %q", got)
 	}
-	if f.in.Dropped() != 1 {
-		t.Fatalf("dropped = %d, want 1", f.in.Dropped())
+	if got := f.in.Drops(); got != (DropCounts{Corrupt: 1}) {
+		t.Fatalf("drops = %+v, want 1 corrupt", got)
 	}
 	if len(deliveredIDs(t, f.sender)) != 0 {
 		t.Fatal("receipt sent for a hostile message id")

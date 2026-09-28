@@ -162,3 +162,24 @@ func TestConfirmTagDomainSeparated(t *testing.T) {
 		t.Fatal(`ConfirmTag must use HKDF info "cravv-connect/pair-v1/confirm"`)
 	}
 }
+
+func TestBindTranscriptPerSideAndSession(t *testing.T) {
+	ka, kb := run(t, "PW", "PW")
+	if !bytes.Equal(BindTranscript(ka, SideA), BindTranscript(kb, SideA)) {
+		t.Fatal("both sides must compute the same transcript for A")
+	}
+	if bytes.Equal(BindTranscript(ka, SideA), BindTranscript(ka, SideB)) {
+		t.Fatal("A's and B's transcripts must differ")
+	}
+	other, _ := run(t, "PW", "PW")
+	if bytes.Equal(BindTranscript(ka, SideA), BindTranscript(other, SideA)) {
+		t.Fatal("transcripts of two sessions must differ")
+	}
+	sub := make([]byte, 32)
+	if _, err := io.ReadFull(hkdf.New(sha256.New, ka, nil, []byte("cravv-connect/pair-v1/bind")), sub); err != nil {
+		t.Fatal(err)
+	}
+	if want := append([]byte("cravv-connect/pair-v1/bind\nAB"), sub...); !bytes.Equal(BindTranscript(ka, SideA), want) {
+		t.Fatalf("transcript = %q", BindTranscript(ka, SideA))
+	}
+}

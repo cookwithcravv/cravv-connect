@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -24,7 +25,9 @@ import (
 type d2Mailbox struct {
 	mu         sync.Mutex
 	allowed    []ed25519.PublicKey
+	denied     []ed25519.PublicKey
 	sends      int
+	sentTo     []core.MachineID
 	deliveries chan transport.Delivery
 	done       chan struct{}
 	once       sync.Once
@@ -34,10 +37,11 @@ func newD2Mailbox() *d2Mailbox {
 	return &d2Mailbox{deliveries: make(chan transport.Delivery), done: make(chan struct{})}
 }
 
-func (m *d2Mailbox) Send(context.Context, core.MachineID, string, []byte) (transport.SendStatus, error) {
+func (m *d2Mailbox) Send(_ context.Context, to core.MachineID, _ string, _ []byte) (transport.SendStatus, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sends++
+	m.sentTo = append(m.sentTo, to)
 	return transport.SendQueued, nil
 }
 func (m *d2Mailbox) Deliveries() <-chan transport.Delivery { return m.deliveries }
@@ -48,7 +52,12 @@ func (m *d2Mailbox) Allow(_ context.Context, ik ed25519.PublicKey) error {
 	m.allowed = append(m.allowed, ik)
 	return nil
 }
-func (m *d2Mailbox) Deny(context.Context, ed25519.PublicKey) error      { return nil }
+func (m *d2Mailbox) Deny(_ context.Context, ik ed25519.PublicKey) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.denied = append(m.denied, ik)
+	return nil
+}
 func (m *d2Mailbox) RequestInvite(context.Context) (string, error)      { return "INVITE", nil }
 func (m *d2Mailbox) CreateRoom(context.Context) (string, string, error) { return "ABCD", "tok", nil }
 func (m *d2Mailbox) Done() <-chan struct{}                              { return m.done }
@@ -399,8 +408,22 @@ func TestResetIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := d.ResetIdentity(ctx, true); err != nil {
+	sendsBefore := relay.box(0).sendCount()
+	untold, err := d.ResetIdentity(ctx, true)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if len(untold) != 0 {
+		t.Fatalf("untold = %v, want none (the daemon was online)", untold)
+	}
+	// The peer was told on the old mailbox, and denied there.
+	box := relay.box(0)
+	box.mu.Lock()
+	told := slices.Contains(box.sentTo[sendsBefore:], peer.rec.MachineID)
+	denied := slices.ContainsFunc(box.denied, func(ik ed25519.PublicKey) bool { return bytes.Equal(ik, peer.rec.IK) })
+	box.mu.Unlock()
+	if !told || !denied {
+		t.Fatalf("peer told %v, denied %v before the reset", told, denied)
 	}
 	if !d.Kill().Killed() || d.Registered() {
 		t.Fatalf("killed %v registered %v after reset", d.Kill().Killed(), d.Registered())
@@ -610,7 +633,7 @@ func TestCloseAndResetStopPairing(t *testing.T) {
 	ctx := context.Background()
 	d := d2NewDaemon(t, t.TempDir(), &d2Relay{})
 	old := d.Pairing()
-	if err := d.ResetIdentity(ctx, true); err != nil {
+	if _, err := d.ResetIdentity(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := old.Start(ctx, true); !errors.Is(err, ErrPairingClosed) {
@@ -819,11 +842,22 @@ func TestResetIdentityWhenAlreadyKilled(t *testing.T) {
 	d := d2NewDaemon(t, t.TempDir(), &d2Relay{})
 	defer d.Close()
 	old := d.Identity().MachineID()
+	peer := newTestPeer(t, "gpu-box")
+	mustPut(t, d.store, peer.rec)
 	if err := d.Kill().Kill(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.ResetIdentity(ctx, true); err != nil {
+	untold, err := d.ResetIdentity(ctx, true)
+	if err != nil {
 		t.Fatal(err)
+	}
+	// Killed means off the relay: the peer could not be told, and the human
+	// is told to unpair this machine there.
+	if !slices.Equal(untold, []string{"gpu-box"}) {
+		t.Fatalf("untold = %v, want [gpu-box]", untold)
+	}
+	if peers, _ := d.store.ListPeers(ctx); len(peers) != 0 {
+		t.Fatalf("peers left after reset: %d", len(peers))
 	}
 	if d.Identity().MachineID() == old || !d.Kill().Killed() {
 		t.Fatalf("identity replaced %v, killed %v", d.Identity().MachineID() != old, d.Kill().Killed())

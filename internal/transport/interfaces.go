@@ -98,4 +98,8 @@ type BlobStore interface {
 var (
 	ErrRelayForbidden = errors.New("relay: forbidden")
 	ErrRoomGone       = errors.New("relay: pairing room gone or already used")
+	// ErrRelayInternal is a relay's answer that one request failed on its
+	// side (res{status:"error",code:"internal"}). The connection stays up;
+	// the request may be retried after a backoff.
+	ErrRelayInternal = errors.New("relay: internal error")
 )

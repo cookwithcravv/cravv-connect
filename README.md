@@ -210,6 +210,10 @@ for links, and nothing else.
 On Linux machines you reach over SSH, run `loginctl enable-linger $USER` once,
 so the daemon (a systemd user service) keeps running after you log out.
 
+Pairing needs cravv-connect 0.2.2 or later on both machines: each side
+proves it holds its identity key, and an older machine is refused with a
+message to update. Machines that are already paired keep working.
+
 A join code works once and expires in 10 minutes. To pair two machines that
 are already set up, run `cravv-connect pair` on one and
 `cravv-connect join <code>` on the other (the join code or the plain bind
@@ -414,7 +418,7 @@ any local process can run the CLI's.
 | `files` | List incoming and outgoing files |
 | `allow-path <dir>` | Allow sending files from another folder (password) |
 | `kill` / `resume` | Kill switch on; off (password) |
-| `reset-identity` | New machine identity; every peer must pair again (password) |
+| `reset-identity` | New machine identity: unpairs every peer (telling each one it can reach); every peer must pair again (password) |
 | `log [-n N]` | Recent audit log entries |
 | `install [claude\|codex] [--allow-send] [--no-allow-send]` / `uninstall <agent>` | Add or remove the MCP server (and for Claude Code the hooks, the `/cravv` skill and allow rules); no argument lists agents |
 | `mcp [--project-dir <dir>]` | The stdio MCP server (started by your agent) |

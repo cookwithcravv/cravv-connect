@@ -46,6 +46,7 @@ type services struct {
 	activity *PeerActivity
 	outbound *Outbound
 	inbound  *Inbound
+	limiter  *InboundLimiter
 	peers    *PeerService
 	discover *Discovery
 	replies  *LinkReplies
@@ -454,47 +455,55 @@ func (d *Daemon) maintain(ctx context.Context, g *services) error {
 	return errors.Join(errs...)
 }
 
-// ResetIdentity turns the kill switch on (if needed), wipes peers, prekeys and
-// the outbox, and switches to a fresh identity. The new identity has no relay
-// mailbox yet: the machine registers again with `init --relay-token` or an
-// invite received while joining. It is a human-only action: unlocked must be
-// true (set by the IPC layer after auth.unlock), otherwise core.ErrAuthRequired.
-func (d *Daemon) ResetIdentity(ctx context.Context, unlocked bool) error {
+// ResetIdentity unpairs every peer (telling each directly, best effort, and
+// denying it on the old mailbox), turns the kill switch on (if needed), wipes
+// peers, prekeys and the outbox, and switches to a fresh identity. It returns
+// the aliases of the peers that were not told: their humans must unpair this
+// machine themselves. The new identity has no relay mailbox yet: the machine
+// registers again with `init --relay-token` or an invite received while
+// joining. It is a human-only action: unlocked must be true (set by the IPC
+// layer after auth.unlock), otherwise core.ErrAuthRequired.
+func (d *Daemon) ResetIdentity(ctx context.Context, unlocked bool) (untold []string, err error) {
 	if !unlocked {
-		return core.ErrAuthRequired
+		return nil, core.ErrAuthRequired
+	}
+	// Before the kill switch: a killed daemon is off the relay and can tell no one.
+	untold, uerr := d.svc.Load().peers.UnpairAll(ctx)
+	if uerr != nil {
+		d.log.Warn("unpair before identity reset", "err", uerr) // the wipe below removes what is left
 	}
 	if err := d.kill.Kill(ctx); err != nil {
-		return err
+		return nil, err
 	}
 	old := d.svc.Load().identity.MachineID()
 	peers, err := d.store.ListPeers(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, p := range peers {
 		if err := d.store.DeleteOutboxForPeer(ctx, p.MachineID); err != nil {
-			return err
+			return nil, err
 		}
 		if err := d.store.DeletePeer(ctx, p.MachineID); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	now := d.clock.Now()
 	if err := d.store.SupersedeAllExcept(ctx, "", now); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := d.store.DeleteSupersededBefore(ctx, now.Add(time.Second)); err != nil {
-		return err
+		return nil, err
 	}
 	id, err := keys.GenerateIdentity()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := d.ids.Save(ctx, id.Seed()); err != nil {
-		return err
+		return nil, err
 	}
 	if err := d.store.SetSetting(ctx, SettingRelayRegistered, ""); err != nil {
-		return err
+		return nil, err
 	}
 	d.registered.Store(false)
 	_ = d.audit.Record(audit.Event{Type: audit.EvResetIdentity, Detail: map[string]any{
@@ -507,7 +516,7 @@ func (d *Daemon) ResetIdentity(ctx context.Context, unlocked bool) error {
 	if cancel != nil {
 		cancel()
 	}
-	return nil
+	return untold, nil
 }
 
 // Close stops background pairing exchanges and releases the store.

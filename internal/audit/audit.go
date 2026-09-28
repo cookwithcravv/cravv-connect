@@ -43,6 +43,10 @@ const (
 	EvLinkReject     = "link_reject"
 	EvLinkClose      = "link_close"
 	EvLinkPermission = "link_permission"
+
+	// EvInboundDropped: a link sent more than its inbound limits allow and
+	// items were dropped (recorded at most once per link per minute).
+	EvInboundDropped = "inbound_dropped"
 )
 
 // Logger records audit events.

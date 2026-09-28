@@ -116,6 +116,19 @@ func (s *InboxService) Deliver(ctx context.Context, it store.InboxItem) (int64, 
 	return seq, nil
 }
 
+// LinkUnread counts the items the shared session has not read from one
+// link, and their body bytes. A session that is gone has nothing unread.
+func (s *InboxService) LinkUnread(ctx context.Context, session, linkID string) (int, int64, error) {
+	rec, err := s.sessions.Get(ctx, session)
+	if errors.Is(err, core.ErrNotFound) {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	return s.inbox.LinkUnread(ctx, rec.ID, linkID, rec.Cursor)
+}
+
 // Delivered reports whether an item with this message ID is in the inbox.
 func (s *InboxService) Delivered(ctx context.Context, msgID string) (bool, error) {
 	return s.inbox.HasInboxMsg(ctx, msgID)

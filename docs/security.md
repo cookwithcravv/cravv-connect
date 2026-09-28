@@ -32,7 +32,7 @@ exact limits behind each claim. Protocol details are in
 |---|---|
 | Accept a link at `messages` or `tasks-ask`; approve one task on a `tasks-ask` link | The human, in the chat (an elicitation form, or a 4-digit code from a desktop notification), or with the password in the CLI or web UI |
 | Accept or raise a link to `tasks-auto`; raise any link; edit managed-session offers; pair and join; resume after the kill switch; allow another folder for files; reset the identity | Only with the password, in the CLI or web UI |
-| Reject a request or deny a task; restrict or disconnect a link; pause, resume-peer or unpair a machine; close a managed session; the kill switch; stop the daemon | Anyone local, agents included: no password, so cutting off stays easy |
+| Reject a request or deny a task; restrict or disconnect a link; pause, resume-peer or unpair a machine; close any session on this machine (`session close`); the kill switch; stop the daemon | Anyone local, agents included: no password, so cutting off stays easy |
 
 ## What we defend against
 
@@ -44,8 +44,10 @@ exact limits behind each claim. Protocol details are in
   messages older than 21 days or more than 10 minutes in the future are
   rejected, and tampered or re-signed frames fail verification. Frames from
   unknown or paused peers are dropped. A frame sealed to an unknown prekey
-  gets at most one `control.stale_prekey` reply per peer and message ID, and
-  only after its signature verifies. Presence and discovery frames older
+  gets at most one `control.stale_prekey` reply per peer and message ID,
+  only after its signature verifies, only when the time in its signed
+  message ID passes the same 21-day and 10-minute checks, and at most 10
+  such replies per peer a minute. Presence and discovery frames older
   than 120 seconds are ignored, so the relay cannot replay an old "the link
   is open". The relay never sees message contents, file contents, file
   names, aliases, session names, purposes, link notes or offer labels.
@@ -66,7 +68,10 @@ exact limits behind each claim. Protocol details are in
   relay sees only the 4-character nameplate, the 40-bit secret is the SPAKE2
   password, a room allows exactly one joiner and lives 10 minutes, and a wrong
   code fails key confirmation and burns the room. An attacker gets one online
-  guess per code. `setup --join` shows the relay in a join code and asks
+  guess per code. Each side signs the exchange with its identity key, so
+  even someone who has the code cannot pass off another machine's identity
+  as its own (a peer on 0.2.1 or older cannot sign and is refused: update
+  both machines). `setup --join` shows the relay in a join code and asks
   before using it. Relays also cap abuse: at most 20 unused invites and
   8 open pairing rooms per member, 2 GiB of live blobs per member and 50 GiB
   per relay, a 10000-frame or 50 MB queue per mailbox, and per-mailbox and
@@ -82,6 +87,12 @@ exact limits behind each claim. Protocol details are in
   - Its link requests wait for your decision. It may have at most 5
     pending and send at most 10 a minute; a request expires after 10
     minutes. It may list your sessions at most 30 times a minute.
+  - It cannot fill your disk through a link: each link may add at most 60
+    messages and task updates a minute here (up to 120 at once), and at
+    most 1000 items or 32 MiB its session has not read yet. Anything over
+    is dropped (and confirmed, so the sender stops resending it), written
+    to the audit log at most once a minute per link, and `status` says
+    "link N: <alias> is sending too fast, dropped K messages" for an hour.
   - On a `messages` link its tasks are rejected; on a `tasks-ask` link each
     task waits for a human here (expiring after 24 hours), and agents
     cannot read a held task's text: the chat gets a notice without it, and
@@ -302,8 +313,8 @@ Needs the password:
 
 Does not need it: rejecting a link request (`link reject`), restricting or
 disconnecting a link (`link restrict`, `link disconnect`, or `link permit`
-to a lower level), `pause`, `resume-peer`, `unpair`, closing a managed
-session (`session close`), `kill`, stopping the daemon, and everything
+to a lower level), `pause`, `resume-peer`, `unpair`, closing any session
+on this machine (`session close`), `kill`, stopping the daemon, and everything
 agents do on their own links (sending, reading, working on tasks they
 received, cancelling tasks they sent). `resume-peer` is the one widening
 without a password, because it only restores what you chose when pairing;
@@ -320,6 +331,20 @@ confirmation code:
 - Only a real answer counts: the form's action `accept` with one of the
   choices it offered. A dismissed or auto-declined form (the VS Code
   extension declines forms without showing them) leaves the item pending.
+- The daemon cannot see a screen: it trusts the MCP client to have shown
+  the form to a human. On MCP protocol 2026-07-28 and later the forms go
+  out as input requests, and the answers come back as `InputResponses` in
+  the client's next `review_pending` call, with a single-use request state
+  that expires after 10 minutes. The model supplies only the tool's
+  arguments, never these responses, so it cannot answer a form itself. But
+  a client that fills in input requests without asking anyone (a script
+  built on an MCP SDK, or a client set to answer them automatically)
+  answers for the human, and the daemon takes that answer at the chat
+  tier. That is no worse than the older elicitation forms, which trust the
+  client the same way, and the chat tier still cannot grant `tasks-auto`
+  or raise a permission. If you connect cravv-connect to such a client, do
+  not rely on `review_pending` as a human check: decide with the password
+  in the CLI or web UI instead.
 - The code is shown only in a macOS desktop notification. The daemon hands
   the notification script to `osascript` on stdin, never as an argument, so
   the code does not appear in `ps`. It never travels over the daemon socket
@@ -426,6 +451,11 @@ peer sends runs `claude -p` in that folder, with the prompt on stdin
   can**, including talking to the local cravv-connect daemon without a
   token, reading `~/.cravv-connect`, and editing your `~/.claude`
   settings. Choose it only for a machine you trust as much as yourself.
+
+In every run mode, files a run sends (`send_file`, files attached to a
+task result) must be inside the offer's folder. The folders you allowed
+with `cravv-connect allow-path` count for your own chats only, never for a
+run.
 
 How a run is contained (Claude Code 2.1.283 flags, checked by probes):
 
@@ -559,7 +589,8 @@ at the relay for up to 7 days. Until `cravv-connect resume` (password),
 every IPC method fails except `status`, `peer.list`, `machines`,
 `audit.read`, `hook.counts`, `auth.unlock`, `resume`, `kill`,
 `reset_identity`, `daemon.shutdown`, `offers.list`, `managed.list`,
-`managed.close`, `sessions.local` and `ui.start` (so the web UI can resume).
+`managed.close`, `sessions.local`, `sessions.close` and `ui.start` (so the
+web UI can resume).
 After resume, links must be requested again. `reset-identity` still works
 (with the password), so a machine killed because it may be compromised gets
 a new identity without reconnecting under the old one first.
@@ -575,9 +606,12 @@ a new identity without reconnecting under the old one first.
     base64 seed) in the default keychain, normally the login keychain,
     written through `security(1)`. The seed is passed to `security` as an
     argument, so another process of the same user could see it in the process
-    list for a moment. If the Keychain refuses the write, the seed goes to the
-    fallback below; if the Keychain cannot be read and there is no fallback
-    copy, the daemon refuses to start instead of creating a new identity.
+    list for a moment. If the Keychain refuses the write, any older item is
+    removed and the seed goes to the fallback below (a seed in the fallback
+    wins over a Keychain item); if the older item cannot be removed, the
+    write fails, so a reset never comes back as the old identity. If the
+    Keychain cannot be read and there is no fallback copy, the daemon
+    refuses to start instead of creating a new identity.
     Every `security` call has a 10 second limit: a locked Keychain can wait
     for an unlock dialog a background daemon never shows, and a timeout
     stops the start with an error (and never writes the fallback).
@@ -598,9 +632,13 @@ a new identity without reconnecting under the old one first.
   automatically). The relay admin token given to `init --relay-token` (or
   typed into `setup`) is kept in `store.db` until the first successful
   registration.
-- `cravv-connect reset-identity` (also while killed) turns the kill
-  switch on (or leaves it on), deletes every peer, prekey and queued outgoing
-  message, and replaces the identity. The new identity has no relay mailbox:
+- `cravv-connect reset-identity` (also while killed) first unpairs every
+  peer: it sends each one `control.unpaired` directly (best effort) and
+  denies it on the old mailbox. It then turns the kill switch on (or leaves
+  it on), deletes every peer, prekey and queued outgoing message, and
+  replaces the identity. A peer the notice could not reach (this machine
+  was offline or already killed) is named in the output and still lists the
+  old machine until its human runs `cravv-connect unpair` there. The new identity has no relay mailbox:
   it registers again with an admin token or with the invite received the
   next time you join a pairing. Every peer has to pair again; run
   `cravv-connect resume` when ready.

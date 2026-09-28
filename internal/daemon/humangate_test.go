@@ -46,7 +46,7 @@ func TestHumanOnlyActionsNeedUnlock(t *testing.T) {
 	d := d2NewDaemon(t, t.TempDir(), &d2Relay{})
 	defer d.Close()
 	old := d.Identity().MachineID()
-	if err := d.ResetIdentity(ctx, false); !errors.Is(err, core.ErrAuthRequired) {
+	if _, err := d.ResetIdentity(ctx, false); !errors.Is(err, core.ErrAuthRequired) {
 		t.Fatalf("ResetIdentity without unlock err = %v", err)
 	}
 	if d.Identity().MachineID() != old || d.Kill().Killed() {

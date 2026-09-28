@@ -180,9 +180,13 @@ each delivery:
    4. `h.suite` is known;
    5. the private prekey `h.pk_id` exists (current or superseded and not yet
       purged). If it does not, reply with `control.stale_prekey` (section 5.3),
-      ack the delivery, and stop. The reply is sent at most once per sender and
+      ack the delivery, and stop. The reply is sent only when `h.id` is a valid
+      message ID (section 1) whose millisecond time passes the freshness check
+      of step 5 (otherwise the frame is dropped), at most once per sender and
       message ID (recorded in the deduplication store), so a relay redelivery
-      of the same frame does not trigger another resend;
+      of the same frame does not trigger another resend, and at most 10 times
+      per sender per minute (a frame over that gets no reply; its sender
+      resends it after the relay TTL);
    6. decrypt;
    7. the envelope has `v` 1 and its `id`, `from_machine`, `to_machine` equal the
       header's. This stops a valid signature from being stripped and replaced.
@@ -210,7 +214,12 @@ each delivery:
       sender is told.
 
    The handler then works on that link's local session only, and takes the
-   peer's session from the link record.
+   peer's session from the link record. `chat` and `task.update` also
+   pass the link's inbound limits: at most 60 a minute (a token bucket of
+   120), and at most 1000 items or 32 MiB of bodies the local session has
+   not read yet. An item over either is dropped as a handler failure for
+   good: it is recorded and confirmed (steps 8 and 9), so the sender stops
+   resending it.
 8. **Record** `id` in the deduplication store. This happens only after the
    handler succeeded or failed for good, so a retryable failure leaves the
    message unrecorded and a redelivery runs the handler again. Handlers are
@@ -223,7 +232,11 @@ each delivery:
    `control.delivered` receipt to the sender.
 10. **Ack** the relay `seq`.
 
-Dropped frames are logged and counted in `status`. A handler failure that is
+Dropped frames are logged. `status` counts them apart: frames that are
+unparseable, unverifiable or have a bad ID or timestamp ("corrupt or
+unverifiable"), frames from unknown machines, and frames from machines this
+one paused. Stale ephemeral frames, expected after being offline, and kinds
+without a handler are only logged. A handler failure that is
 worth retrying (a local database error, including a failed deduplication
 lookup) is not acked: the receiver stops reading, closes the connection and
 reconnects after a backoff (1 second, doubling, at most 5 minutes), and
@@ -262,8 +275,9 @@ The relay's answer to `send` decides what happens:
 |---|---|
 | `queued` | Non-control kinds: mark `queued`; if no `control.delivered` arrives within 7 days (the relay queue TTL), the item goes back to `pending` and is sent again. Control kinds: delete the item (they are never confirmed) |
 | `not_allowed` | Within 30 minutes of pairing: the peer has most likely not finalized yet (it has not allowed this machine on the relay); retry with backoff capped at 5 seconds and mark nothing. Later: the peer paused this machine: mark the peer "paused by peer" and hold every non-control item for it until `control.resumed`. Control items keep retrying with backoff |
-| `too_large`, `unknown_mailbox` | Drop the item and report it in `status` (items for a peer that is no longer paired are dropped the same way) |
-| `queue_full`, `rate_limited`, network error | Back off: 1 second, doubling per attempt, at most 5 minutes |
+| `too_large` | Drop the item and report it in `status` (items for a peer that is no longer paired are dropped the same way) |
+| `unknown_mailbox` | The peer has no mailbox on this relay yet (it just paired or set up again): back off from 1 second, doubling per attempt, at most 30 minutes, and report in `status` how many items wait for it. Any other answer for that peer retries its waiting items at once. An item still waiting when it is 21 days old is dropped and reported |
+| `queue_full`, `rate_limited`, `error` with code `internal`, network error | Back off: 1 second, doubling per attempt, at most 5 minutes. An `internal` answer fails that request only: the connection stays up |
 
 `control.delivered` deletes the confirmed items (only items addressed to the
 peer that sent the receipt). Items older than 21 days are purged. Receivers
@@ -714,13 +728,30 @@ ends the exchange with "pairing failed", and closing the room burns it.
      "prekey": {"id": "...", "pub": "...", "created_at": 1790000000000, "sig": "..."},
      "relay_url": "https://relay.example.com",
      "name": "prith-mbp",
-     "invite": "only from A: the single-use relay invite"
+     "invite": "only from A: the single-use relay invite",
+     "bind_sig": "base64 of the 64-byte Ed25519 signature by ik over the binding transcript"
    }
    ```
 
+   The binding transcript proves the sender holds `ik` in this very
+   exchange, so a machine that knows the code cannot present another
+   machine's identity key and prekey as its own (an unknown key share). For
+   the sender on side S (`A` or `B`) and the other side O it is the bytes
+
+   ```
+   "cravv-connect/pair-v1/bind\n" || S || O || HKDF-SHA256(ikm = K, salt = none, info = "cravv-connect/pair-v1/bind", 32 bytes)
+   ```
+
+   where `\n` is the byte 0x0a and S and O are the single bytes `A` or `B`.
+
 4. **Validation.** The received IK is 32 bytes, is not this machine's own IK,
-   the prekey signature verifies against it, and `relay_url` is an `https` URL
+   `bind_sig` verifies against it over the transcript for the peer's side
+   (A checks S = `B`, O = `A`; B checks S = `A`, O = `B`), the prekey
+   signature verifies against it, and `relay_url` is an `https` URL
    (plain `http` only for localhost, private network addresses (RFC 1918, unique local IPv6, 100.64.0.0/10) and single-label `.local` names).
+   A payload without `bind_sig` comes from cravv-connect 0.2.1 or older: it
+   is refused, and the human is told to update cravv-connect on both
+   machines and pair again.
 5. **Ack.** Each side sends the sealed constant `cravv-connect/pair-v1/ok`
    (same key and AAD, nonce last byte `2` for A, `3` for B) and checks the
    peer's. A payload tampered with in either direction therefore fails on both

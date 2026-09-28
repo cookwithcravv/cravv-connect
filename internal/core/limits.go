@@ -47,4 +47,16 @@ const (
 	PresenceMaxAge         = 120 * time.Second
 	UnknownLinkReplyEvery  = time.Minute // link.closed{unknown_link}: at most one per link
 	UnsupportedReplyEvery  = time.Hour   // control.unsupported: at most one per peer
+	// control.stale_prekey replies per peer per minute. A sender reseals each
+	// named message; one it is not told about is resent after RelayTTL.
+	StalePrekeyRepliesPerMinute = 10
+
+	// Inbound volume per link, enforced by the receiver on chat and
+	// task.update: a token bucket (InboundItemsPerMinute, up to
+	// InboundItemsBurst at once) and an unread budget per link. An item over
+	// either is dropped (and confirmed, so the sender stops resending it).
+	InboundItemsPerMinute = 60
+	InboundItemsBurst     = 120
+	MaxUnreadItemsPerLink = 1000
+	MaxUnreadBytesPerLink = 32 << 20
 )

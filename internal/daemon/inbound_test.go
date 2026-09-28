@@ -170,23 +170,25 @@ func TestDuplicateDeliveryShownOnce(t *testing.T) {
 }
 
 func TestInboundDrops(t *testing.T) {
+	corrupt := DropCounts{Corrupt: 1}
 	cases := []struct {
 		name  string
+		want  DropCounts
 		build func(t *testing.T, f *inboundFixture) transport.Delivery
 	}{
-		{"unknown sender", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"unknown sender", DropCounts{Unknown: 1}, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			stranger := newTestPeer(t, "stranger")
 			id, raw := f.frameFrom(t, stranger, testEpoch, f.myPK)
 			return transport.Delivery{Seq: 1, From: stranger.id.Public(), ID: id, Frame: raw}
 		}},
-		{"paused peer", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"paused peer", DropCounts{Paused: 1}, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			p := f.gpu.rec
 			p.Paused = true
 			mustPut(t, f.peers, p)
 			id, raw := f.frameFrom(t, f.gpu, testEpoch, f.myPK)
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
 		}},
-		{"bad signature", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"bad signature", corrupt, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			id, raw := f.frameFrom(t, f.gpu, testEpoch, f.myPK)
 			fr, err := sealing.ParseFrame(raw)
 			if err != nil {
@@ -196,23 +198,24 @@ func TestInboundDrops(t *testing.T) {
 			raw, _ = fr.Marshal()
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
 		}},
-		{"signed by another key", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"signed by another key", corrupt, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			impostor := newTestPeer(t, "impostor")
 			id, raw := f.frameFrom(t, impostor, testEpoch, f.myPK)
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
 		}},
-		{"garbage frame", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"garbage frame", corrupt, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: "x", Frame: []byte("not json")}
 		}},
-		{"too old", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"too old", corrupt, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			id, raw := f.frameFrom(t, f.gpu, testEpoch.Add(-core.MaxMessageAge-time.Minute), f.myPK)
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
 		}},
-		{"from the future", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		{"from the future", corrupt, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			id, raw := f.frameFrom(t, f.gpu, testEpoch.Add(core.MaxClockSkew+time.Minute), f.myPK)
 			return transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: id, Frame: raw}
 		}},
-		{"no handler for kind", func(t *testing.T, f *inboundFixture) transport.Delivery {
+		// A kind this version has no handler for (a newer peer's) is not corrupt.
+		{"no handler for kind", DropCounts{}, func(t *testing.T, f *inboundFixture) transport.Delivery {
 			env, err := core.NewEnvelope(f.clock, f.gpu.id.MachineID(), f.me.MachineID(), core.KindFileOffer, core.EmptyBody{})
 			if err != nil {
 				t.Fatal(err)
@@ -236,8 +239,8 @@ func TestInboundDrops(t *testing.T) {
 			if got := mb.ackedSeqs(); !slices.Equal(got, []uint64{1}) {
 				t.Fatalf("dropped delivery must still be acked, acks = %v", got)
 			}
-			if f.in.Dropped() != 1 {
-				t.Fatalf("Dropped = %d", f.in.Dropped())
+			if got := f.in.Drops(); got != tc.want {
+				t.Fatalf("drops = %+v, want %+v", got, tc.want)
 			}
 			if n := len(f.sender.envelopes()); n != 0 {
 				t.Fatalf("sent %d envelopes for a dropped delivery", n)
@@ -392,6 +395,60 @@ func TestInboundStalePrekeyReplyOncePerMessage(t *testing.T) {
 	sent := f.sender.ofKind(core.KindControlStalePrekey)
 	if len(sent) != 2 {
 		t.Fatalf("stale_prekey replies = %d, want one per message ID", len(sent))
+	}
+}
+
+// A frame sealed to a prekey this machine no longer has gets no
+// control.stale_prekey when its (signed) message ID is older than
+// core.MaxMessageAge or too far in the future: a relay replaying old frames
+// cannot make this machine answer them.
+func TestInboundStalePrekeyReplyNeedsAFreshID(t *testing.T) {
+	f := newInboundFixture(t)
+	gone, err := keys.GeneratePrekey(testEpoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldID, oldRaw := f.frameFrom(t, f.gpu, testEpoch.Add(-core.MaxMessageAge-time.Hour), gone.Signed(f.me))
+	futureID, futureRaw := f.frameFrom(t, f.gpu, testEpoch.Add(core.MaxClockSkew+time.Hour), gone.Signed(f.me))
+	mb := f.run(t, transport.Delivery{Seq: 1, From: f.gpu.id.Public(), ID: oldID, Frame: oldRaw},
+		transport.Delivery{Seq: 2, From: f.gpu.id.Public(), ID: futureID, Frame: futureRaw})
+	if sent := f.sender.ofKind(core.KindControlStalePrekey); len(sent) != 0 {
+		t.Fatalf("stale_prekey sent for an old or future ID: %+v", sent)
+	}
+	if got := mb.ackedSeqs(); !slices.Equal(got, []uint64{1, 2}) {
+		t.Fatalf("acks = %v", got)
+	}
+	if got := f.in.Drops(); got != (DropCounts{Corrupt: 2}) {
+		t.Fatalf("drops = %+v, want 2 corrupt", got)
+	}
+}
+
+// control.stale_prekey replies are rate limited per peer.
+func TestInboundStalePrekeyReplyRateLimited(t *testing.T) {
+	f := newInboundFixture(t)
+	gone, err := keys.GeneratePrekey(testEpoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ds []transport.Delivery
+	for i := range core.StalePrekeyRepliesPerMinute + 5 {
+		id, raw := f.frameFrom(t, f.gpu, testEpoch, gone.Signed(f.me))
+		ds = append(ds, transport.Delivery{Seq: uint64(i + 1), From: f.gpu.id.Public(), ID: id, Frame: raw})
+	}
+	f.run(t, ds...)
+	if n := len(f.sender.ofKind(core.KindControlStalePrekey)); n != core.StalePrekeyRepliesPerMinute {
+		t.Fatalf("stale_prekey replies = %d, want %d", n, core.StalePrekeyRepliesPerMinute)
+	}
+	// Another peer has its own budget, and a minute later this one does again.
+	other := newTestPeer(t, "laptop")
+	mustPut(t, f.peers, other.rec)
+	id, raw := f.frameFrom(t, other, testEpoch, gone.Signed(f.me))
+	f.run(t, transport.Delivery{Seq: 100, From: other.id.Public(), ID: id, Frame: raw})
+	f.clock.Advance(time.Minute)
+	id, raw = f.frameFrom(t, f.gpu, f.clock.Now(), gone.Signed(f.me))
+	f.run(t, transport.Delivery{Seq: 101, From: f.gpu.id.Public(), ID: id, Frame: raw})
+	if n := len(f.sender.ofKind(core.KindControlStalePrekey)); n != core.StalePrekeyRepliesPerMinute+2 {
+		t.Fatalf("stale_prekey replies = %d, want %d", n, core.StalePrekeyRepliesPerMinute+2)
 	}
 }
 

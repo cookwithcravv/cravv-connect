@@ -229,6 +229,8 @@ type recordingSender struct {
 	held     []core.MachineID
 	released []core.MachineID
 	forgot   []core.MachineID
+	// directFail makes SendDirect to these peers fail (after logging the attempt).
+	directFail map[core.MachineID]bool
 }
 
 func (r *recordingSender) SendEnvelope(_ context.Context, to core.MachineID, kind core.Kind, linkID string, body any) (string, error) {
@@ -254,6 +256,9 @@ func (r *recordingSender) SendDirect(_ context.Context, peer store.Peer, kind co
 		return err
 	}
 	r.log.add("direct %s %s", kind, peer.MachineID.Short())
+	if r.directFail[peer.MachineID] {
+		return ErrOffline
+	}
 	r.direct = append(r.direct, sentEnvelope{To: peer.MachineID, Kind: kind, Body: b})
 	return nil
 }

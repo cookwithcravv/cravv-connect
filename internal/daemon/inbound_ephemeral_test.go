@@ -59,6 +59,38 @@ func TestInboundEphemeralFrames(t *testing.T) {
 	if seen, _ := f.dedup.Seen(context.Background(), fresh); seen {
 		t.Fatal("an ephemeral frame was marked in the dedup store")
 	}
+	// Stale presence is expected after being offline: no warning.
+	if got := f.in.Drops(); got != (DropCounts{}) {
+		t.Fatalf("drops = %+v, want none counted for a stale ping", got)
+	}
+	if w := inboundWarnings(f.in)(); len(w) != 0 {
+		t.Fatalf("warnings for a stale ping: %q", w)
+	}
+}
+
+// Status names each kind of dropped frame in its own words.
+func TestInboundWarningsWording(t *testing.T) {
+	f := newInboundFixture(t)
+	stranger := newTestPeer(t, "stranger")
+	sid, sraw := f.frameFrom(t, stranger, testEpoch, f.myPK)
+	f.run(t,
+		transport.Delivery{Seq: 1, From: stranger.id.Public(), ID: sid, Frame: sraw},
+		transport.Delivery{Seq: 2, From: stranger.id.Public(), ID: sid, Frame: sraw},
+		transport.Delivery{Seq: 3, From: f.gpu.id.Public(), ID: "x", Frame: []byte("not json")},
+	)
+	p := f.gpu.rec
+	p.Paused = true
+	mustPut(t, f.peers, p)
+	pid, praw := f.frameFrom(t, f.gpu, testEpoch, f.myPK)
+	f.run(t, transport.Delivery{Seq: 4, From: f.gpu.id.Public(), ID: pid, Frame: praw})
+	want := []string{
+		"1 corrupt or unverifiable frames dropped",
+		"2 messages from unknown machines dropped",
+		"1 messages from machines you paused dropped",
+	}
+	if got := inboundWarnings(f.in)(); !slices.Equal(got, want) {
+		t.Fatalf("warnings = %q, want %q", got, want)
+	}
 }
 
 func TestOutboxRefusesEphemeralKinds(t *testing.T) {

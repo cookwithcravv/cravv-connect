@@ -37,7 +37,13 @@ func (f *flakyInbox) failNext(n int) {
 // d2FlakyTasks is d2Tasks with an inbox whose writes can be made to fail.
 func d2FlakyTasks(t *testing.T) (*d2TaskEnv, *flakyInbox) {
 	t.Helper()
-	e := d2Tasks(t, core.PermTasksAuto)
+	return d2FlakyTasksWith(t, core.PermTasksAuto)
+}
+
+// d2FlakyTasksWith is d2FlakyTasks where gpu-box may do perm on the link.
+func d2FlakyTasksWith(t *testing.T, perm core.Permission) (*d2TaskEnv, *flakyInbox) {
+	t.Helper()
+	e := d2Tasks(t, perm)
 	flaky := &flakyInbox{InboxStore: e.st}
 	e.inbox = NewInboxService(flaky, e.shared, e.st, e.st, e.clock)
 	e.tasks = NewTaskService(TaskDeps{
@@ -90,6 +96,41 @@ func TestHandleCreateRedeliversAfterRetryableFailure(t *testing.T) {
 	}
 	if items := inboxFor(t, e, id); len(items) != 1 {
 		t.Fatalf("inbox items for the task = %d, want 1", len(items))
+	}
+}
+
+// A held task whose approval notice was not stored (a retryable failure),
+// and which a human then approved, is delivered once: the relay's
+// redelivery of the task.create must not deliver it a second time.
+func TestApprovedTaskIsNotDeliveredAgainOnRedelivery(t *testing.T) {
+	ctx := context.Background()
+	e, flaky := d2FlakyTasksWith(t, core.PermTasksAsk)
+	id := core.NewID()
+	env := d2Env(t, e.peer, core.KindTaskCreate, e.link.ID, core.TaskCreateBody{TaskID: id, Instructions: "work"})
+	flaky.failNext(1)
+	var re *RetryableError
+	if err := e.tasks.HandleCreate(withLink(ctx, e.link), e.peer, env); !errors.As(err, &re) {
+		t.Fatalf("first attempt err = %v, want retryable", err)
+	}
+	if tk := e.state(t, id); tk.State != core.TaskAwaitingApproval {
+		t.Fatalf("state %s, want awaiting_approval", tk.State)
+	}
+	if err := e.tasks.Decide(ctx, id, true, AuthChat); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := e.tasks.HandleCreate(withLink(ctx, e.link), e.peer, env); err != nil {
+			t.Fatalf("redelivery: %v", err)
+		}
+	}
+	n := 0
+	for _, it := range inboxFor(t, e, id) {
+		if it.Kind == core.KindTaskCreate {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("the approved task was delivered %d times, want once", n)
 	}
 }
 

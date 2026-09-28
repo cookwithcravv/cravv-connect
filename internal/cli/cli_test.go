@@ -211,7 +211,7 @@ func TestApproveSingle(t *testing.T) {
 func TestResetIdentityRequiresConfirmation(t *testing.T) {
 	fd := newFakeDaemon(t)
 	fd.reply(ipc.MethodStatus, ipc.GateAllowWhenKilled, ipc.StatusResult{MachineID: "abcdefghijklmnopqrstuvwxyz"})
-	fd.reply(ipc.MethodResetIdentity, ipc.GateUnlock, nil)
+	fd.reply(ipc.MethodResetIdentity, ipc.GateUnlock, ipc.ResetIdentityResult{Untold: []string{"gpu-box", "laptop"}})
 	fd.start()
 	r := fd.run(&fakePrompter{lines: []string{"abcdefghijklmnoX"}}, "reset-identity")
 	if r.code != 1 || !strings.Contains(r.stderr, "confirmation did not match") || slices.Contains(fd.methods(), ipc.MethodResetIdentity) {
@@ -220,6 +220,10 @@ func TestResetIdentityRequiresConfirmation(t *testing.T) {
 	r = fd.run(&fakePrompter{lines: []string{"abcdefghijklmnop"}, passwords: []string{"pw"}}, "reset-identity")
 	if r.code != 0 || !strings.Contains(r.stdout, "Identity reset.") {
 		t.Fatalf("confirmed: %d %q %q", r.code, r.stdout, r.stderr)
+	}
+	// Peers that were not told must unpair the old machine themselves.
+	if !strings.Contains(r.stdout, "gpu-box, laptop") || !strings.Contains(r.stdout, "cravv-connect unpair") {
+		t.Fatalf("untold peers not reported: %q", r.stdout)
 	}
 }
 

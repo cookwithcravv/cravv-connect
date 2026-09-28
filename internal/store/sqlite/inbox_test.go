@@ -190,3 +190,29 @@ func TestSessionUnreadGroups(t *testing.T) {
 		t.Fatalf("empty session matched %+v", got)
 	}
 }
+
+func TestLinkUnread(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	add := func(to, link, body string) int64 {
+		seq, err := db.AddItem(ctx, store.InboxItem{MsgID: core.NewID(), From: "m1", ToSession: to, LinkID: link,
+			Kind: core.KindChat, Body: []byte(body), ReceivedAt: t0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return seq
+	}
+	first := add("S1", "L1", "12345")
+	add("S1", "L1", "123")
+	add("S1", "L2", "1234567") // another link
+	add("S2", "L1", "1234567") // another session
+	if n, b, err := db.LinkUnread(ctx, "S1", "L1", 0); err != nil || n != 2 || b != 8 {
+		t.Fatalf("LinkUnread = %d items, %d bytes, %v; want 2, 8", n, b, err)
+	}
+	if n, b, _ := db.LinkUnread(ctx, "S1", "L1", first); n != 1 || b != 3 {
+		t.Fatalf("after the cursor = %d items, %d bytes; want 1, 3", n, b)
+	}
+	if n, b, _ := db.LinkUnread(ctx, "S9", "L1", 0); n != 0 || b != 0 {
+		t.Fatalf("unknown session = %d, %d", n, b)
+	}
+}

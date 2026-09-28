@@ -304,7 +304,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	g.versions = NewVersionNotices()
 	g.prekeys = NewPrekeyManager(db, db, id, g.outbound, clock)
 	g.files = NewFileService(FileDeps{
-		Blobs: func() transport.BlobStore { return d.blobs(id) }, Peers: db, Links: db, Files: db, Inbox: d.inbox,
+		Blobs: func() transport.BlobStore { return d.blobs(id) }, Peers: db, Links: db, Sessions: d.shared, Files: db, Inbox: d.inbox,
 		Sender: g.outbound, Guard: d.allow, FilesDir: d.opts.Paths.Files, Quota: d.opts.Config.PeerQuota,
 		Policy: PermissionPolicy{}, Clock: clock, Audit: lg, Log: d.log, RetryDelay: d.opts.FileRetryDelay,
 		Killed: d.kill.Killed,
@@ -327,6 +327,7 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	g.links.AddLowerObserver(g.tasks)
 	d.buildManaged(g)
 	g.inbound = NewInbound(id, db, db, g.prekeys, g.registry, g.outbound, clock, d.kill.Killed, d.log)
+	g.limiter = NewInboundLimiter(d.inbox, DefaultInboundLimits(), clock, lg)
 	g.pairing = NewPairingService(id, d.rooms(), d, pake.SPAKE2{}, db, g.prekeys, g.outbound, d,
 		PairingConfig{DeviceName: d.opts.Config.DeviceName, RelayURL: d.opts.Config.RelayURL}, clock, lg)
 	registerHandlers(g, d.inbox, d.shared, db)
@@ -334,7 +335,8 @@ func (d *Daemon) build(id *keys.Identity) *services {
 		Version: d.opts.Version, MachineID: id.MachineID(), DeviceName: d.opts.Config.DeviceName, RelayURL: d.opts.Config.RelayURL,
 		Mailboxes: d, Killed: d.kill.Killed, Peers: db, Outbox: db, Shared: d.shared, Inbox: d.inbox,
 		Tasks: g.tasks, Activity: g.activity,
-		Errors: []func() []string{d.authErrors, d.relayErrors, g.outbound.Errors, inboundWarnings(g.inbound), g.versions.Errors},
+		Errors: []func() []string{d.authErrors, d.relayErrors, g.outbound.Errors, inboundWarnings(g.inbound),
+			g.limiter.Warnings, g.versions.Errors},
 	})
 	return g
 }
@@ -349,9 +351,11 @@ func registerHandlers(g *services, inbox *InboxService, sessions SessionLookup, 
 		return LinkGate{Links: db, Sessions: sessions, Replies: g.versions.Replier(g.replies), Inner: inner, OnReject: onReject, Seen: g.versions.Seen,
 			Traffic: g.presence.Traffic}
 	}
-	r.Register(core.KindChat, gate(NewChatHandler(inbox), nil))
+	// Chat and task.update are what a link can pile up here: both pass the
+	// per-link inbound limits.
+	r.Register(core.KindChat, gate(g.limiter.Wrap(NewChatHandler(inbox)), nil))
 	r.Register(core.KindTaskCreate, gate(HandlerFunc(g.tasks.HandleCreate), HandlerFunc(g.tasks.RejectCreate)))
-	r.Register(core.KindTaskUpdate, gate(HandlerFunc(g.tasks.HandleUpdate), nil))
+	r.Register(core.KindTaskUpdate, gate(g.limiter.Wrap(HandlerFunc(g.tasks.HandleUpdate)), nil))
 	r.Register(core.KindTaskCancel, gate(HandlerFunc(g.tasks.HandleCancel), nil))
 	r.Register(core.KindFileOffer, gate(HandlerFunc(g.files.HandleOffer), HandlerFunc(g.files.RejectOffer)))
 	RegisterControlHandlers(r, db, g.peers, g.outbound)
@@ -418,8 +422,15 @@ func (d *Daemon) relayErrors() []string {
 func inboundWarnings(in *Inbound) func() []string {
 	return func() []string {
 		var out []string
-		if n := in.Dropped(); n > 0 {
-			out = append(out, fmt.Sprintf("%d corrupt or unverifiable frames dropped", n))
+		drops := in.Drops()
+		if drops.Corrupt > 0 {
+			out = append(out, fmt.Sprintf("%d corrupt or unverifiable frames dropped", drops.Corrupt))
+		}
+		if drops.Unknown > 0 {
+			out = append(out, fmt.Sprintf("%d messages from unknown machines dropped", drops.Unknown))
+		}
+		if drops.Paused > 0 {
+			out = append(out, fmt.Sprintf("%d messages from machines you paused dropped", drops.Paused))
 		}
 		if n := in.SkewRejected(); n > 0 {
 			out = append(out, fmt.Sprintf("%d messages rejected for a timestamp in the future: check the clocks", n))

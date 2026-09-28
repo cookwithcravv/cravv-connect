@@ -43,6 +43,7 @@ func init() {
 		{daemon.ErrOffline, KindOffline},
 		{daemon.ErrOfflineForPairing, KindOffline},
 		{daemon.ErrPairingFailed, KindPairingFailed},
+		{daemon.ErrPairingPeerOutdated, KindPairingFailed},
 		{daemon.ErrPairingExpired, KindPairingExpired},
 		{daemon.ErrPairingInProgress, KindBusy},
 		{daemon.ErrPairingClosed, KindOffline},

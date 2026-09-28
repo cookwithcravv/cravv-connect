@@ -173,6 +173,27 @@ func (s *PeerService) Unpair(ctx context.Context, alias string) error {
 	return s.remove(ctx, p, false)
 }
 
+// UnpairAll unpairs every peer the way Unpair does (a direct
+// control.unpaired, best effort, then deny and delete) before an identity
+// reset. It returns the aliases of the peers the notice did not reach
+// (this machine was offline or killed, or the relay refused it): those
+// still list this machine until their human unpairs it. Every peer is
+// removed even when another fails; the errors are joined.
+func (s *PeerService) UnpairAll(ctx context.Context) (untold []string, err error) {
+	peers, err := s.peers.ListPeers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var errs []error
+	for _, p := range peers {
+		if s.out.SendDirect(ctx, p, core.KindControlUnpaired, core.EmptyBody{}) != nil {
+			untold = append(untold, p.Alias)
+		}
+		errs = append(errs, s.remove(ctx, p, false))
+	}
+	return untold, errors.Join(errs...)
+}
+
 // RemoveByPeer handles a control.unpaired from the peer itself: same cleanup as Unpair, no notice back.
 func (s *PeerService) RemoveByPeer(ctx context.Context, id core.MachineID) error {
 	p, err := s.peers.GetPeer(ctx, id)

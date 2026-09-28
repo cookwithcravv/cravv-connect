@@ -31,6 +31,10 @@ var (
 	ErrOfflineForPairing = errors.New("not connected to the relay")
 	// ErrPairingClosed is returned by Start after Close (daemon shutdown or identity reset).
 	ErrPairingClosed = errors.New("pairing service stopped")
+	// ErrPairingPeerOutdated is returned when the peer's payload carries no
+	// identity-key binding: it runs cravv-connect 0.2.1 or older.
+	ErrPairingPeerOutdated = errors.New("pairing refused: the other machine runs an older cravv-connect that does not " +
+		"prove its identity key; update cravv-connect on both machines and pair again")
 )
 
 // pairAAD binds the sealed messages to this protocol; pairAck is the final confirmation.
@@ -59,6 +63,9 @@ type pairPayload struct {
 	RelayURL string                `json:"relay_url"`
 	Name     string                `json:"name"`
 	Invite   string                `json:"invite,omitempty"` // creator (side A) only
+	// BindSig is the sender's IK signature over pake.BindTranscript(K, its side):
+	// proof that the sender holds IK in this very exchange.
+	BindSig []byte `json:"bind_sig,omitempty"`
 }
 
 type pendingPair struct {
@@ -284,9 +291,11 @@ func (s *PairingService) Finalize(ctx context.Context, pendingID, alias string, 
 // exchange runs the symmetric protocol. Both sides:
 //  1. send the PAKE message, receive the peer's, derive the key;
 //  2. send ConfirmTag(key, own side), receive the peer's tag and check it;
-//  3. send the payload sealed with ChaCha20-Poly1305 under SessionKey(key)
+//  3. send the payload, with an IK signature over BindTranscript(key, own
+//     side), sealed with ChaCha20-Poly1305 under SessionKey(key)
 //     (nonce 0 for A, 1 for B);
-//  4. receive and open the peer's payload and verify it;
+//  4. receive and open the peer's payload and verify it, including that its
+//     IK signed BindTranscript(key, peer side);
 //  5. send a sealed ack (nonce 2 for A, 3 for B) and check the peer's, so a payload
 //     tampered in either direction fails on both sides.
 //
@@ -328,6 +337,7 @@ func (s *PairingService) exchange(ctx context.Context, room transport.Room, side
 	if err != nil {
 		return fail("aead", err)
 	}
+	mine.BindSig = s.identity.Sign(pake.BindTranscript(key, side))
 	plain, err := json.Marshal(mine)
 	if err != nil {
 		return fail("encode", err)
@@ -347,7 +357,10 @@ func (s *PairingService) exchange(ctx context.Context, room transport.Room, side
 	if err := json.Unmarshal(opened, &peer); err != nil {
 		return fail("payload", err)
 	}
-	if err := s.validatePeer(peer); err != nil {
+	if err := s.validatePeer(peer, key, peerSide); err != nil {
+		if errors.Is(err, ErrPairingPeerOutdated) {
+			return pairPayload{}, err
+		}
 		return fail("payload", err)
 	}
 	if err := room.Send(ctx, aead.Seal(nil, pairNonce(side, 1), pairAck, pairAAD)); err != nil {
@@ -373,12 +386,20 @@ func pairNonce(sender pake.Side, msg byte) []byte {
 	return n
 }
 
-func (s *PairingService) validatePeer(p pairPayload) error {
+// validatePeer checks the payload the machine on peerSide sent in the
+// exchange that agreed on key.
+func (s *PairingService) validatePeer(p pairPayload, key []byte, peerSide pake.Side) error {
 	if len(p.IK) != ed25519.PublicKeySize {
 		return errors.New("bad identity key")
 	}
 	if keys.MachineIDOf(p.IK) == s.identity.MachineID() {
 		return errors.New("cannot pair with this machine itself")
+	}
+	if len(p.BindSig) == 0 {
+		return ErrPairingPeerOutdated
+	}
+	if !ed25519.Verify(ed25519.PublicKey(p.IK), pake.BindTranscript(key, peerSide), p.BindSig) {
+		return errors.New("the identity key does not sign this exchange")
 	}
 	if err := keys.SignedPrekeyFromWire(p.Prekey).Verify(p.IK); err != nil {
 		return err

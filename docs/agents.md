@@ -15,7 +15,8 @@ The MCP server takes its project folder from the directory the agent starts
 it in. If your editor starts MCP servers somewhere else, add
 `"--project-dir", "<absolute project path>"` after `"mcp"`; VS Code and
 Cursor accept `${workspaceFolder}` there. Files a chat sends must be inside
-that folder or a folder you allowed with `cravv-connect allow-path`.
+that folder or a folder you allowed with `cravv-connect allow-path`
+(a managed run sends from its offer's folder only).
 
 ## The tools
 

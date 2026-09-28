@@ -18,7 +18,8 @@ var ErrClosed = errors.New("relay: connection closed")
 var ErrProtocol = errors.New("relay: protocol violation")
 
 // ServerError is an error{code,message} frame or a res{status:"error",code}.
-// Code "forbidden" matches transport.ErrRelayForbidden with errors.Is.
+// Code "forbidden" matches transport.ErrRelayForbidden and code "internal"
+// matches transport.ErrRelayInternal with errors.Is.
 type ServerError struct {
 	Code    string
 	Message string
@@ -32,8 +33,11 @@ func (e *ServerError) Error() string {
 }
 
 func (e *ServerError) Unwrap() error {
-	if e.Code == relayproto.CodeForbidden {
+	switch e.Code {
+	case relayproto.CodeForbidden:
 		return transport.ErrRelayForbidden
+	case relayproto.CodeInternal:
+		return transport.ErrRelayInternal
 	}
 	return nil
 }
