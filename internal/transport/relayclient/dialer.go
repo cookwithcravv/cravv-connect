@@ -17,7 +17,10 @@ type dialer struct{ c *Client }
 // reports the key as unregistered, and returns a live Mailbox. It never retries.
 func (d dialer) Dial(ctx context.Context, id transport.Signer, creds transport.Credentials) (transport.Mailbox, error) {
 	u := d.c.wsBase + relayproto.PathConnect + "?" + relayproto.QueryIK + "=" + url.QueryEscape(relayproto.B64(id.Public()))
-	ws, _, err := websocket.Dial(ctx, u, &websocket.DialOptions{HTTPClient: d.c.http})
+	// The connection does not depend on dctx once the upgrade is done.
+	dctx, cancel := bounded(ctx, d.c.dialTimeout)
+	ws, _, err := websocket.Dial(dctx, u, &websocket.DialOptions{HTTPClient: d.c.http})
+	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("relay: dial: %w", err)
 	}
@@ -28,7 +31,7 @@ func (d dialer) Dial(ctx context.Context, id transport.Signer, creds transport.C
 		ws.CloseNow()
 		return nil, err
 	}
-	return newMailbox(ws, d.c.pingInterval, d.c.pingTimeout), nil
+	return newMailbox(ws, d.c.pingInterval, d.c.pingTimeout, d.c.reqTimeout), nil
 }
 
 func (d dialer) handshake(ctx context.Context, ws *websocket.Conn, id transport.Signer, creds transport.Credentials) error {

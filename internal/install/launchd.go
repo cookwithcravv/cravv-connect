@@ -7,16 +7,25 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // LaunchdLabel is the launchd job label.
 const LaunchdLabel = "dev.cravv.connect"
+
+// LaunchdUnloadWait bounds how long Stop waits for launchd to remove the
+// job after bootout, which returns before launchd has finished.
+const LaunchdUnloadWait = 10 * time.Second
 
 // Launchd manages ~/Library/LaunchAgents/dev.cravv.connect.plist.
 type Launchd struct {
 	Cfg ServiceConfig
 	Run Runner
 	UID int
+	// UnloadWait and Poll bound and pace the wait for an unloaded job;
+	// zero means LaunchdUnloadWait and 100 ms.
+	UnloadWait time.Duration
+	Poll       time.Duration
 }
 
 func (l *Launchd) plistPath() string {
@@ -80,31 +89,67 @@ func (l *Launchd) Install(ctx context.Context, bin string) error {
 	if err := writeFileAtomic(l.plistPath(), []byte(l.Plist(bin)), 0o644); err != nil {
 		return err
 	}
-	_, _ = l.Run.Run(ctx, "launchctl", "bootout", l.target())
+	if err := l.Stop(ctx); err != nil {
+		return err
+	}
 	_, err := l.Run.Run(ctx, "launchctl", "bootstrap", l.domain(), l.plistPath())
 	return err
 }
 
 // Uninstall unloads the job and deletes the plist.
 func (l *Launchd) Uninstall(ctx context.Context) error {
-	_, _ = l.Run.Run(ctx, "launchctl", "bootout", l.target())
+	_ = l.Stop(ctx)
 	if err := os.Remove(l.plistPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil
 }
 
-// Start loads the job if needed, otherwise restarts it.
+// loaded reports whether launchd has the job.
+func (l *Launchd) loaded(ctx context.Context) bool {
+	_, err := l.Run.Run(ctx, "launchctl", "print", l.target())
+	return err == nil
+}
+
+// Start bootstraps the job, which starts the daemon (RunAtLoad). Only a job
+// launchd still has loaded (a daemon that exited on its own) is kickstarted
+// instead: kickstarting a job that is being unloaded does nothing.
 func (l *Launchd) Start(ctx context.Context) error {
-	if _, err := l.Run.Run(ctx, "launchctl", "kickstart", l.target()); err == nil {
-		return nil
+	if l.loaded(ctx) {
+		_, err := l.Run.Run(ctx, "launchctl", "kickstart", l.target())
+		return err
 	}
 	_, err := l.Run.Run(ctx, "launchctl", "bootstrap", l.domain(), l.plistPath())
 	return err
 }
 
-// Stop unloads the job (KeepAlive would otherwise restart the daemon).
+// Stop unloads the job (KeepAlive would otherwise restart the daemon) and
+// waits until launchd has removed it, so a Start right after finds it gone.
+// A job that is not loaded is already stopped.
 func (l *Launchd) Stop(ctx context.Context) error {
-	_, err := l.Run.Run(ctx, "launchctl", "bootout", l.target())
-	return err
+	if _, err := l.Run.Run(ctx, "launchctl", "bootout", l.target()); err != nil {
+		if !l.loaded(ctx) {
+			return nil
+		}
+		return err
+	}
+	wait, poll := l.UnloadWait, l.Poll
+	if wait <= 0 {
+		wait = LaunchdUnloadWait
+	}
+	if poll <= 0 {
+		poll = 100 * time.Millisecond
+	}
+	deadline := time.Now().Add(wait)
+	for l.loaded(ctx) {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("launchd did not unload %s within %s", LaunchdLabel, wait)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(poll):
+		}
+	}
+	return nil
 }

@@ -7,7 +7,7 @@ var (
 	ErrNotFound       = errors.New("not found")
 	ErrNotPermitted   = errors.New("not permitted on this link")
 	ErrPaused         = errors.New("peer is paused")
-	ErrPausedByPeer   = errors.New("paused by peer")
+	ErrPausedByPeer   = errors.New("the peer paused or unpaired this machine")
 	ErrKilled         = errors.New("kill switch is on")
 	ErrAuthRequired   = errors.New("password required")
 	ErrLocked         = errors.New("too many failed password attempts; locked")

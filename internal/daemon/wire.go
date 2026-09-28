@@ -24,6 +24,10 @@ import (
 	"github.com/cookwithcravv/cravv-connect/internal/transport/relayclient"
 )
 
+// ReconnectStable is how long a relay connection must stay up before the
+// reconnect backoff starts over from Options.ReconnectMin.
+const ReconnectStable = 60 * time.Second
+
 // Options configure New. Zero values get production defaults.
 type Options struct {
 	Paths    config.Paths
@@ -38,6 +42,7 @@ type Options struct {
 	Username         string                                           // for the password Guard; default auth.CurrentUsername()
 	IdentityStore    func(settings store.SettingsStore) IdentityStore // default DefaultIdentityStore
 	ReconnectMin     time.Duration                                    // default core.BackoffMin
+	ReconnectStable  time.Duration                                    // a connection this long resets the backoff; default 60 s
 	MaintenanceEvery time.Duration                                    // default 1 minute
 	PresenceEvery    time.Duration                                    // default core.PresenceInterval
 	FileRetryDelay   time.Duration                                    // default 2 seconds
@@ -194,6 +199,9 @@ func normalize(o *Options) error {
 	if o.ReconnectMin <= 0 {
 		o.ReconnectMin = core.BackoffMin
 	}
+	if o.ReconnectStable <= 0 {
+		o.ReconnectStable = ReconnectStable
+	}
 	if o.MaintenanceEvery <= 0 {
 		o.MaintenanceEvery = time.Minute
 	}
@@ -293,14 +301,16 @@ func (d *Daemon) build(id *keys.Identity) *services {
 	// as soon as Kill starts (Killed).
 	g.outbound = NewOutbound(id, db, db, d, clock, func() bool { return !d.kill.SendingAllowed() }, d.log)
 	g.peers = NewPeerService(db, d, g.outbound, lg, clock)
+	g.outbound.SetPauseRecorder(g.peers)
 	g.discover = NewDiscovery(d.shared, g.peers, g.outbound, clock, d.log)
 	g.replies = NewLinkReplies(g.outbound, clock, d.log)
 	g.links = NewLinkService(LinkDeps{
 		Links: db, Sessions: d.shared, Peers: db, Directory: g.discover, Sender: g.outbound, Replies: g.replies,
-		Inbox: d.inbox, Desktop: d.opts.Desktop, Managed: d.host, Clock: clock, Audit: lg, Log: d.log,
+		Inbox: d.inbox, Desktop: d.opts.Desktop, Managed: d.host, Unsent: g.outbound, Clock: clock, Audit: lg, Log: d.log,
 	})
 	g.presence = NewPresenceService(db, db, g.links, g.outbound, clock, d.log)
 	g.presence.SetGrace(presenceGrace(d.shared, db, offersNow{d}))
+	g.presence.SetOnline(func() bool { _, ok := d.Mailbox(); return ok })
 	g.versions = NewVersionNotices()
 	g.prekeys = NewPrekeyManager(db, db, id, g.outbound, clock)
 	g.files = NewFileService(FileDeps{

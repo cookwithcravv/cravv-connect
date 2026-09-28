@@ -23,6 +23,41 @@ change behaviour or wire formats, and the notes say so.
   vulnerabilities in `net/http`, `crypto/tls`, `crypto/x509`, `net/url`,
   `html/template`, `encoding/asn1` and `net/textproto`.
 
+### Fixed
+
+- A relay that accepts the connection and then drops it no longer makes the
+  daemon reconnect every second: the reconnect delay keeps growing (up to 5
+  minutes) until a connection stays up for a minute.
+- A machine whose own relay connection is down no longer closes its links
+  with `presence_timeout`: only silence after a ping that actually left,
+  while connected, counts against a peer.
+- A peer that has no relay mailbox yet (just paired, or set up again) no
+  longer loses messages: they wait and go out once it has one, and status
+  says how many are waiting. A link request that never left before it timed
+  out is reported as "not sent: <alias> has no mailbox on the relay yet".
+- A relay request that never gets an answer fails after 30 seconds and
+  the connection is replaced, instead of holding up every outgoing message;
+  `kill` no longer waits behind such a request.
+- `cravv-connect daemon stop && cravv-connect daemon start` no longer fails
+  now and then with "daemon did not start within 5s": stop waits until
+  launchd has unloaded the job and the old process has exited, start loads
+  the job again rather than kickstarting one that is going away, and start
+  waits up to 15 seconds and shows the end of the daemon's stderr log when
+  it gives up. On Linux, start clears a unit's failed state first.
+- `cravv-connect daemon start` on a machine that is not set up says to run
+  `cravv-connect setup` at once, and a daemon that exits while starting is
+  reported right away with its error output.
+- Network waits are bounded: a relay dial gives up after 30 seconds (and
+  the kill switch stops one in progress), a file chunk request after 2
+  minutes (it then counts as a failed attempt), and any HTTP response
+  header after 30 seconds.
+- When the relay says a peer no longer allows this machine, its links now
+  close and its tasks end, as when the peer says it paused you. `peers` and
+  the web UI show such a peer as "paused or unpaired you".
+- A peer that was offline for more than a week (longer than the relay
+  keeps a prekey announcement) is sent this machine's current prekey again
+  as soon as it sends anything sealed to an older one.
+
 ## v0.2.1 (2026-09-28)
 
 ### Fixed

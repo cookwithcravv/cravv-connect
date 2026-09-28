@@ -55,6 +55,7 @@ func TestLimitValues(t *testing.T) {
 		{"PresenceMaxAge", PresenceMaxAge, 120 * time.Second},
 		{"UnknownLinkReplyEvery", UnknownLinkReplyEvery, time.Minute},
 		{"UnsupportedReplyEvery", UnsupportedReplyEvery, time.Hour},
+		{"PrekeyReannounceEvery", PrekeyReannounceEvery, 10 * time.Minute},
 	}
 	for _, tt := range durs {
 		if tt.got != tt.want {

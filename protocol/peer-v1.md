@@ -274,7 +274,7 @@ The relay's answer to `send` decides what happens:
 | Relay status | Sender action |
 |---|---|
 | `queued` | Non-control kinds: mark `queued`; if no `control.delivered` arrives within 7 days (the relay queue TTL), the item goes back to `pending` and is sent again. Control kinds: delete the item (they are never confirmed) |
-| `not_allowed` | Within 30 minutes of pairing: the peer has most likely not finalized yet (it has not allowed this machine on the relay); retry with backoff capped at 5 seconds and mark nothing. Later: the peer paused this machine: mark the peer "paused by peer" and hold every non-control item for it until `control.resumed`. Control items keep retrying with backoff |
+| `not_allowed` | Within 30 minutes of pairing: the peer has most likely not finalized yet (it has not allowed this machine on the relay); retry with backoff capped at 5 seconds and mark nothing. Later: the peer paused (or unpaired) this machine: treat it like `control.paused` (mark the peer "paused by peer", hold every non-control item for it until `control.resumed`, and close its links). Control items keep retrying with backoff |
 | `too_large` | Drop the item and report it in `status` (items for a peer that is no longer paired are dropped the same way) |
 | `unknown_mailbox` | The peer has no mailbox on this relay yet (it just paired or set up again): back off from 1 second, doubling per attempt, at most 30 minutes, and report in `status` how many items wait for it. Any other answer for that peer retries its waiting items at once. An item still waiting when it is 21 days old is dropped and reported |
 | `queue_full`, `rate_limited`, `error` with code `internal`, network error | Back off: 1 second, doubling per attempt, at most 5 minutes. An `internal` answer fails that request only: the connection stays up |
@@ -519,7 +519,11 @@ A pending request is decided once, on the receiving side, by a human:
 accepted (at the level asked or lower) or rejected (`declined`).
 Accepting at `messages` or `tasks-ask` takes a chat decision or the
 password; accepting at `tasks-auto` takes the password. A request pending
-for 10 minutes is rejected with `timeout`.
+for 10 minutes is rejected with `timeout`. On the sending side, a request
+whose `link.request` is still waiting for the peer to have a relay mailbox
+(section 4.1, `unknown_mailbox`) when it times out is taken out of the
+outbox, and the session is told `not sent: <alias> has no mailbox on the
+relay yet` instead.
 
 **Request to an offer.** With `offer_id` instead of `to_session_id`, the
 receiver checks the offer's rules, caps and concurrency limit, creates a
@@ -578,6 +582,11 @@ read from the link, and closes a managed session whose link it was.
 - A side that finds more than 60 seconds passed since its last heartbeat
   round (it slept) resets its evidence, pings, and closes nothing in that
   round.
+- Only silence after a ping that left counts. While a side's own relay
+  mailbox is not live, and for a peer whose ping of the last round could
+  not be sent, that side treats the round like a sleep for those links: it
+  resets their evidence and marks or closes nothing. A machine that is
+  itself offline therefore never times out its links.
 - Both kinds are ephemeral (section 4, step 5): a ping or pong older than
   120 seconds, or more than 10 minutes in the future, is ignored.
 
@@ -651,6 +660,11 @@ checked to be inside `files/`.
   one superseded, and sends `control.prekey` to each peer it has not paused.
 - The same pass deletes private prekeys superseded more than 21 days ago. That
   covers the relay's 7-day queue plus 14 days of a sender retrying.
+- A peer that seals to a `pk_id` the receiver still has but has replaced
+  missed the `control.prekey` (a control item leaves the outbox once the
+  relay queued it, and the relay keeps it only 7 days). The receiver handles
+  the frame and sends that peer `control.prekey` with its current prekey
+  again, at most once per peer every 10 minutes.
 - A peer that missed the rotation (it was paused, or it was offline long
   enough for the old key to be purged) seals to a `pk_id` the receiver no
   longer has. The round trip:

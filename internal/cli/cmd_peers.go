@@ -33,7 +33,7 @@ func peerState(p ipc.PeerView) string {
 	case p.Paused:
 		return "paused"
 	case p.PausedByPeer:
-		return "paused by peer"
+		return "paused or unpaired you"
 	case p.Online:
 		return "online"
 	default:

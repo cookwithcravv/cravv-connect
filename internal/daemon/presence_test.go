@@ -372,3 +372,70 @@ func TestPresenceGraceByKind(t *testing.T) {
 type offerGetter func(ctx context.Context, id string) (store.Offer, error)
 
 func (f offerGetter) Get(ctx context.Context, id string) (store.Offer, error) { return f(ctx, id) }
+
+// setNoSend makes v's direct sends fail (its relay connection is down).
+func (n *v2Net) setNoSend(v *v2Node, fail bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.noSend == nil {
+		n.noSend = map[core.MachineID]bool{}
+	}
+	n.noSend[v.id] = fail
+}
+
+// This machine's own relay connection is down (its mailbox is not live and
+// its pings cannot leave): however long that lasts, the silence says nothing
+// about the peer, and no link is marked away or closed.
+func TestPresenceOwnOutageDoesNotCloseLinks(t *testing.T) {
+	n, a, b := linkNet(t)
+	l := linkUp(t, n, a, b, core.PermMessages)
+	tickBoth(t, n, a, b)
+	online := false
+	a.presence.SetOnline(func() bool { return online })
+	n.setNoSend(a, true)
+	n.setDown(a, true)
+	for elapsed := time.Duration(0); elapsed < core.PresenceTimeout+core.AwayGrace+5*time.Minute; elapsed += core.PresenceInterval {
+		tickAlice(t, n, a, core.PresenceInterval)
+	}
+	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkActive || !got.PresenceAway.IsZero() {
+		t.Fatalf("a link closed or away while this machine was offline: %+v", got)
+	}
+	if sent := n.sent(core.KindLinkClosed); len(sent) != 0 {
+		t.Fatalf("link.closed queued to a healthy peer: %d", len(sent))
+	}
+	// Back online: the peer answers and the link stays up.
+	online = true
+	n.setNoSend(a, false)
+	n.setDown(a, false)
+	for range 10 {
+		tickBoth(t, n, a, b)
+		n.clock.Advance(core.PresenceInterval)
+	}
+	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkActive || !got.PresenceAway.IsZero() {
+		t.Fatalf("after reconnecting: %+v", got)
+	}
+}
+
+// A mailbox that reports live while every ping fails (a flapping
+// connection) counts the same: silence after pings that never left is not
+// evidence. Once the pings leave again, a silent peer does time out.
+func TestPresencePingsThatDidNotLeaveDoNotCount(t *testing.T) {
+	n, a, b := linkNet(t)
+	l := linkUp(t, n, a, b, core.PermMessages)
+	tickBoth(t, n, a, b)
+	n.setNoSend(a, true)
+	n.setDown(b, true)
+	for elapsed := time.Duration(0); elapsed < core.PresenceTimeout+core.AwayGrace+time.Minute; elapsed += core.PresenceInterval {
+		tickAlice(t, n, a, core.PresenceInterval)
+	}
+	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkActive || !got.PresenceAway.IsZero() {
+		t.Fatalf("silence after unsent pings timed the link out: %+v", got)
+	}
+	n.setNoSend(a, false)
+	for elapsed := time.Duration(0); elapsed <= core.PresenceTimeout+core.AwayGrace+2*core.PresenceInterval; elapsed += core.PresenceInterval {
+		tickAlice(t, n, a, core.PresenceInterval)
+	}
+	if got := a.linkOf(t, b, l.aLink.ID); got.State != store.LinkClosed || got.Reason != core.ClosePresenceTimeout {
+		t.Fatalf("a silent peer with pings leaving: %+v", got)
+	}
+}

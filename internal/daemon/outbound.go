@@ -58,7 +58,8 @@ type Outbound struct {
 	logger    *slog.Logger
 	wake      chan struct{}
 
-	pass    sync.Mutex // serializes SendDue passes (the loop and Flush)
+	pass    chan struct{} // holds a token while a SendDue pass runs (the loop and the kill flush)
+	pauses  PauseRecorder // nil: markPausedByPeer only holds the outbox and marks the peer
 	mu      sync.Mutex
 	recent  []string
 	waiting map[core.MachineID]*noMailbox // items the relay had no mailbox for, by peer
@@ -86,8 +87,24 @@ func NewOutbound(id *keys.Identity, peers store.PeerStore, outbox store.OutboxSt
 		identity: id, peers: peers, outbox: outbox, mailboxes: mailboxes,
 		clock: clock, stopped: stopped, logger: logger,
 		wake:    make(chan struct{}, 1),
+		pass:    make(chan struct{}, 1),
 		waiting: map[core.MachineID]*noMailbox{},
 	}
+}
+
+// PauseRecorder records that a peer paused (or unpaired) this machine and
+// cuts it off: its links close and its tasks and files end. Implemented by
+// *PeerService.
+type PauseRecorder interface {
+	MarkPausedByPeer(ctx context.Context, id core.MachineID, paused bool) error
+}
+
+// SetPauseRecorder routes a relay's not_allowed (the peer paused or
+// unpaired this machine) through r, like a control.paused from the peer.
+func (o *Outbound) SetPauseRecorder(r PauseRecorder) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.pauses = r
 }
 
 // ErrNoLinkID is returned by SendEnvelope for a link-scoped kind (chat,
@@ -165,6 +182,9 @@ func (o *Outbound) SendDirect(ctx context.Context, peer store.Peer, kind core.Ki
 	if err != nil {
 		return err
 	}
+	if st == transport.SendUnknownMailbox {
+		return fmt.Errorf("%s has no mailbox on the relay yet (it may still be finishing pairing or setup)", peer.Alias)
+	}
 	if st != transport.SendQueued {
 		return fmt.Errorf("relay refused %s: %s", kind, st)
 	}
@@ -203,8 +223,14 @@ func (o *Outbound) SendDue(ctx context.Context) error {
 	if o.stopped() {
 		return nil
 	}
-	o.pass.Lock()
-	defer o.pass.Unlock()
+	// Wait for a running pass only as long as ctx allows: the kill flush
+	// must not hang behind a pass stuck on a relay that does not answer.
+	select {
+	case o.pass <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-o.pass }()
 	mb, ok := o.mailboxes.Mailbox()
 	if !ok {
 		return nil
@@ -347,6 +373,28 @@ func noMailboxDrop(id, alias string) string {
 	return fmt.Sprintf("dropped message %s: %s has no mailbox on this relay", id, alias)
 }
 
+// WithdrawUnsent deletes a message that is still waiting for the peer to
+// have a relay mailbox and reports whether it did: the message never left.
+// A message that is being sent, was sent, or waits for another reason is
+// left alone.
+func (o *Outbound) WithdrawUnsent(ctx context.Context, peer core.MachineID, msgID string) (bool, error) {
+	o.mu.Lock()
+	waiting := false
+	if w, ok := o.waiting[peer]; ok {
+		_, waiting = w.items[msgID]
+	}
+	o.mu.Unlock()
+	if !waiting {
+		return false, nil
+	}
+	deleted, err := o.outbox.DeleteIf(ctx, msgID, store.OutboxPending)
+	if err != nil || !deleted {
+		return false, err
+	}
+	o.unwait(peer, msgID)
+	return true, nil
+}
+
 // unwait forgets one waiting item.
 func (o *Outbound) unwait(peer core.MachineID, id string) {
 	o.mu.Lock()
@@ -415,7 +463,16 @@ func (o *Outbound) seal(peer store.Peer, env core.Envelope) ([]byte, error) {
 	return frame.Marshal()
 }
 
+// markPausedByPeer records that the peer paused or unpaired this machine:
+// through the PauseRecorder when there is one (it holds the outbox and runs
+// the cut-off), otherwise by holding the outbox and marking the peer.
 func (o *Outbound) markPausedByPeer(ctx context.Context, peer store.Peer) error {
+	o.mu.Lock()
+	pauses := o.pauses
+	o.mu.Unlock()
+	if pauses != nil {
+		return pauses.MarkPausedByPeer(ctx, peer.MachineID, true)
+	}
 	if err := o.outbox.HoldPeer(ctx, peer.MachineID); err != nil {
 		return err
 	}

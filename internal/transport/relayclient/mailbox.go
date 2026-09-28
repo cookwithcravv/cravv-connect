@@ -33,6 +33,8 @@ type mailbox struct {
 	done       chan struct{}
 	fwdDone    chan struct{}
 
+	reqTimeout time.Duration // per request; 0 means none
+
 	mu      sync.Mutex
 	nextRID uint64
 	pending map[string]chan relayproto.Res
@@ -44,10 +46,11 @@ type mailbox struct {
 	qclosed bool
 }
 
-func newMailbox(ws *websocket.Conn, pingInterval, pingTimeout time.Duration) *mailbox {
+func newMailbox(ws *websocket.Conn, pingInterval, pingTimeout, reqTimeout time.Duration) *mailbox {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &mailbox{
 		ws:         ws,
+		reqTimeout: reqTimeout,
 		ctx:        ctx,
 		cancel:     cancel,
 		deliveries: make(chan transport.Delivery),
@@ -196,7 +199,9 @@ func (m *mailbox) resolve(r relayproto.Res) {
 	}
 }
 
-// request sends a frame built for a fresh rid and waits for its res.
+// request sends a frame built for a fresh rid and waits for its res, at most
+// reqTimeout: a relay that does not answer in time is a dead connection, so
+// it is ended (and Err reports ErrRequestTimeout) for the caller to redial.
 func (m *mailbox) request(ctx context.Context, build func(rid string) any) (relayproto.Res, error) {
 	ch := make(chan relayproto.Res, 1)
 	m.mu.Lock()
@@ -217,7 +222,19 @@ func (m *mailbox) request(ctx context.Context, build func(rid string) any) (rela
 	if err := writeJSON(m.ctx, m.ws, build(rid)); err != nil {
 		return relayproto.Res{}, fmt.Errorf("relay: write: %w", err)
 	}
+	var timeout <-chan time.Time
+	if m.reqTimeout > 0 {
+		t := time.NewTimer(m.reqTimeout)
+		defer t.Stop()
+		timeout = t.C
+	}
 	select {
+	case <-timeout:
+		err := fmt.Errorf("%w (%s)", ErrRequestTimeout, m.reqTimeout)
+		m.fail(err)
+		m.cancel()
+		m.ws.CloseNow()
+		return relayproto.Res{}, err
 	case r := <-ch:
 		if r.Status == relayproto.StatusError {
 			return r, &ServerError{Code: r.Code}

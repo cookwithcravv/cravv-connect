@@ -22,6 +22,7 @@ type versionedDaemon struct {
 
 func newVersionedDaemon(t *testing.T, running string) *versionedDaemon {
 	vd := &versionedDaemon{fd: newFakeDaemon(t), v: running}
+	vd.fd.setUp(t)
 	vd.fd.handle(ipc.MethodStatus, ipc.GateAllowWhenKilled, func(*ipc.ConnState, json.RawMessage) (any, error) {
 		vd.mu.Lock()
 		defer vd.mu.Unlock()
@@ -83,11 +84,11 @@ func TestDaemonStartRestartsAnotherVersionWithoutService(t *testing.T) {
 	env, out, errb := vd.fd.env(&fakePrompter{}, "")
 	env.Executable = func() (string, error) { return "/usr/local/bin/cravv-connect", nil }
 	var spawned []string
-	env.Spawn = func(exe string, args []string, _ string) (int, error) {
+	env.Spawn = func(exe string, args []string, _ string) (<-chan struct{}, error) {
 		spawned = append([]string{exe}, args...)
 		vd.upgrade()
 		vd.fd.serve()
-		return 4242, nil
+		return make(chan struct{}), nil
 	}
 	if code := Main([]string{"daemon", "start"}, env); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())

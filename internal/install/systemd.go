@@ -83,5 +83,13 @@ func (s *Systemd) Uninstall(ctx context.Context) error {
 	return s.ctl(ctx, "daemon-reload")
 }
 
-func (s *Systemd) Start(ctx context.Context) error { return s.ctl(ctx, "start", SystemdUnit) }
-func (s *Systemd) Stop(ctx context.Context) error  { return s.ctl(ctx, "stop", SystemdUnit) }
+// Start starts the unit. A unit that failed too often in a row is refused
+// by systemd's start rate limit until its failed state is reset, so that
+// is reset first (best effort). systemctl start waits for the start job.
+func (s *Systemd) Start(ctx context.Context) error {
+	_ = s.ctl(ctx, "reset-failed", SystemdUnit)
+	return s.ctl(ctx, "start", SystemdUnit)
+}
+
+// Stop stops the unit; systemctl stop returns once the daemon has exited.
+func (s *Systemd) Stop(ctx context.Context) error { return s.ctl(ctx, "stop", SystemdUnit) }

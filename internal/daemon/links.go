@@ -71,10 +71,18 @@ type LinkDeps struct {
 	Replies   UnknownLinkReplier
 	Inbox     SessionInbox
 	Desktop   DesktopNotifier
-	Managed   ManagedStarter // nil: this machine offers no managed sessions
+	Managed   ManagedStarter   // nil: this machine offers no managed sessions
+	Unsent    UnsentWithdrawer // nil: a request that times out is never reported as unsent
 	Clock     core.Clock
 	Audit     audit.Logger
 	Log       *slog.Logger
+}
+
+// UnsentWithdrawer takes back an outgoing message that is still waiting for
+// the peer to have a relay mailbox, and reports whether it did (the message
+// never left). Implemented by *Outbound.
+type UnsentWithdrawer interface {
+	WithdrawUnsent(ctx context.Context, peer core.MachineID, msgID string) (bool, error)
 }
 
 // LinkService owns session-to-session links (v2 spec 3.4 and 4): requests,
@@ -86,6 +94,7 @@ type LinkService struct {
 	mu     sync.Mutex
 	closes []LinkCloseObserver
 	lowers []LinkLowerObserver
+	sent   map[string]string // pending outgoing link ID -> its link.request message ID
 }
 
 // NewLinkService builds a LinkService.
@@ -165,15 +174,41 @@ func (s *LinkService) Connect(ctx context.Context, sessionID, target string, pro
 		LinkID: l.ID, FromSession: core.SessionRef{ID: sess.ID, Name: sess.Name, Purpose: sess.Purpose},
 		ToSessionID: remote.SessionID, ProposedPermission: proposed, Note: note,
 	}
-	if _, err := s.d.Sender.SendEnvelope(ctx, peer.MachineID, core.KindLinkRequest, "", body); err != nil {
-		_, _ = s.d.Links.UpdateLink(ctx, l.Peer, l.ID, func(x *store.Link) error {
-			x.State, x.Reason, x.ExpiresAt, x.UpdatedAt = store.LinkClosed, "not sent: "+err.Error(), time.Time{}, now
-			return nil
-		})
+	if err := s.sendRequest(ctx, l, body); err != nil {
 		return store.Link{}, err
 	}
 	s.record(audit.EvLinkRequest, peer, l, map[string]any{"direction": "out", "proposed": string(proposed)})
 	return l, nil
+}
+
+// sendRequest queues the link.request for pending outgoing link l and
+// remembers its message ID; a request that cannot be queued closes l.
+func (s *LinkService) sendRequest(ctx context.Context, l store.Link, body core.LinkRequestBody) error {
+	msgID, err := s.d.Sender.SendEnvelope(ctx, l.Peer, core.KindLinkRequest, "", body)
+	if err != nil {
+		now := s.d.Clock.Now()
+		_, _ = s.d.Links.UpdateLink(ctx, l.Peer, l.ID, func(x *store.Link) error {
+			x.State, x.Reason, x.ExpiresAt, x.UpdatedAt = store.LinkClosed, "not sent: "+err.Error(), time.Time{}, now
+			return nil
+		})
+		return err
+	}
+	s.mu.Lock()
+	if s.sent == nil {
+		s.sent = map[string]string{}
+	}
+	s.sent[l.ID] = msgID
+	s.mu.Unlock()
+	return nil
+}
+
+// takeRequest forgets and returns the link.request message ID of link id.
+func (s *LinkService) takeRequest(id string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	msgID, ok := s.sent[id]
+	delete(s.sent, id)
+	return msgID, ok
 }
 
 // HandleRequest records a link.request as pending for a human decision, or
@@ -376,6 +411,7 @@ func (s *LinkService) HandleAccepted(ctx context.Context, peer store.Peer, env c
 	if err != nil {
 		return Retryable(err)
 	}
+	s.takeRequest(l.ID)
 	s.recordLink(ctx, audit.EvLinkAccept, l, map[string]any{"permission_out": string(b.GrantedPermission)})
 	s.tell(ctx, l, env.ID, core.KindLinkAccepted, LinkNotice{Event: "accepted", Permission: b.GrantedPermission})
 	return nil
@@ -653,6 +689,8 @@ func (s *LinkService) ExpireDue(ctx context.Context) (int, error) {
 		spec := closeSpec{local: core.RejectTimeout, tell: true, event: "rejected"}
 		if l.Direction == store.LinkInbound {
 			spec = closeSpec{local: core.RejectTimeout, reject: core.RejectTimeout}
+		} else if s.withdrawUnsent(ctx, l) {
+			spec.local = fmt.Sprintf("not sent: %s has no mailbox on the relay yet", s.alias(ctx, l.Peer))
 		}
 		if _, err := s.closeLink(ctx, l, spec); err != nil {
 			return n, err
@@ -660,6 +698,21 @@ func (s *LinkService) ExpireDue(ctx context.Context) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+// withdrawUnsent takes back the link.request of an outgoing link whose
+// request timed out, if it is still waiting for the peer's relay mailbox
+// (the peer just paired or set up again), and reports whether it did.
+func (s *LinkService) withdrawUnsent(ctx context.Context, l store.Link) bool {
+	msgID, ok := s.takeRequest(l.ID)
+	if !ok || s.d.Unsent == nil {
+		return false
+	}
+	withdrawn, err := s.d.Unsent.WithdrawUnsent(ctx, l.Peer, msgID)
+	if err != nil {
+		s.d.Log.Warn("withdraw an unsent link request", "link", l.Num, "err", err)
+	}
+	return withdrawn
 }
 
 // PurgeClosed deletes links closed longer ago than core.InboxRetention.
@@ -697,6 +750,7 @@ func (s *LinkService) closeLink(ctx context.Context, l store.Link, spec closeSpe
 	if err != nil {
 		return l, err
 	}
+	s.takeRequest(l.ID)
 	var errs []error
 	switch {
 	case spec.reject != "":

@@ -406,6 +406,13 @@ func TestOutboundSendDirect(t *testing.T) {
 	if err := f.o.SendDirect(context.Background(), f.gpu.rec, core.KindControlPaused, core.EmptyBody{}); err == nil {
 		t.Fatal("refused direct send reported success")
 	}
+	// A peer that just paired may not have a mailbox yet: say so plainly
+	// (discovery shows this error to the agent that asked).
+	f.mb.statuses = []transport.SendStatus{transport.SendUnknownMailbox}
+	err = f.o.SendDirect(context.Background(), f.gpu.rec, core.KindSessionsList, core.SessionsListBody{ReqID: core.NewID()})
+	if err == nil || !strings.Contains(err.Error(), "gpu-box has no mailbox on the relay yet") {
+		t.Fatalf("unknown_mailbox err = %v", err)
+	}
 }
 
 func TestOutboundPurgeOld(t *testing.T) {

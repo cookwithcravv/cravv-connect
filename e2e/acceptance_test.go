@@ -260,7 +260,9 @@ func TestAcceptance_2_SessionLinks(t *testing.T) {
 // online), or within 150 seconds when a machine drops." and "A session
 // that is only briefly away (sleep, MCP reconnect) does not lose its
 // links." A machine that drops makes its links away within 150 seconds
-// (the other side learns it); they close only after the away grace.
+// (the other side learns it); they close only after the away grace. A
+// machine that is itself cut off from the relay times nothing out: it cannot
+// tell a peer that dropped from its own outage.
 func TestAcceptance_3_Presence(t *testing.T) {
 	t.Parallel()
 
@@ -282,6 +284,53 @@ func TestAcceptance_3_Presence(t *testing.T) {
 	t.Run("a machine that drops is away within 150 seconds and closed after the grace", func(t *testing.T) {
 		t.Parallel()
 		clock := core.NewFakeClock(time.Now())
+		_, mac, gpu := NewPairWithClock(t, clock)
+		l := LinkUp(t, mac, gpu, "messages")
+		ctx := context.Background()
+		tick := func() {
+			if err := mac.Daemon.Presence().Tick(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// The GPU box drops first, so no presence frame from before the
+		// drop can arrive late; the link's timeout starts at the first tick.
+		gpu.Stop()
+		tick()
+		for range 5 { // 150 seconds of pings nobody answers
+			clock.Advance(core.PresenceInterval)
+			tick()
+		}
+		if a := mac.Link(l.ANum); a.State != "active" || a.RemoteAway {
+			t.Fatalf("away before 150 seconds: %+v", a)
+		}
+		clock.Advance(time.Second)
+		tick()
+		if v := mac.Link(l.ANum); v.State != "active" || !v.RemoteAway || !v.Unreachable {
+			t.Fatalf("after 150 seconds: %+v", v)
+		}
+		// Away, not closed, for the away grace (10 minutes).
+		for range int(core.AwayGrace / core.PresenceInterval) {
+			clock.Advance(core.PresenceInterval)
+			tick()
+		}
+		if v := mac.Link(l.ANum); v.State != "active" || !v.Unreachable {
+			t.Fatalf("closed within the away grace: %+v", v)
+		}
+		clock.Advance(core.PresenceInterval)
+		tick()
+		if v := mac.Link(l.ANum); v.State != "closed" || v.Reason != core.ClosePresenceTimeout {
+			t.Fatalf("after the away grace: %+v", v)
+		}
+		// The GPU box comes back: the queued link.closed converges its side.
+		gpu.Restart()
+		gpu.WaitLink(wait, "the GPU box learns the link closed", func(v ipc.LinkView) bool {
+			return v.Link == l.BNum && v.State == "closed" && v.Reason == core.ClosePresenceTimeout
+		})
+	})
+
+	t.Run("a machine cut off from the relay keeps its links", func(t *testing.T) {
+		t.Parallel()
+		clock := core.NewFakeClock(time.Now())
 		r, mac, gpu := NewPairWithClock(t, clock)
 		l := LinkUp(t, mac, gpu, "messages")
 		ctx := context.Background()
@@ -292,47 +341,30 @@ func TestAcceptance_3_Presence(t *testing.T) {
 				}
 			}
 		}
-		// The relay goes first, so no presence frame from before the drop
-		// can arrive late; the links' timeouts start at the first tick.
+		// Both machines lose the relay for longer than the timeout and the
+		// grace together: neither can tell whether the other dropped.
 		r.Stop()
 		tick()
-		for range 5 { // 150 seconds of pings nobody receives
-			clock.Advance(core.PresenceInterval)
-			tick()
-		}
-		if a, b := mac.Link(l.ANum), gpu.Link(l.BNum); a.State != "active" || b.State != "active" || a.RemoteAway || b.RemoteAway {
-			t.Fatalf("away before 150 seconds: %+v %+v", a, b)
-		}
-		clock.Advance(time.Second)
-		tick()
-		for _, v := range []ipc.LinkView{mac.Link(l.ANum), gpu.Link(l.BNum)} {
-			if v.State != "active" || !v.RemoteAway || !v.Unreachable {
-				t.Fatalf("after 150 seconds: %+v", v)
-			}
-		}
-		// Away, not closed, for the away grace (10 minutes).
-		for range int(core.AwayGrace / core.PresenceInterval) {
+		for range int((core.PresenceTimeout+core.AwayGrace)/core.PresenceInterval) + 2 {
 			clock.Advance(core.PresenceInterval)
 			tick()
 		}
 		for _, v := range []ipc.LinkView{mac.Link(l.ANum), gpu.Link(l.BNum)} {
-			if v.State != "active" || !v.Unreachable {
-				t.Fatalf("closed within the away grace: %+v", v)
+			if v.State != "active" || v.Unreachable {
+				t.Fatalf("a link timed out while its own machine was offline: %+v", v)
 			}
 		}
-		clock.Advance(core.PresenceInterval)
-		tick()
-		for _, v := range []ipc.LinkView{mac.Link(l.ANum), gpu.Link(l.BNum)} {
-			if v.State != "closed" || v.Reason != core.ClosePresenceTimeout {
-				t.Fatalf("after the away grace: %+v", v)
-			}
-		}
+		r.Start()
+		mac.WaitOnline()
+		gpu.WaitOnline()
+		msg := sendChat(t, l.A.C, l.ANum, "ACC3-RELAY-BACK")
+		WaitItem(t, l.B.C, wait, "the chat after the relay came back", isChat(msg))
 	})
 
 	t.Run("a machine that comes back within the grace keeps its links", func(t *testing.T) {
 		t.Parallel()
 		clock := core.NewFakeClock(time.Now())
-		r, mac, gpu := NewPairWithClock(t, clock)
+		_, mac, gpu := NewPairWithClock(t, clock)
 		l := LinkUp(t, mac, gpu, "messages")
 		ctx := context.Background()
 		tick := func(n *Node) {
@@ -340,26 +372,23 @@ func TestAcceptance_3_Presence(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		r.Stop()
+		gpu.Stop()
 		tick(mac)
-		tick(gpu)
-		for range 6 { // 180 seconds without the relay: both sides away
+		for range 6 { // 180 seconds without the GPU box: away on the Mac
 			clock.Advance(core.PresenceInterval)
 			tick(mac)
-			tick(gpu)
 		}
-		if a, b := mac.Link(l.ANum), gpu.Link(l.BNum); !a.Unreachable || !b.Unreachable {
-			t.Fatalf("not away after 180 seconds: %+v %+v", a, b)
+		if a := mac.Link(l.ANum); !a.Unreachable {
+			t.Fatalf("not away after 180 seconds: %+v", a)
 		}
-		r.Start()
-		mac.WaitOnline()
+		gpu.Restart()
+		back := gpu.Reattach("claude", l.B)
 		gpu.WaitOnline()
-		// The first ping each way brings the link back on both sides.
+		// The first ping brings the link back.
 		tick(mac)
-		gpu.WaitLink(wait, "the GPU box hears the Mac", func(v ipc.LinkView) bool { return v.Link == l.BNum && !v.Unreachable })
 		mac.WaitLink(wait, "the Mac hears the pong", func(v ipc.LinkView) bool { return v.Link == l.ANum && !v.Unreachable })
 		msg := sendChat(t, l.A.C, l.ANum, "ACC3-BACK")
-		WaitItem(t, l.B.C, wait, "the chat after coming back", isChat(msg))
+		WaitItem(t, back.C, wait, "the chat after coming back", isChat(msg))
 		if a, b := mac.Link(l.ANum), gpu.Link(l.BNum); a.State != "active" || b.State != "active" || a.RemoteAway || b.RemoteAway {
 			t.Fatalf("after coming back: %+v %+v", a, b)
 		}

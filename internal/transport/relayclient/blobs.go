@@ -21,8 +21,12 @@ type blobs struct {
 	s transport.Signer
 }
 
-// do sends a signed request and returns the status and at most limit bytes of body.
+// do sends a signed request and returns the status and at most limit bytes
+// of body. The whole request, body included, is bounded by the client's
+// blob timeout, so a stalled chunk fails (and counts as a failed attempt).
 func (b blobs) do(ctx context.Context, method, path string, body []byte, limit int64) (int, []byte, error) {
+	ctx, cancel := bounded(ctx, b.c.blobTimeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, b.c.origin+path, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, err

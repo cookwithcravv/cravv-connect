@@ -88,12 +88,13 @@ type Daemon struct {
 	// the password verifier cannot check passwords.
 	authWarning string
 
-	mu        sync.Mutex
-	mb        transport.Mailbox
-	lastErr   error
-	changed   chan struct{} // closed and replaced whenever mb or lastErr changes
-	cancelRun context.CancelFunc
-	wake      chan struct{} // buffered(1): kicks the connection loop
+	mu         sync.Mutex
+	mb         transport.Mailbox
+	lastErr    error
+	changed    chan struct{} // closed and replaced whenever mb or lastErr changes
+	cancelRun  context.CancelFunc
+	cancelDial context.CancelFunc // stops the relay dial in progress, if any
+	wake       chan struct{}      // buffered(1): kicks the connection loop
 }
 
 // Mailbox implements MailboxProvider: the live mailbox, or false when offline or killed.
@@ -191,15 +192,37 @@ func (d *Daemon) goLive(mb transport.Mailbox) bool {
 	return true
 }
 
-// disconnect closes the live mailbox (kill switch).
+// disconnect closes the live mailbox and stops a dial in progress (kill switch).
 func (d *Daemon) disconnect() {
 	d.mu.Lock()
-	mb := d.mb
+	mb, cancelDial := d.mb, d.cancelDial
 	d.mu.Unlock()
+	if cancelDial != nil {
+		cancelDial()
+	}
 	if mb != nil {
 		mb.Close()
 	}
 	d.poke()
+}
+
+// dial dials the relay with a context the kill switch can cancel
+// (disconnect), so a relay that never answers cannot hold the loop.
+func (d *Daemon) dial(ctx context.Context, g *services, creds transport.Credentials) (transport.Mailbox, error) {
+	dctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	d.mu.Lock()
+	d.cancelDial = cancel
+	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		d.cancelDial = nil
+		d.mu.Unlock()
+	}()
+	if d.kill.Killed() { // killed between the loop's check and here
+		return nil, core.ErrKilled
+	}
+	return d.relay.Dialer().Dial(dctx, g.identity, creds)
 }
 
 // Run runs the services until ctx ends. After ResetIdentity it continues
@@ -259,7 +282,7 @@ func (d *Daemon) runServices(ctx context.Context, g *services) error {
 // stops with ErrRetryLater (a handler failed retryably and the delivery was not acked)
 // the connection is recycled so the relay redelivers it; repeated retries back off too.
 func (d *Daemon) connectLoop(ctx context.Context, g *services) {
-	backoff := d.opts.ReconnectMin
+	backoff := &reconnectBackoff{min: d.opts.ReconnectMin, stable: d.opts.ReconnectStable, cur: d.opts.ReconnectMin}
 	retryDelay := d.opts.ReconnectMin
 	for ctx.Err() == nil {
 		if d.kill.Killed() || d.relay == nil {
@@ -272,30 +295,30 @@ func (d *Daemon) connectLoop(ctx context.Context, g *services) {
 			if !d.registered.Load() {
 				// An unregistered identity needs its admin token or invite: a dial
 				// without them would only be refused. Retry the store later.
-				d.log.Error("read relay credentials", "err", err, "retry_in", backoff)
+				wait := backoff.next()
+				d.log.Error("read relay credentials", "err", err, "retry_in", wait)
 				d.setState(nil, fmt.Errorf("read relay credentials: %w", err))
-				d.sleep(ctx, backoff)
-				backoff = min(backoff*2, core.BackoffMax)
+				d.sleep(ctx, wait)
 				continue
 			}
 			d.log.Warn("read relay credentials; dialing with the existing registration", "err", err)
 		}
-		mb, err := d.relay.Dialer().Dial(ctx, g.identity, creds)
+		mb, err := d.dial(ctx, g, creds)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			d.log.Warn("relay dial failed", "err", err, "retry_in", backoff)
+			wait := backoff.next()
+			d.log.Warn("relay dial failed", "err", err, "retry_in", wait)
 			if creds.AdminToken != "" || creds.Invite != "" {
 				err = &registerError{err: err}
 			}
 			d.setState(nil, err)
-			d.sleep(ctx, backoff)
-			backoff = min(backoff*2, core.BackoffMax)
+			d.sleep(ctx, wait)
 			continue
 		}
 		d.markRegistered(ctx, creds)
-		backoff = d.opts.ReconnectMin
+		connectedAt := d.clock.Now()
 		if d.kill.Killed() {
 			mb.Close()
 			continue
@@ -321,14 +344,40 @@ func (d *Daemon) connectLoop(ctx context.Context, g *services) {
 		if ctx.Err() != nil {
 			return
 		}
+		// Only a connection that stayed up resets the backoff: a relay that
+		// accepts and then drops us must not be redialed every second.
+		backoff.ended(d.clock.Now().Sub(connectedAt))
 		if errors.Is(inErr, ErrRetryLater) {
 			d.sleep(ctx, retryDelay)
 			retryDelay = min(retryDelay*2, core.BackoffMax)
 			continue
 		}
 		retryDelay = d.opts.ReconnectMin
-		d.log.Info("relay connection ended", "err", mb.Err())
-		d.sleep(ctx, backoff)
+		wait := backoff.next()
+		d.log.Info("relay connection ended", "err", mb.Err(), "retry_in", wait)
+		d.sleep(ctx, wait)
+	}
+}
+
+// reconnectBackoff is the connect loop's delay before its next dial. It
+// doubles after every failed dial and every connection that ended sooner
+// than stable, up to core.BackoffMax, and starts over from min only after a
+// connection stayed up for stable.
+type reconnectBackoff struct {
+	min, stable, cur time.Duration
+}
+
+// next returns the delay to wait now and doubles the one after it.
+func (b *reconnectBackoff) next() time.Duration {
+	d := b.cur
+	b.cur = min(b.cur*2, core.BackoffMax)
+	return d
+}
+
+// ended records a connection that lasted lived.
+func (b *reconnectBackoff) ended(lived time.Duration) {
+	if lived >= b.stable {
+		b.cur = b.min
 	}
 }
 

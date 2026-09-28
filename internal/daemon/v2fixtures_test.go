@@ -33,6 +33,7 @@ type v2Net struct {
 	queue      []v2Frame
 	holdDirect bool
 	down       map[core.MachineID]bool // machines that are offline: their frames are lost
+	noSend     map[core.MachineID]bool // machines whose direct sends fail (their relay connection is down)
 	log        []v2Frame               // every frame sent, in order
 }
 
@@ -234,6 +235,10 @@ func (s *v2Sender) SendDirect(_ context.Context, peer store.Peer, kind core.Kind
 	}
 	n := s.node.net
 	n.mu.Lock()
+	if n.noSend[s.node.id] {
+		n.mu.Unlock()
+		return ErrOffline
+	}
 	n.log = append(n.log, f)
 	hold := n.holdDirect
 	if hold {
