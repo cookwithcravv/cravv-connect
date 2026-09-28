@@ -1,7 +1,7 @@
 package e2e
 
-// The v2 acceptance suite: one test per success criterion of spec section 2
-// (docs/superpowers/specs/2026-09-26-cravv-connect-v2-sessions-design.md),
+// The v2 acceptance suite: one test per success criterion of the v2
+// sessions design (section 2),
 // each against real daemons on an in-process relay, through the surfaces a
 // person and an agent use (the MCP server, the listener process, the CLI,
 // the web UI). The criterion each test pins is quoted above it.

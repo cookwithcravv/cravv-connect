@@ -151,7 +151,7 @@ func (fd *fakeDaemon) env(p *fakePrompter, stdin string) (*Env, *bytes.Buffer, *
 				Socket: fd.sock, Log: filepath.Join(fd.home, "daemon.log")}, nil
 		},
 		Getwd:    func() (string, error) { return "/work/glow-v2", nil },
-		Hostname: func() (string, error) { return "Prith's MacBook", nil },
+		Hostname: func() (string, error) { return "Alice's MacBook", nil },
 		OpenSettings: func(string) (store.SettingsStore, func() error, error) {
 			return nil, nil, errors.New("not used")
 		},

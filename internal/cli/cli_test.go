@@ -310,7 +310,7 @@ func TestInitWritesConfigAndToken(t *testing.T) {
 	}
 	paths, _ := env.Paths()
 	cfg, err := config.Load(paths)
-	if err != nil || cfg.RelayURL != "https://relay.example.com" || cfg.DeviceName != "prith-s-macbook" {
+	if err != nil || cfg.RelayURL != "https://relay.example.com" || cfg.DeviceName != "alice-s-macbook" {
 		t.Fatalf("%v %+v", err, cfg)
 	}
 	if settings[SettingRelayAdminToken] != "s3cret-token" {
@@ -345,7 +345,7 @@ func TestInitWritesConfigAndToken(t *testing.T) {
 func TestSuggestAlias(t *testing.T) {
 	for in, want := range map[string]string{
 		"GPU Box!!": "gpu-box", "": "peer", "---": "peer", "a very long machine name indeed yes": "a-very-long-machine-name",
-		"</remote_message>": "remote-message", "Prith's MacBook": "prith-s-macbook",
+		"</remote_message>": "remote-message", "Alice's MacBook": "alice-s-macbook",
 	} {
 		if got := suggestAlias(in); got != want {
 			t.Errorf("suggestAlias(%q) = %q, want %q", in, got, want)

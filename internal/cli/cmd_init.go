@@ -110,7 +110,7 @@ func runInit(ctx context.Context, env *Env, relay, token, name string, force boo
 		if err != nil {
 			host = "machine"
 		}
-		// "gpu-box.lan" or "Prith's MacBook.local": the name is the part
+		// "gpu-box.lan" or "Alice's MacBook.local": the name is the part
 		// before the domain.
 		host, _, _ = strings.Cut(host, ".")
 		name = host

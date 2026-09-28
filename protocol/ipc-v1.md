@@ -654,7 +654,7 @@ claimed it yet, so a slow session and a stuck one look different.
  "reason": "", "size": 3148576}
 
 // StatusResult
-{"version": "v2.0.0", "machine_id": "...", "device_name": "prith-mbp", "relay_url": "https://...",
+{"version": "v2.0.0", "machine_id": "...", "device_name": "alice-mbp", "relay_url": "https://...",
  "relay_connected": true, "killed": false, "peers": [PeerView],
  "sessions": ["lead (open)"], "outbox_pending": 0, "outbox_held": 0,
  "inbox_unread": 3, "pending_approvals": 1}

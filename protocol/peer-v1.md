@@ -741,7 +741,7 @@ ends the exchange with "pairing failed", and closing the room burns it.
      "ik": "base64 of the 32-byte Ed25519 identity key",
      "prekey": {"id": "...", "pub": "...", "created_at": 1790000000000, "sig": "..."},
      "relay_url": "https://relay.example.com",
-     "name": "prith-mbp",
+     "name": "alice-mbp",
      "invite": "only from A: the single-use relay invite",
      "bind_sig": "base64 of the 64-byte Ed25519 signature by ik over the binding transcript"
    }

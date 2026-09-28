@@ -16,9 +16,38 @@ change behaviour or wire formats, and the notes say so.
   after the fact.
 - CI runs `govulncheck`; Dependabot watches Go modules, npm and Actions.
 
+### Security
+
+- Pairing now proves that each side holds the identity key it presents, so
+  someone who has the code cannot pass off another machine's key as theirs.
+  **Pairing needs 0.2.2 or later on both machines**; an older machine is
+  refused with a message to update. Machines already paired keep working.
+- A managed session sends files only from the folder it was offered, never
+  from folders added with `allow-path` for your own chats.
+- On macOS, `reset-identity` can no longer come back as the old identity when
+  the Keychain refuses the new one. `reset-identity` now unpairs every peer
+  it can reach first, and names the ones that must unpair this machine.
+- A peer can no longer fill your disk through one link: chat and task
+  updates are limited to 60 a minute (burst 120) and 1000 unread items or
+  32 MiB per link; extra ones are dropped and status says so.
+- `control.stale_prekey` replies are bounded (fresh messages only, 10 per
+  peer per minute), and an approved task is never delivered twice.
+- Relay (Cloudflare): a key that is not a member, or a join on an unknown
+  pairing room, stores nothing; each member may hold at most 8 open pairing
+  rooms; a malformed `PUBLIC_ORIGIN` is refused instead of failing every
+  login. The conformance suite covers these, request signatures bound to
+  method, path and body, and malformed timestamps.
+
 ### Changed
 
 - The quick start begins with deploying your own relay.
+- A relay request that fails inside the relay is answered with an
+  `internal` error for that request only, and the connection stays open
+  (relay-v1); the relay retries a failed call between mailboxes once, and
+  logs the error with Cloudflare's flags.
+- Status names dropped messages by cause (corrupt, from unknown machines,
+  from paused machines); stale presence pings after being offline are no
+  longer counted.
 - Release binaries are built with Go 1.26.8, which fixes standard library
   vulnerabilities in `net/http`, `crypto/tls`, `crypto/x509`, `net/url`,
   `html/template`, `encoding/asn1` and `net/textproto`.

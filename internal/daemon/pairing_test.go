@@ -205,7 +205,7 @@ func newPairSide(t *testing.T, rooms *memRooms, name string, online bool) *pairS
 func TestPairingFullExchange(t *testing.T) {
 	ctx := context.Background()
 	rooms := newMemRooms()
-	a := newPairSide(t, rooms, "Prith's MacBook", true)
+	a := newPairSide(t, rooms, "Alice's MacBook", true)
 	b := newPairSide(t, rooms, "GPU Box", false) // joiner has no mailbox yet
 
 	pendingA, code, err := a.svc.Start(ctx, true)
@@ -226,7 +226,7 @@ func TestPairingFullExchange(t *testing.T) {
 	if propA.MachineID != b.id.MachineID() || propB.MachineID != a.id.MachineID() {
 		t.Fatal("proposals carry the wrong machine IDs")
 	}
-	if propA.SuggestedName != "gpu-box" || propB.SuggestedName != "prith-s-macbook" {
+	if propA.SuggestedName != "gpu-box" || propB.SuggestedName != "alice-s-macbook" {
 		t.Fatalf("suggested names %q / %q", propA.SuggestedName, propB.SuggestedName)
 	}
 

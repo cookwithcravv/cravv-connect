@@ -5,7 +5,7 @@ import "testing"
 func TestSanitizeAlias(t *testing.T) {
 	cases := map[string]string{
 		"gpu-box":                               "gpu-box",
-		"Prith's MacBook Pro":                   "prith-s-macbook-pro",
+		"Alice's MacBook Pro":                   "alice-s-macbook-pro",
 		"  --weird__name!!  ":                   "weird-name",
 		"ÜBER box":                              "ber-box",
 		"":                                      "",

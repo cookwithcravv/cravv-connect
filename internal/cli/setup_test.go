@@ -223,7 +223,7 @@ func TestSetupFirstMachine(t *testing.T) {
 	if code := r.run(); code != 0 {
 		t.Fatalf("code %d stderr %s", code, r.errb.String())
 	}
-	if cfg := r.config(t); cfg.RelayURL != "https://relay.example.com" || cfg.DeviceName != "prith-s-macbook" {
+	if cfg := r.config(t); cfg.RelayURL != "https://relay.example.com" || cfg.DeviceName != "alice-s-macbook" {
 		t.Fatalf("config %+v", cfg)
 	}
 	if r.settings[SettingRelayAdminToken] != "admin-tok" {
@@ -303,9 +303,9 @@ func TestSetupRelayChecks(t *testing.T) {
 // An empty relay answer starts cravv-relay from next to this binary on
 // <host>.local, with the admin token only in its environment.
 func TestSetupStartsLANRelay(t *testing.T) {
-	r := newSetupRig(t, ipc.StatusResult{RelayURL: "http://prithvis-mac.local:8787", RelayConnected: true})
-	r.env.Hostname = func() (string, error) { return "Prithvis-Mac.lan", nil }
-	r.sys.resolves = map[string][]string{"prithvis-mac.local": {"192.168.1.10"}}
+	r := newSetupRig(t, ipc.StatusResult{RelayURL: "http://alices-mac.local:8787", RelayConnected: true})
+	r.env.Hostname = func() (string, error) { return "Alices-Mac.lan", nil }
+	r.sys.resolves = map[string][]string{"alices-mac.local": {"192.168.1.10"}}
 	r.prompt.lines = []string{"", "n"}
 	if code := r.run("--no-agents"); code != 0 {
 		t.Fatalf("code %d stderr %s", code, r.errb.String())
@@ -314,7 +314,7 @@ func TestSetupStartsLANRelay(t *testing.T) {
 		t.Fatalf("started %v", r.sys.started)
 	}
 	s := r.sys.started[0]
-	if s.bin != "/usr/local/bin/cravv-relay" || !slices.Equal(s.args, []string{"-addr", "0.0.0.0:8787", "-origin", "http://prithvis-mac.local:8787"}) {
+	if s.bin != "/usr/local/bin/cravv-relay" || !slices.Equal(s.args, []string{"-addr", "0.0.0.0:8787", "-origin", "http://alices-mac.local:8787"}) {
 		t.Fatalf("started %s %q", s.bin, s.args)
 	}
 	token, ok := strings.CutPrefix(strings.Join(s.env, ""), "CRAVV_RELAY_ADMIN_TOKEN=")
@@ -324,10 +324,10 @@ func TestSetupStartsLANRelay(t *testing.T) {
 	if r.settings[SettingRelayAdminToken] != token {
 		t.Fatalf("stored admin token %q, relay has %q", r.settings[SettingRelayAdminToken], token)
 	}
-	if cfg := r.config(t); cfg.RelayURL != "http://prithvis-mac.local:8787" {
+	if cfg := r.config(t); cfg.RelayURL != "http://alices-mac.local:8787" {
 		t.Fatalf("relay %q", cfg.RelayURL)
 	}
-	if !strings.HasSuffix(s.logPath, "/relay.log") || !strings.Contains(r.out.String(), "Started a LAN test relay at http://prithvis-mac.local:8787 (log: ") {
+	if !strings.HasSuffix(s.logPath, "/relay.log") || !strings.Contains(r.out.String(), "Started a LAN test relay at http://alices-mac.local:8787 (log: ") {
 		t.Fatalf("log %s\n%s", s.logPath, r.out.String())
 	}
 	if slices.Contains(r.prompt.asked, "password: Relay admin token (only for the relay's first machine; press Enter if another machine is already on it): ") {
@@ -372,16 +372,16 @@ func TestSetupLoopbackLANRelay(t *testing.T) {
 // <host>.local when it resolves, else the first private IPv4 address, else
 // loopback; a host name that is not a DNS label is never looked up.
 func TestLANRelayHost(t *testing.T) {
-	v4, v6 := netip.MustParseAddr("192.168.1.23"), netip.MustParseAddr("fd00::1")
+	v4, v6 := netip.MustParseAddr("192.168.1.50"), netip.MustParseAddr("fd00::1")
 	for _, tc := range []struct {
 		host     string
 		resolves map[string][]string
 		private  []netip.Addr
 		want     string
 	}{
-		{"Mac.lan", map[string][]string{"mac.local": {"192.168.1.23"}}, []netip.Addr{v4}, "mac.local"},
-		{"gpu-box", nil, []netip.Addr{v6, v4}, "192.168.1.23"},
-		{"Prith's MacBook", map[string][]string{"prith's macbook.local": {"x"}}, []netip.Addr{v6}, "fd00::1"},
+		{"Mac.lan", map[string][]string{"mac.local": {"192.168.1.50"}}, []netip.Addr{v4}, "mac.local"},
+		{"gpu-box", nil, []netip.Addr{v6, v4}, "192.168.1.50"},
+		{"Alice's MacBook", map[string][]string{"alice's macbook.local": {"x"}}, []netip.Addr{v6}, "fd00::1"},
 		{"gpu-box", nil, nil, "127.0.0.1"},
 	} {
 		sys := &fakeSystem{resolves: tc.resolves, private: tc.private}
