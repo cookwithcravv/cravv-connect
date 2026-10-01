@@ -18,6 +18,12 @@ var ErrClosed = errors.New("relay: connection closed")
 // the connection is ended with it.
 var ErrRequestTimeout = errors.New("relay: no answer to a request in time")
 
+// ErrRecycled ends a connection the client replaced on purpose: one that got an
+// internal answer after it had been open a while, or reached its maximum age.
+// Cloudflare limits how deep a chain of calls can get, and a long-lived
+// connection can reach that limit; a fresh connection starts from zero.
+var ErrRecycled = errors.New("relay: connection replaced")
+
 // ErrProtocol reports a frame the relay-v1 contract does not allow at that point.
 var ErrProtocol = errors.New("relay: protocol violation")
 

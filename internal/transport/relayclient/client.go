@@ -24,6 +24,8 @@ type Client struct {
 	reqTimeout   time.Duration
 	dialTimeout  time.Duration
 	blobTimeout  time.Duration
+	recycleAfter time.Duration
+	maxAge       time.Duration
 }
 
 // Keepalive defaults: relay-v1 clients SHOULD ping every 30 seconds.
@@ -47,6 +49,11 @@ const (
 	DefaultBlobTimeout           = 2 * time.Minute
 	DefaultResponseHeaderTimeout = 30 * time.Second
 )
+
+// DefaultInternalRecycle is how old a mailbox connection must be for an
+// internal answer to end it (ErrRecycled). A fresh connection that gets one
+// stays up: its failure is not the depth limit a long-lived one can reach.
+const DefaultInternalRecycle = 2 * time.Minute
 
 // newHTTPClient is the default HTTP client: the standard transport with a
 // bound on the wait for response headers.
@@ -81,6 +88,15 @@ func WithDialTimeout(d time.Duration) Option { return func(c *Client) { c.dialTi
 // WithBlobTimeout bounds each blob request; d <= 0 means only the caller's context.
 func WithBlobTimeout(d time.Duration) Option { return func(c *Client) { c.blobTimeout = d } }
 
+// WithInternalRecycle ends a mailbox connection at least d old when the relay
+// answers one of its requests with internal, so the caller reconnects; the
+// request still fails with that error. d < 0 never ends one.
+func WithInternalRecycle(d time.Duration) Option { return func(c *Client) { c.recycleAfter = d } }
+
+// WithMaxConnectionAge ends a mailbox connection d after it opened, with
+// ErrRecycled, so the caller replaces it. d <= 0 means no limit.
+func WithMaxConnectionAge(d time.Duration) Option { return func(c *Client) { c.maxAge = d } }
+
 // WithClock sets the clock used for request-signature timestamps.
 func WithClock(clk core.Clock) Option { return func(c *Client) { c.clock = clk } }
 
@@ -102,12 +118,16 @@ func New(relayURL string, opts ...Option) (*Client, error) {
 		reqTimeout:   DefaultRequestTimeout,
 		dialTimeout:  DefaultDialTimeout,
 		blobTimeout:  DefaultBlobTimeout,
+		recycleAfter: DefaultInternalRecycle,
 	}
 	for _, o := range opts {
 		o(c)
 	}
 	return c, nil
 }
+
+// MaxConnectionAge is the WithMaxConnectionAge setting (0: no limit).
+func (c *Client) MaxConnectionAge() time.Duration { return c.maxAge }
 
 // Origin is the normalized scheme://host[:port], the value bound into auth and HTTP signatures.
 func (c *Client) Origin() string { return c.origin }

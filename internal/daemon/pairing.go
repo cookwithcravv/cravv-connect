@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/chacha20poly1305"
 
@@ -96,9 +97,17 @@ type PairingService struct {
 	base context.Context
 	stop context.CancelFunc
 
+	// reconnectWait bounds the wait for a new relay connection after the relay
+	// answered internal (the client then replaces the connection).
+	reconnectWait time.Duration
+
 	mu      sync.Mutex
 	pending map[string]*pendingPair
 }
+
+// PairingReconnectWait is how long pairing waits for a new relay connection
+// before its one retry, after the relay answered internal.
+const PairingReconnectWait = 15 * time.Second
 
 // NewPairingService wires a PairingService.
 func NewPairingService(id *keys.Identity, rooms transport.Rooms, mailboxes MailboxProvider, pf pake.Factory,
@@ -109,7 +118,39 @@ func NewPairingService(id *keys.Identity, rooms transport.Rooms, mailboxes Mailb
 		identity: id, rooms: rooms, mailboxes: mailboxes, pake: pf, peers: peers, prekeys: prekeys,
 		sender: sender, registrar: registrar, cfg: cfg, clock: clock, audit: lg,
 		base: base, stop: stop,
-		pending: make(map[string]*pendingPair),
+		reconnectWait: PairingReconnectWait,
+		pending:       make(map[string]*pendingPair),
+	}
+}
+
+// openRelayRoom asks the relay for an invite for the joiner and a pairing room.
+func (s *PairingService) openRelayRoom(ctx context.Context, mb transport.Mailbox) (invite, nameplate, token string, err error) {
+	if invite, err = mb.RequestInvite(ctx); err != nil {
+		return "", "", "", fmt.Errorf("request invite: %w", err)
+	}
+	if nameplate, token, err = mb.CreateRoom(ctx); err != nil {
+		return "", "", "", fmt.Errorf("create pairing room: %w", err)
+	}
+	return invite, nameplate, token, nil
+}
+
+// awaitNewMailbox waits up to reconnectWait for a live mailbox other than old.
+func (s *PairingService) awaitNewMailbox(ctx context.Context, old transport.Mailbox) (transport.Mailbox, bool) {
+	deadline := time.NewTimer(s.reconnectWait)
+	defer deadline.Stop()
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if mb, ok := s.mailboxes.Mailbox(); ok && mb != old {
+			return mb, true
+		}
+		select {
+		case <-tick.C:
+		case <-deadline.C:
+			return nil, false
+		case <-ctx.Done():
+			return nil, false
+		}
 	}
 }
 
@@ -135,15 +176,19 @@ func (s *PairingService) Start(ctx context.Context, unlocked bool) (pendingID, c
 	if err != nil {
 		return "", "", err
 	}
-	invite, err := mb.RequestInvite(ctx)
+	invite, nameplate, token, err := s.openRelayRoom(ctx, mb)
+	if errors.Is(err, transport.ErrRelayInternal) {
+		// The client replaces a connection the relay answered internal on (a
+		// long-lived one can reach Cloudflare's depth limit): try once more on
+		// the new one.
+		if fresh, ok := s.awaitNewMailbox(ctx, mb); ok {
+			invite, nameplate, token, err = s.openRelayRoom(ctx, fresh)
+		}
+	}
 	if err != nil {
-		return "", "", fmt.Errorf("request invite: %w", err)
+		return "", "", err
 	}
 	mine.Invite = invite
-	nameplate, token, err := mb.CreateRoom(ctx)
-	if err != nil {
-		return "", "", fmt.Errorf("create pairing room: %w", err)
-	}
 	c, err := bindcode.NewCode(nameplate)
 	if err != nil {
 		return "", "", err

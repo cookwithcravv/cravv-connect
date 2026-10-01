@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/cookwithcravv/cravv-connect/internal/auth"
+	"github.com/cookwithcravv/cravv-connect/internal/config"
 	"github.com/cookwithcravv/cravv-connect/internal/core"
+	"github.com/cookwithcravv/cravv-connect/internal/transport/relayclient"
 )
 
 // The password lockout lives in the store, so restarting the daemon (or
@@ -222,5 +224,21 @@ func TestBrokenVerifierStartsWithStatusWarning(t *testing.T) {
 	}
 	if n := v.calls.Load(); n != 2 {
 		t.Fatalf("self-test ran %d times over 2 starts, want 2 (not cached)", n)
+	}
+}
+
+// The daemon's relay client replaces its connection every few hours, so a
+// long-lived connection never gets near Cloudflare's subrequest depth limit.
+func TestDefaultRelayClientReplacesOldConnections(t *testing.T) {
+	o := Options{Config: config.Config{RelayURL: "https://relay.example.com"}}
+	if err := normalize(&o); err != nil {
+		t.Fatal(err)
+	}
+	c, ok := o.Relay.(*relayclient.Client)
+	if !ok {
+		t.Fatalf("relay is %T", o.Relay)
+	}
+	if got := c.MaxConnectionAge(); got != RelayMaxConnectionAge || got <= 0 {
+		t.Fatalf("max connection age %s, want %s", got, RelayMaxConnectionAge)
 	}
 }

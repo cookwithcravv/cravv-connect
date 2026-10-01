@@ -28,6 +28,12 @@ import (
 // reconnect backoff starts over from Options.ReconnectMin.
 const ReconnectStable = 60 * time.Second
 
+// RelayMaxConnectionAge is how long one relay connection is kept before the
+// daemon replaces it. Cloudflare limits how deep a chain of calls can get, and
+// a long-lived connection can reach that limit; then every relay call that
+// involves another mailbox fails with internal until the client reconnects.
+const RelayMaxConnectionAge = 6 * time.Hour
+
 // Options configure New. Zero values get production defaults.
 type Options struct {
 	Paths    config.Paths
@@ -212,7 +218,7 @@ func normalize(o *Options) error {
 		o.FileRetryDelay = 2 * time.Second
 	}
 	if o.Relay == nil && o.Config.RelayURL != "" {
-		c, err := relayclient.New(o.Config.RelayURL)
+		c, err := relayclient.New(o.Config.RelayURL, relayclient.WithMaxConnectionAge(RelayMaxConnectionAge))
 		if err != nil {
 			return err
 		}

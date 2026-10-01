@@ -33,7 +33,9 @@ type mailbox struct {
 	done       chan struct{}
 	fwdDone    chan struct{}
 
-	reqTimeout time.Duration // per request; 0 means none
+	reqTimeout   time.Duration // per request; 0 means none
+	recycleAfter time.Duration // age from which an internal answer ends the connection; < 0 never
+	opened       time.Time
 
 	mu      sync.Mutex
 	nextRID uint64
@@ -46,25 +48,56 @@ type mailbox struct {
 	qclosed bool
 }
 
-func newMailbox(ws *websocket.Conn, pingInterval, pingTimeout, reqTimeout time.Duration) *mailbox {
+// mailboxTiming is a connection's keepalive, request and lifetime settings.
+type mailboxTiming struct {
+	pingInterval, pingTimeout time.Duration
+	reqTimeout                time.Duration
+	recycleAfter              time.Duration
+	maxAge                    time.Duration
+}
+
+func newMailbox(ws *websocket.Conn, t mailboxTiming) *mailbox {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &mailbox{
-		ws:         ws,
-		reqTimeout: reqTimeout,
-		ctx:        ctx,
-		cancel:     cancel,
-		deliveries: make(chan transport.Delivery),
-		done:       make(chan struct{}),
-		fwdDone:    make(chan struct{}),
-		pending:    map[string]chan relayproto.Res{},
+		ws:           ws,
+		reqTimeout:   t.reqTimeout,
+		recycleAfter: t.recycleAfter,
+		opened:       time.Now(),
+		ctx:          ctx,
+		cancel:       cancel,
+		deliveries:   make(chan transport.Delivery),
+		done:         make(chan struct{}),
+		fwdDone:      make(chan struct{}),
+		pending:      map[string]chan relayproto.Res{},
 	}
 	m.qcond = sync.NewCond(&m.qmu)
 	go m.forward()
 	go m.readLoop()
-	if pingInterval > 0 {
-		go m.pingLoop(pingInterval, pingTimeout)
+	if t.pingInterval > 0 {
+		go m.pingLoop(t.pingInterval, t.pingTimeout)
+	}
+	if t.maxAge > 0 {
+		go m.endAt(t.maxAge)
 	}
 	return m
+}
+
+// endAt replaces the connection once it is maxAge old.
+func (m *mailbox) endAt(maxAge time.Duration) {
+	t := time.NewTimer(maxAge)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		m.end(fmt.Errorf("%w: open for %s", ErrRecycled, maxAge))
+	case <-m.ctx.Done():
+	}
+}
+
+// end closes the connection with err as its reason, for the caller to redial.
+func (m *mailbox) end(err error) {
+	m.fail(err)
+	m.cancel()
+	m.ws.CloseNow()
 }
 
 // fail records err as the reason the connection ended, unless one is already set.
@@ -231,12 +264,13 @@ func (m *mailbox) request(ctx context.Context, build func(rid string) any) (rela
 	select {
 	case <-timeout:
 		err := fmt.Errorf("%w (%s)", ErrRequestTimeout, m.reqTimeout)
-		m.fail(err)
-		m.cancel()
-		m.ws.CloseNow()
+		m.end(err)
 		return relayproto.Res{}, err
 	case r := <-ch:
 		if r.Status == relayproto.StatusError {
+			if r.Code == relayproto.CodeInternal && m.recycleAfter >= 0 && time.Since(m.opened) >= m.recycleAfter {
+				m.end(fmt.Errorf("%w: internal answer after %s", ErrRecycled, time.Since(m.opened).Round(time.Second)))
+			}
 			return r, &ServerError{Code: r.Code}
 		}
 		return r, nil

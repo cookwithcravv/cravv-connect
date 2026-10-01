@@ -8,12 +8,15 @@ change behaviour or wire formats, and the notes say so.
 
 ### Fixed
 
-- Relay (Cloudflare): a mailbox that has been connected for a long time could
-  hit Cloudflare's "subrequest depth limit", after which every call it made
-  to another object failed with `internal` (sends to peers, `pair`'s invite
-  request) until the relay restarted. The mailbox now answers that request
-  with `internal`, closes its connections and restarts itself; clients
-  reconnect within seconds and the next try works.
+- `pair`, sends and other relay requests failing with `relay: internal` after
+  the daemon had been connected for a while. Cloudflare limits how deep a
+  chain of calls between Workers and Durable Objects can get, and a
+  long-lived relay connection can reach that limit; then every request that
+  involves another mailbox or the relay's registry fails until the client
+  reconnects. The daemon now replaces a connection that gets an `internal`
+  answer after it has been open for 2 minutes, replaces every connection
+  after 6 hours, and `pair` retries once on the new connection. The relay
+  also restarts a mailbox object that reports the limit.
 
 ## v0.2.2 (2026-09-28)
 

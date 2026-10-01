@@ -31,7 +31,13 @@ func (d dialer) Dial(ctx context.Context, id transport.Signer, creds transport.C
 		ws.CloseNow()
 		return nil, err
 	}
-	return newMailbox(ws, d.c.pingInterval, d.c.pingTimeout, d.c.reqTimeout), nil
+	return newMailbox(ws, mailboxTiming{
+		pingInterval: d.c.pingInterval,
+		pingTimeout:  d.c.pingTimeout,
+		reqTimeout:   d.c.reqTimeout,
+		recycleAfter: d.c.recycleAfter,
+		maxAge:       d.c.maxAge,
+	}), nil
 }
 
 func (d dialer) handshake(ctx context.Context, ws *websocket.Conn, id transport.Signer, creds transport.Credentials) error {
