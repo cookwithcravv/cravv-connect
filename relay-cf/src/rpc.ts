@@ -34,3 +34,10 @@ export function describeError(err: unknown): string {
   const base = `${err.name}: ${err.message}`;
   return flags.length > 0 ? `${base} [${flags.join(" ")}]` : base;
 }
+
+// True for Cloudflare's "Subrequest depth limit exceeded" error. A long-lived mailbox object
+// can reach that limit after days of traffic between objects, and then every further call it
+// makes fails until the object restarts.
+export function isDepthLimit(err: unknown): boolean {
+  return err instanceof Error && /subrequest depth limit/i.test(err.message);
+}

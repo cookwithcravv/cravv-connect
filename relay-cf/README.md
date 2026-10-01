@@ -156,4 +156,7 @@ connection refilled at 200 per second, and 600 connects or blob requests per IP 
   other Durable Objects (`Mailbox.enqueue`, the `Registry`, `Room.init`) are retried once on a
   fresh stub when Cloudflare marks the error `retryable`, so a frame can be queued twice; clients
   deduplicate by `id`. A failure during the handshake still closes the connection with
-  `error{internal}`.
+  `error{internal}`. The one exception is Cloudflare's "Subrequest depth limit exceeded": a long-lived
+  mailbox can reach it, and then every call it makes fails until the object restarts. That
+  request still gets `res internal`, and then the mailbox closes its connections (code 1012) and
+  restarts itself; its storage is untouched and the client reconnects.

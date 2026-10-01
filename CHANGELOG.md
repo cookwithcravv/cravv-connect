@@ -4,6 +4,17 @@ All notable changes to cravv-connect. Versions follow
 [semantic versioning](https://semver.org); before 1.0, a minor version may
 change behaviour or wire formats, and the notes say so.
 
+## Unreleased
+
+### Fixed
+
+- Relay (Cloudflare): a mailbox that has been connected for a long time could
+  hit Cloudflare's "subrequest depth limit", after which every call it made
+  to another object failed with `internal` (sends to peers, `pair`'s invite
+  request) until the relay restarted. The mailbox now answers that request
+  with `internal`, closes its connections and restarts itself; clients
+  reconnect within seconds and the next try works.
+
 ## v0.2.2 (2026-09-28)
 
 ### Added

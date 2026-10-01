@@ -436,6 +436,25 @@ describe("internal errors", () => {
     cx.close();
   });
 
+  it("a mailbox that hits Cloudflare's subrequest depth limit resets itself, and the next connection works", async () => {
+    const id = await Identity.create();
+    const c = await member(id);
+    const registry = testEnv.REGISTRY.getByName("registry");
+    // Every call between objects from this mailbox fails the way production did, until the
+    // object restarts.
+    const proto = await runInDurableObject(registry, (inst) => Object.getPrototypeOf(inst) as { createInvite: unknown });
+    const original = proto.createInvite;
+    proto.createInvite = () => {
+      throw new Error("Subrequest depth limit exceeded. This request recursed through Workers too many times.");
+    };
+    expect(await c.request({ t: "invite_request" })).toEqual({ t: "res", rid: expect.any(String), status: "error", code: "internal" });
+    await c.waitClosed();
+    proto.createInvite = original;
+    const again = await member(id);
+    expect((await again.request({ t: "invite_request" })).status).toBe("ok");
+    again.close();
+  });
+
   it("a failure during the handshake still sends a fixed error and closes", async () => {
     const id = await Identity.create();
     await runInDurableObject(testEnv.MAILBOX.getByName(id.mailboxId), (_inst, state) => {

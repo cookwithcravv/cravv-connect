@@ -31,7 +31,7 @@ import {
 } from "./protocol";
 import { META_DDL, Meta, QUEUE_DDL, Queue } from "./queue";
 import { REGISTRY_NAME, type InviteResult } from "./registry";
-import { describeError, retryOnce } from "./rpc";
+import { describeError, isDepthLimit, retryOnce } from "./rpc";
 import { Schema } from "./schema";
 
 export type BlobReservation = "ok" | "quota" | "count";
@@ -56,6 +56,8 @@ const ROOM_CREATE_ATTEMPTS = 16;
 // the handshake after this long is closed the next time any socket arrives for the mailbox.
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 const MAX_ID_CHARS = 128;
+// How long a mailbox that hit the subrequest depth limit waits before it resets itself.
+const RESET_DELAY_MS = 250;
 
 const MAILBOX_DDL = [
   META_DDL,
@@ -328,6 +330,20 @@ export class Mailbox extends DurableObject<Env> {
         ws.send(resFrame(rid, { status: Status.ERROR, code: Code.INTERNAL }));
       } catch {
         // socket already gone
+      }
+      if (isDepthLimit(err)) {
+        // Only a restart clears the limit: reset this object (its sockets close and the
+        // client reconnects to a fresh one). Its storage is untouched.
+        console.error("mailbox: resetting after the subrequest depth limit");
+        for (const other of this.ctx.getWebSockets()) {
+          try {
+            other.close(1012, "relay restarting this mailbox");
+          } catch {
+            // already closed
+          }
+        }
+        // A moment later, so the answer and the close frames leave first.
+        setTimeout(() => this.ctx.abort("subrequest depth limit"), RESET_DELAY_MS);
       }
     }
   }
